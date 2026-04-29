@@ -12,7 +12,7 @@ const fadeUp = {
 
 export default function HomePage() {
   const { user } = useUser();
-  const { senior, loading: ctxLoading, dataLoading, schedule, api } = useDashboard();
+  const { senior, loading: ctxLoading, schedule, api } = useDashboard();
   const [conversations, setConversations] = useState([]);
   const [localLoading, setLocalLoading] = useState(true);
 
@@ -35,7 +35,7 @@ export default function HomePage() {
     return () => { cancelled = true; };
   }, [senior]);
 
-  if (ctxLoading || dataLoading || localLoading) {
+  if (ctxLoading || localLoading) {
     return <div className="db-loading"><div className="db-spinner" /></div>;
   }
 

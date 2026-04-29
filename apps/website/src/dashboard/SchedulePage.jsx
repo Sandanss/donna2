@@ -8,7 +8,7 @@ import ScheduleCallModal from './components/ScheduleCallModal';
 const DAYS_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 export default function SchedulePage() {
-  const { senior, loading: ctxLoading, dataLoading, schedule, setSchedule, reminders, api } = useDashboard();
+  const { senior, loading: ctxLoading, schedule, setSchedule, reminders, api } = useDashboard();
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [modalOpen, setModalOpen] = useState(false);
   const [editingCall, setEditingCall] = useState(null);
@@ -97,7 +97,7 @@ export default function SchedulePage() {
       return false;
     });
 
-  if (ctxLoading || dataLoading) {
+  if (ctxLoading) {
     return <div className="db-loading"><div className="db-spinner" /></div>;
   }
 
