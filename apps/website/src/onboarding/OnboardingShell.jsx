@@ -5,6 +5,7 @@ const TOTAL_STEPS = 7;
 export default function OnboardingShell({
   step,
   onBack,
+  onExit,
   onNext,
   nextLabel = 'Continue',
   nextDisabled = false,
@@ -16,6 +17,10 @@ export default function OnboardingShell({
   const showHeader = step > 0 && step <= TOTAL_STEPS;
   const showProgress = step >= 1 && step <= TOTAL_STEPS;
 
+  const handleBrandClick = () => {
+    if (onExit) onExit();
+  };
+
   return (
     <div className="onboarding">
       {showHeader && (
@@ -24,7 +29,9 @@ export default function OnboardingShell({
             <button className="ob-header__back" onClick={onBack} aria-label="Go back">
               <ChevronLeftIcon size={24} />
             </button>
-            <span className="ob-header__brand">Donna</span>
+            <button className="ob-header__brand ob-header__brand--link" onClick={handleBrandClick} type="button">
+              Donna
+            </button>
             <span className="ob-header__step">
               Step {step} of {TOTAL_STEPS}
             </span>

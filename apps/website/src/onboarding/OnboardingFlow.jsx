@@ -108,10 +108,24 @@ function OnboardingInner() {
     window.scrollTo(0, 0);
   }, [step, setStep]);
 
+  const handleExit = useCallback(() => {
+    const confirmed = window.confirm(
+      'Are you sure you want to leave? You\'ll lose all your progress in the signup flow.'
+    );
+    if (confirmed) {
+      reset();
+      window.location.href = '/';
+    }
+  }, [reset]);
+
   const goBack = useCallback(() => {
-    setStep(Math.max(step - 1, 0));
+    if (step <= 1) {
+      handleExit();
+      return;
+    }
+    setStep(step - 1);
     window.scrollTo(0, 0);
-  }, [step, setStep]);
+  }, [step, setStep, handleExit]);
 
   const handleSubmit = useCallback(async () => {
     setError('');
@@ -206,7 +220,7 @@ function OnboardingInner() {
       <div className="onboarding">
         <header className="ob-header">
           <div className="ob-header__inner">
-            <a href="/" className="ob-header__brand" style={{ textDecoration: 'none' }}>
+            <a href="/" className="ob-header__brand ob-header__brand--link" style={{ textDecoration: 'none' }}>
               Donna
             </a>
             <span />
@@ -248,6 +262,7 @@ function OnboardingInner() {
       <OnboardingShell
         step={step}
         onBack={goBack}
+        onExit={handleExit}
         onNext={handleNext}
         nextLabel={isLastStep ? (submitting ? 'Creating profile...' : 'Create profile') : 'Continue'}
         nextDisabled={!canContinue || submitting}
