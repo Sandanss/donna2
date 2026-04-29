@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { useDashboard } from './DashboardContext';
 import WeekStrip from './components/WeekStrip';
 import MonthPicker from './components/MonthPicker';
@@ -8,34 +8,10 @@ import ScheduleCallModal from './components/ScheduleCallModal';
 const DAYS_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 export default function SchedulePage() {
-  const { senior, loading: ctxLoading, api } = useDashboard();
-  const [schedule, setSchedule] = useState([]);
-  const [reminders, setReminders] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const { senior, loading: ctxLoading, dataLoading, schedule, setSchedule, reminders, api } = useDashboard();
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [modalOpen, setModalOpen] = useState(false);
   const [editingCall, setEditingCall] = useState(null);
-
-  useEffect(() => {
-    if (!senior) return;
-    loadData();
-  }, [senior]);
-
-  async function loadData() {
-    try {
-      const [schedData, remData] = await Promise.all([
-        api.getSchedule(senior.id),
-        api.getReminders(),
-      ]);
-      const sched = schedData?.schedule;
-      setSchedule(Array.isArray(sched) ? sched : []);
-      setReminders(Array.isArray(remData) ? remData : []);
-    } catch (err) {
-      console.error('Failed to load schedule:', err);
-    } finally {
-      setLoading(false);
-    }
-  }
 
   const handleAdd = () => {
     setEditingCall(null);
@@ -87,13 +63,14 @@ export default function SchedulePage() {
     setSelectedDate(date);
   };
 
-  // Hooks must be called before any early return
   const selectedDayIdx = selectedDate.getDay();
   const selectedDayName = DAYS_FULL[selectedDayIdx];
 
+  const safeSchedule = Array.isArray(schedule) ? schedule : [];
+
   const scheduledDays = useMemo(() => {
     const days = new Set();
-    for (const call of schedule) {
+    for (const call of safeSchedule) {
       if (call.frequency === 'daily') {
         DAYS_FULL.forEach((d) => days.add(d));
       } else if (call.frequency === 'recurring' && call.recurringDays) {
@@ -101,17 +78,18 @@ export default function SchedulePage() {
       }
     }
     return days;
-  }, [schedule]);
+  }, [safeSchedule]);
 
   const reminderMap = useMemo(() => {
     const map = {};
-    for (const r of reminders) {
+    const safeReminders = Array.isArray(reminders) ? reminders : [];
+    for (const r of safeReminders) {
       map[r.id] = r.title;
     }
     return map;
   }, [reminders]);
 
-  const callsForDay = schedule
+  const callsForDay = safeSchedule
     .map((c, i) => ({ ...c, _index: i }))
     .filter((c) => {
       if (c.frequency === 'daily') return true;
@@ -119,7 +97,7 @@ export default function SchedulePage() {
       return false;
     });
 
-  if (ctxLoading || loading) {
+  if (ctxLoading || dataLoading) {
     return <div className="db-loading"><div className="db-spinner" /></div>;
   }
 
@@ -174,7 +152,7 @@ export default function SchedulePage() {
       {modalOpen && (
         <ScheduleCallModal
           call={editingCall}
-          reminders={reminders}
+          reminders={Array.isArray(reminders) ? reminders : []}
           onSave={handleSave}
           onClose={() => { setModalOpen(false); setEditingCall(null); }}
         />

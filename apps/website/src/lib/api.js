@@ -19,7 +19,11 @@ async function fetchWithAuth(path, options = {}, token) {
     throw new Error(error || `HTTP ${res.status}`);
   }
 
-  return res.json();
+  try {
+    return await res.json();
+  } catch {
+    throw new Error(`Invalid JSON response from ${path}`);
+  }
 }
 
 export function useApi() {
