@@ -5,7 +5,7 @@ import ReminderModal from './components/ReminderModal';
 import DeleteReminderModal from './components/DeleteReminderModal';
 
 export default function RemindersPage() {
-  const { senior, loading: ctxLoading, dataLoading, schedule, setSchedule, reminders, setReminders, api } = useDashboard();
+  const { senior, loading: ctxLoading, schedule, setSchedule, reminders, setReminders, api } = useDashboard();
   const [modalOpen, setModalOpen] = useState(false);
   const [editingReminder, setEditingReminder] = useState(null);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
@@ -95,7 +95,7 @@ export default function RemindersPage() {
     setEditingReminder(null);
   };
 
-  if (ctxLoading || dataLoading) {
+  if (ctxLoading) {
     return <div className="db-loading"><div className="db-spinner" /></div>;
   }
 

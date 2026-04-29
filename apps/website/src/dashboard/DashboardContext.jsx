@@ -11,16 +11,31 @@ export function DashboardProvider({ children }) {
 
   const [schedule, setSchedule] = useState([]);
   const [reminders, setReminders] = useState([]);
-  const [dataLoading, setDataLoading] = useState(true);
 
-  // Phase 1: Load senior
+  // Single-phase load: senior → then schedule + reminders in one effect
   useEffect(() => {
     let cancelled = false;
     async function load() {
       try {
         const data = await api.getMe();
-        if (!cancelled && data.seniors?.length > 0) {
-          setSenior(data.seniors[0]);
+        if (cancelled) return;
+        if (data.seniors?.length > 0) {
+          const s = data.seniors[0];
+          setSenior(s);
+          // Load schedule + reminders now that we have the senior
+          try {
+            const [schedData, remData] = await Promise.all([
+              api.getSchedule(s.id),
+              api.getReminders(),
+            ]);
+            if (!cancelled) {
+              const sched = schedData?.schedule;
+              setSchedule(Array.isArray(sched) ? sched : []);
+              setReminders(Array.isArray(remData) ? remData : []);
+            }
+          } catch (dataErr) {
+            console.error('Failed to load schedule/reminders:', dataErr);
+          }
         }
       } catch (err) {
         if (!cancelled) setError(err.message);
@@ -31,31 +46,6 @@ export function DashboardProvider({ children }) {
     load();
     return () => { cancelled = true; };
   }, []);
-
-  // Phase 2: Load schedule + reminders once senior is available
-  useEffect(() => {
-    if (!senior) return;
-    let cancelled = false;
-    async function loadData() {
-      try {
-        const [schedData, remData] = await Promise.all([
-          api.getSchedule(senior.id),
-          api.getReminders(),
-        ]);
-        if (!cancelled) {
-          const sched = schedData?.schedule;
-          setSchedule(Array.isArray(sched) ? sched : []);
-          setReminders(Array.isArray(remData) ? remData : []);
-        }
-      } catch (err) {
-        console.error('Failed to load dashboard data:', err);
-      } finally {
-        if (!cancelled) setDataLoading(false);
-      }
-    }
-    loadData();
-    return () => { cancelled = true; };
-  }, [senior]);
 
   const refreshSchedule = useCallback(async () => {
     if (!senior) return;
@@ -83,7 +73,6 @@ export function DashboardProvider({ children }) {
       loading, error, api,
       schedule, setSchedule,
       reminders, setReminders,
-      dataLoading,
       refreshSchedule, refreshReminders,
     }}>
       {children}
