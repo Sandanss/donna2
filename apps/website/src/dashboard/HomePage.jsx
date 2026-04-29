@@ -12,35 +12,30 @@ const fadeUp = {
 
 export default function HomePage() {
   const { user } = useUser();
-  const { senior, loading: ctxLoading, api } = useDashboard();
+  const { senior, loading: ctxLoading, dataLoading, schedule, api } = useDashboard();
   const [conversations, setConversations] = useState([]);
-  const [schedule, setSchedule] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [localLoading, setLocalLoading] = useState(true);
 
   useEffect(() => {
     if (!senior) return;
     let cancelled = false;
     async function load() {
       try {
-        const [convos, sched] = await Promise.all([
-          api.getConversations(senior.id),
-          api.getSchedule(senior.id),
-        ]);
+        const convos = await api.getConversations(senior.id);
         if (!cancelled) {
           setConversations(Array.isArray(convos) ? convos.slice(0, 5) : []);
-          setSchedule(sched);
         }
       } catch (err) {
-        console.error('Failed to load dashboard data:', err);
+        console.error('Failed to load conversations:', err);
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) setLocalLoading(false);
       }
     }
     load();
     return () => { cancelled = true; };
   }, [senior]);
 
-  if (ctxLoading || loading) {
+  if (ctxLoading || dataLoading || localLoading) {
     return <div className="db-loading"><div className="db-spinner" /></div>;
   }
 
@@ -104,8 +99,8 @@ export default function HomePage() {
 }
 
 function getNextCall(scheduleData) {
-  const calls = scheduleData?.schedule;
-  if (!Array.isArray(calls) || calls.length === 0) return null;
+  const calls = Array.isArray(scheduleData) ? scheduleData : [];
+  if (calls.length === 0) return null;
 
   const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   const now = new Date();

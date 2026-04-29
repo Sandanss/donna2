@@ -1,14 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useDashboard } from './DashboardContext';
 import ReminderCard from './components/ReminderCard';
 import ReminderModal from './components/ReminderModal';
 import DeleteReminderModal from './components/DeleteReminderModal';
 
 export default function RemindersPage() {
-  const { senior, loading: ctxLoading, api } = useDashboard();
-  const [reminders, setReminders] = useState([]);
-  const [schedule, setSchedule] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const { senior, loading: ctxLoading, dataLoading, schedule, setSchedule, reminders, setReminders, api } = useDashboard();
   const [modalOpen, setModalOpen] = useState(false);
   const [editingReminder, setEditingReminder] = useState(null);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
@@ -18,31 +15,12 @@ export default function RemindersPage() {
 
   const seniorFirstName = senior?.name?.split(' ')[0] || 'your senior';
 
-  useEffect(() => {
-    if (!senior) return;
-    loadData();
-  }, [senior]);
-
-  async function loadData() {
-    try {
-      const [remData, schedData] = await Promise.all([
-        api.getReminders(),
-        api.getSchedule(senior.id),
-      ]);
-      setReminders(Array.isArray(remData) ? remData : []);
-      const sched = schedData?.schedule;
-      setSchedule(Array.isArray(sched) ? sched : []);
-    } catch (err) {
-      console.error('Failed to load reminders:', err);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  const activeReminders = reminders.filter((r) => r.isActive !== false);
+  const safeSchedule = Array.isArray(schedule) ? schedule : [];
+  const safeReminders = Array.isArray(reminders) ? reminders : [];
+  const activeReminders = safeReminders.filter((r) => r.isActive !== false);
 
   function getLinkedCalls(reminderId) {
-    return schedule.filter((call) => (call.reminderIds || []).includes(reminderId));
+    return safeSchedule.filter((call) => (call.reminderIds || []).includes(reminderId));
   }
 
   const handleAdd = () => {
@@ -68,11 +46,11 @@ export default function RemindersPage() {
     try {
       await api.deleteReminder(deletingReminder.id);
       // Remove reminder ID from all schedule entries
-      const updatedSchedule = schedule.map((call) => {
+      const updatedSchedule = safeSchedule.map((call) => {
         if (!(call.reminderIds || []).includes(deletingReminder.id)) return call;
         return { ...call, reminderIds: call.reminderIds.filter((id) => id !== deletingReminder.id) };
       });
-      if (JSON.stringify(updatedSchedule) !== JSON.stringify(schedule)) {
+      if (JSON.stringify(updatedSchedule) !== JSON.stringify(safeSchedule)) {
         await api.updateSchedule(senior.id, { schedule: updatedSchedule });
         setSchedule(updatedSchedule);
       }
@@ -99,7 +77,7 @@ export default function RemindersPage() {
 
     // Update schedule: add/remove this reminder's ID from calls
     const reminderId = savedReminder.id;
-    const updatedSchedule = schedule.map((call, idx) => {
+    const updatedSchedule = safeSchedule.map((call, idx) => {
       const currentIds = call.reminderIds || [];
       const shouldHave = selectedCallIndices.includes(idx);
       const hasIt = currentIds.includes(reminderId);
@@ -108,7 +86,7 @@ export default function RemindersPage() {
       return call;
     });
 
-    if (JSON.stringify(updatedSchedule) !== JSON.stringify(schedule)) {
+    if (JSON.stringify(updatedSchedule) !== JSON.stringify(safeSchedule)) {
       await api.updateSchedule(senior.id, { schedule: updatedSchedule });
       setSchedule(updatedSchedule);
     }
@@ -117,7 +95,7 @@ export default function RemindersPage() {
     setEditingReminder(null);
   };
 
-  if (ctxLoading || loading) {
+  if (ctxLoading || dataLoading) {
     return <div className="db-loading"><div className="db-spinner" /></div>;
   }
 
@@ -165,7 +143,7 @@ export default function RemindersPage() {
       {modalOpen && (
         <ReminderModal
           reminder={editingReminder}
-          schedule={schedule}
+          schedule={safeSchedule}
           onSave={handleSave}
           onClose={() => { setModalOpen(false); setEditingReminder(null); }}
         />
