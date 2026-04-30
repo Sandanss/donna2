@@ -1,17 +1,44 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useDashboard } from './DashboardContext';
 import ReminderCard from './components/ReminderCard';
 import ReminderModal from './components/ReminderModal';
 import DeleteReminderModal from './components/DeleteReminderModal';
 
 export default function RemindersPage() {
-  const { senior, loading: ctxLoading, schedule, setSchedule, reminders, setReminders, api } = useDashboard();
+  const { senior, loading: ctxLoading, api } = useDashboard();
+  const [schedule, setSchedule] = useState([]);
+  const [reminders, setReminders] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingReminder, setEditingReminder] = useState(null);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deletingReminder, setDeletingReminder] = useState(null);
   const [deleteError, setDeleteError] = useState('');
   const [deleting, setDeleting] = useState(false);
+
+  useEffect(() => {
+    if (!senior) return;
+    let cancelled = false;
+    async function loadData() {
+      try {
+        const [schedData, remData] = await Promise.all([
+          api.getSchedule(senior.id),
+          api.getReminders(),
+        ]);
+        if (!cancelled) {
+          const sched = schedData?.schedule;
+          setSchedule(Array.isArray(sched) ? sched : []);
+          setReminders(Array.isArray(remData) ? remData : []);
+        }
+      } catch (err) {
+        console.error('Failed to load reminders data:', err);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    loadData();
+    return () => { cancelled = true; };
+  }, [senior]);
 
   const seniorFirstName = senior?.name?.split(' ')[0] || 'your senior';
 
@@ -95,7 +122,7 @@ export default function RemindersPage() {
     setEditingReminder(null);
   };
 
-  if (ctxLoading) {
+  if (ctxLoading || loading) {
     return <div className="db-loading"><div className="db-spinner" /></div>;
   }
 

@@ -12,30 +12,36 @@ const fadeUp = {
 
 export default function HomePage() {
   const { user } = useUser();
-  const { senior, loading: ctxLoading, schedule, api } = useDashboard();
+  const { senior, loading: ctxLoading, api } = useDashboard();
   const [conversations, setConversations] = useState([]);
-  const [localLoading, setLocalLoading] = useState(true);
+  const [schedule, setSchedule] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!senior) return;
     let cancelled = false;
     async function load() {
       try {
-        const convos = await api.getConversations(senior.id);
+        const [convos, schedData] = await Promise.all([
+          api.getConversations(senior.id),
+          api.getSchedule(senior.id),
+        ]);
         if (!cancelled) {
           setConversations(Array.isArray(convos) ? convos.slice(0, 5) : []);
+          const sched = schedData?.schedule;
+          setSchedule(Array.isArray(sched) ? sched : []);
         }
       } catch (err) {
-        console.error('Failed to load conversations:', err);
+        console.error('Failed to load home data:', err);
       } finally {
-        if (!cancelled) setLocalLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
     load();
     return () => { cancelled = true; };
   }, [senior]);
 
-  if (ctxLoading || localLoading) {
+  if (ctxLoading || loading) {
     return <div className="db-loading"><div className="db-spinner" /></div>;
   }
 

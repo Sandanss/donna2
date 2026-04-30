@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useDashboard } from './DashboardContext';
 import WeekStrip from './components/WeekStrip';
 import MonthPicker from './components/MonthPicker';
@@ -8,10 +8,37 @@ import ScheduleCallModal from './components/ScheduleCallModal';
 const DAYS_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 export default function SchedulePage() {
-  const { senior, loading: ctxLoading, schedule, setSchedule, reminders, api } = useDashboard();
+  const { senior, loading: ctxLoading, api } = useDashboard();
+  const [schedule, setSchedule] = useState([]);
+  const [reminders, setReminders] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [modalOpen, setModalOpen] = useState(false);
   const [editingCall, setEditingCall] = useState(null);
+
+  useEffect(() => {
+    if (!senior) return;
+    let cancelled = false;
+    async function loadData() {
+      try {
+        const [schedData, remData] = await Promise.all([
+          api.getSchedule(senior.id),
+          api.getReminders(),
+        ]);
+        if (!cancelled) {
+          const sched = schedData?.schedule;
+          setSchedule(Array.isArray(sched) ? sched : []);
+          setReminders(Array.isArray(remData) ? remData : []);
+        }
+      } catch (err) {
+        console.error('Failed to load schedule data:', err);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    loadData();
+    return () => { cancelled = true; };
+  }, [senior]);
 
   const handleAdd = () => {
     setEditingCall(null);
@@ -97,7 +124,7 @@ export default function SchedulePage() {
       return false;
     });
 
-  if (ctxLoading) {
+  if (ctxLoading || loading) {
     return <div className="db-loading"><div className="db-spinner" /></div>;
   }
 
