@@ -1,6 +1,7 @@
 import { createContext, useContext, useReducer, useEffect, useCallback } from 'react';
 
 const STORAGE_KEY = 'donna_onboarding';
+const EXIT_FLAG_KEY = 'donna_onboarding_exited';
 
 const initialState = {
   step: 0, // 0=create account, 1-7=steps, 8=success
@@ -56,6 +57,12 @@ export function OnboardingProvider({ children }) {
   const [state, dispatch] = useReducer(reducer, initialState, () => {
     if (typeof window === 'undefined') return initialState;
     try {
+      // If the user explicitly exited, start fresh at step 0
+      if (sessionStorage.getItem(EXIT_FLAG_KEY)) {
+        sessionStorage.removeItem(EXIT_FLAG_KEY);
+        localStorage.removeItem(STORAGE_KEY);
+        return initialState;
+      }
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
@@ -97,8 +104,9 @@ export function OnboardingProvider({ children }) {
     dispatch({ type: 'RESET' });
     try {
       localStorage.removeItem(STORAGE_KEY);
+      sessionStorage.setItem(EXIT_FLAG_KEY, 'true');
     } catch {
-      // Ignore unavailable local storage during reset.
+      // Ignore unavailable storage during reset.
     }
   }, []);
 

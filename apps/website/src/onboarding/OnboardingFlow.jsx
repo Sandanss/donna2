@@ -91,9 +91,18 @@ function OnboardingInner() {
   }
 
   // If already signed in, skip create account; if they completed onboarding, go to dashboard
+  // But don't skip if the user just explicitly exited — they should see step 0
   useEffect(() => {
     if (!isSignedIn || devMode) return;
     if (data.step === 0) {
+      try {
+        if (sessionStorage.getItem('donna_onboarding_exited')) {
+          sessionStorage.removeItem('donna_onboarding_exited');
+          return; // Stay on step 0
+        }
+      } catch {
+        // sessionStorage unavailable — proceed normally
+      }
       setStep(1);
     } else if (data.step === 8) {
       // Already completed onboarding — send them to dashboard
@@ -113,6 +122,14 @@ function OnboardingInner() {
       'Are you sure you want to leave? You\'ll lose all your progress in the signup flow.'
     );
     if (confirmed) {
+      // Clear localStorage directly before reset to prevent the persist useEffect
+      // from re-saving data before navigation happens
+      try {
+        localStorage.removeItem('donna_onboarding');
+        sessionStorage.setItem('donna_onboarding_exited', 'true');
+      } catch {
+        // Storage unavailable — reset() will still clear in-memory state
+      }
       reset();
       window.location.href = '/';
     }
