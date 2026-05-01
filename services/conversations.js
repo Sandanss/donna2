@@ -25,12 +25,20 @@ function decryptSummary(row) {
   return row.summaryEncrypted ? decrypt(row.summaryEncrypted) : row.summary;
 }
 
+const PLACEHOLDER_SUMMARIES = ['analysis unavailable', 'no summary available', 'summary unavailable'];
+
+function isRealSummary(text) {
+  if (!text) return false;
+  return !PLACEHOLDER_SUMMARIES.includes(text.trim().toLowerCase());
+}
+
 async function addSummaryFallbacks(rows) {
   const analyses = await callAnalysisService.getLatestByConversationIds(rows.map(row => row.id));
 
   return rows.map(row => {
     const analysis = analyses.get(row.id) || null;
-    const rawSummary = decryptSummary(row) || analysis?.summary || null;
+    const candidateSummary = decryptSummary(row) || analysis?.summary || null;
+    const rawSummary = isRealSummary(candidateSummary) ? candidateSummary : null;
     const sentiment = row.sentiment || analysis?.sentiment || null;
     const direction = row.direction || null;
 
@@ -44,10 +52,20 @@ async function addSummaryFallbacks(rows) {
       displayStatus = 'Answered';
     }
 
-    // Fallback summary for missed calls
-    const summary = rawSummary || (displayStatus === 'Missed'
-      ? "Donna called but didn\u2019t reach them. A voicemail was left."
-      : null);
+    // Fallback summaries based on status and available data
+    let summary = rawSummary;
+    if (!summary) {
+      if (displayStatus === 'Missed') {
+        summary = null; // Frontend fills in with senior name
+      } else if (displayStatus === 'Answered' && row.durationSeconds != null) {
+        const mins = Math.round(row.durationSeconds / 60);
+        if (row.durationSeconds < 120) {
+          summary = `Donna spoke with them briefly (${mins} min) but a summary couldn\u2019t be generated.`;
+        } else {
+          summary = `Donna had a ${mins}-minute conversation but a summary couldn\u2019t be generated.`;
+        }
+      }
+    }
 
     return {
       id: row.id,

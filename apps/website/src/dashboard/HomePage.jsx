@@ -116,7 +116,7 @@ export default function HomePage() {
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {conversations.map((convo) => (
-                <CallCard key={convo.id} conversation={convo} />
+                <CallCard key={convo.id} conversation={convo} seniorName={seniorName} />
               ))}
             </div>
           )}

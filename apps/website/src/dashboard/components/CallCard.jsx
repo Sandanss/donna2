@@ -1,4 +1,4 @@
-export default function CallCard({ conversation }) {
+export default function CallCard({ conversation, seniorName }) {
   const date = new Date(conversation.startedAt || conversation.createdAt);
   const dateStr = date.toLocaleDateString('en-US', {
     month: 'short',
@@ -11,7 +11,14 @@ export default function CallCard({ conversation }) {
   });
 
   const displayStatus = conversation.displayStatus || conversation.status || 'completed';
-  const summary = conversation.summary || conversation.analysis?.summary;
+  const name = seniorName || conversation.seniorName || 'them';
+  const rawSummary = conversation.summary || conversation.analysis?.summary;
+
+  // Build display summary with senior name for missed calls
+  let summary = rawSummary;
+  if (!summary && displayStatus === 'Missed') {
+    summary = `Donna called but didn\u2019t reach ${name}. A voicemail was left.`;
+  }
 
   const badgeClassMap = {
     Answered: 'db-badge--answered',
