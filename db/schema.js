@@ -46,6 +46,7 @@ export const conversations = pgTable('conversations', {
   transcriptEncrypted: text('transcript_encrypted'),
   transcriptTextEncrypted: text('transcript_text_encrypted'),
   callMetrics: json('call_metrics'),
+  voicemailDetected: boolean('voicemail_detected').default(false),
   createdAt: timestamp('created_at').defaultNow(),
 });
 

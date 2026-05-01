@@ -1077,6 +1077,15 @@ async def telnyx_events(request: Request, background_tasks: BackgroundTasks):
                     "transcript": None,
                 })
                 logger.info("[{cid}] Completed voicemail conversation dur={dur}s", cid=call_control_id, dur=duration)
+                # Persist voicemail flag separately — survives race with run_post_call's complete()
+                try:
+                    from db import execute
+                    await execute(
+                        "UPDATE conversations SET voicemail_detected = TRUE WHERE id = $1",
+                        metadata["conversation_id"],
+                    )
+                except Exception as vm_exc:
+                    logger.error("[{cid}] Failed to set voicemail_detected: {err}", cid=call_control_id, err=str(vm_exc))
             except Exception as exc:
                 logger.error("[{cid}] Failed to complete voicemail conversation: {err}", cid=call_control_id, err=str(exc))
         await _cleanup_metadata(call_control_id)

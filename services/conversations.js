@@ -42,11 +42,11 @@ async function addSummaryFallbacks(rows) {
     const sentiment = row.sentiment || analysis?.sentiment || null;
     const direction = row.direction || null;
 
-    // Compute displayStatus from direction + summary + duration
+    // Compute displayStatus from direction + summary + duration + voicemail flag
     let displayStatus;
     if (direction === 'inbound') {
       displayStatus = 'Inbound';
-    } else if (!rawSummary && (row.durationSeconds == null || row.durationSeconds < 60)) {
+    } else if (row.voicemailDetected || (!rawSummary && (row.durationSeconds == null || row.durationSeconds < 60))) {
       displayStatus = 'Missed';
     } else {
       displayStatus = 'Answered';
@@ -200,6 +200,7 @@ export const conversationService = {
       durationSeconds: conversations.durationSeconds,
       status: conversations.status,
       direction: conversations.direction,
+      voicemailDetected: conversations.voicemailDetected,
       summary: conversations.summary,
       summaryEncrypted: conversations.summaryEncrypted,
       sentiment: conversations.sentiment,
@@ -358,6 +359,7 @@ export const conversationService = {
       durationSeconds: conversations.durationSeconds,
       status: conversations.status,
       direction: conversations.direction,
+      voicemailDetected: conversations.voicemailDetected,
       summary: conversations.summary,
       summaryEncrypted: conversations.summaryEncrypted,
       sentiment: conversations.sentiment,

@@ -193,9 +193,12 @@ class TestGetRecentSummaries:
 
     @pytest.mark.asyncio
     async def test_earlier_today_formatting(self):
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
-        row = {"summary": "Good call", "started_at": now - timedelta(hours=2), "duration_seconds": 300}
-        with patch("services.conversations.query_many", new_callable=AsyncMock, return_value=[row]):
+        # Pin time to midday UTC (8 AM ET) so "2 hours ago" is safely "today" in New York
+        frozen_now = datetime(2026, 4, 15, 18, 0, 0, tzinfo=timezone.utc)
+        row = {"summary": "Good call", "started_at": frozen_now.replace(tzinfo=None) - timedelta(hours=2), "duration_seconds": 300}
+        with patch("services.conversations.query_many", new_callable=AsyncMock, return_value=[row]), \
+             patch("services.conversations.datetime", wraps=datetime) as mock_dt:
+            mock_dt.now.return_value = frozen_now
             from services.conversations import get_recent_summaries
             result = await get_recent_summaries("senior-1")
             assert "Earlier today" in result
@@ -203,9 +206,12 @@ class TestGetRecentSummaries:
 
     @pytest.mark.asyncio
     async def test_yesterday_formatting(self):
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
-        row = {"summary": "Nice chat", "started_at": now - timedelta(days=1, hours=2), "duration_seconds": 600}
-        with patch("services.conversations.query_many", new_callable=AsyncMock, return_value=[row]):
+        # Pin time to midday UTC so "1 day + 2 hours ago" is safely "yesterday" in New York
+        frozen_now = datetime(2026, 4, 15, 18, 0, 0, tzinfo=timezone.utc)
+        row = {"summary": "Nice chat", "started_at": frozen_now.replace(tzinfo=None) - timedelta(days=1, hours=2), "duration_seconds": 600}
+        with patch("services.conversations.query_many", new_callable=AsyncMock, return_value=[row]), \
+             patch("services.conversations.datetime", wraps=datetime) as mock_dt:
+            mock_dt.now.return_value = frozen_now
             from services.conversations import get_recent_summaries
             result = await get_recent_summaries("senior-1")
             assert "Yesterday" in result
