@@ -78,7 +78,7 @@ function InterestIcon({ id, size = 28, color = 'currentColor' }) {
 /* ===== Component ===== */
 
 export default function LovedOneSettings() {
-  const { senior, setSenior, loading: ctxLoading, api } = useDashboard();
+  const { senior, setSenior, loading: ctxLoading, error: ctxError, reload, api } = useDashboard();
 
   // Basic info
   const [name, setName] = useState('');
@@ -253,6 +253,24 @@ export default function LovedOneSettings() {
 
   if (ctxLoading) {
     return <div className="db-loading"><div className="db-spinner" /></div>;
+  }
+
+  if (ctxError) {
+    return (
+      <div className="db-error">
+        <p className="db-error__text">Something went wrong: {ctxError}</p>
+        <button className="db-btn db-btn--primary" onClick={reload}>Try Again</button>
+      </div>
+    );
+  }
+
+  if (!senior) {
+    return (
+      <div className="db-empty">
+        <p className="db-empty__text">No loved one found. Complete onboarding to get started.</p>
+        <a className="db-btn db-btn--primary" href="/signup">Start Onboarding</a>
+      </div>
+    );
   }
 
   const selectedInterests = INTERESTS.filter((i) => interests.includes(i.id));

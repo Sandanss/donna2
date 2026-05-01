@@ -5,7 +5,7 @@ import ReminderModal from './components/ReminderModal';
 import DeleteReminderModal from './components/DeleteReminderModal';
 
 export default function RemindersPage() {
-  const { senior, loading: ctxLoading, api } = useDashboard();
+  const { senior, loading: ctxLoading, error: ctxError, reload, api } = useDashboard();
   const [schedule, setSchedule] = useState([]);
   const [reminders, setReminders] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -17,7 +17,7 @@ export default function RemindersPage() {
   const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
-    if (!senior) return;
+    if (!senior) { setLoading(false); return; }
     let cancelled = false;
     async function loadData() {
       try {
@@ -122,7 +122,29 @@ export default function RemindersPage() {
     setEditingReminder(null);
   };
 
-  if (ctxLoading || loading) {
+  if (ctxLoading) {
+    return <div className="db-loading"><div className="db-spinner" /></div>;
+  }
+
+  if (ctxError) {
+    return (
+      <div className="db-error">
+        <p className="db-error__text">Something went wrong: {ctxError}</p>
+        <button className="db-btn db-btn--primary" onClick={reload}>Try Again</button>
+      </div>
+    );
+  }
+
+  if (!senior) {
+    return (
+      <div className="db-empty">
+        <p className="db-empty__text">No loved one found. Complete onboarding to get started.</p>
+        <a className="db-btn db-btn--primary" href="/signup">Start Onboarding</a>
+      </div>
+    );
+  }
+
+  if (loading) {
     return <div className="db-loading"><div className="db-spinner" /></div>;
   }
 

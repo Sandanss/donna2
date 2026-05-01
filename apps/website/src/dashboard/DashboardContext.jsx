@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useApi } from '../lib/api';
 
 const DashboardContext = createContext(null);
@@ -28,8 +28,24 @@ export function DashboardProvider({ children }) {
     return () => { cancelled = true; };
   }, []);
 
+  const reload = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    setSenior(null);
+    try {
+      const data = await api.getMe();
+      if (data.seniors?.length > 0) {
+        setSenior(data.seniors[0]);
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [api]);
+
   return (
-    <DashboardContext.Provider value={{ senior, setSenior, loading, error, api }}>
+    <DashboardContext.Provider value={{ senior, setSenior, loading, error, reload, api }}>
       {children}
     </DashboardContext.Provider>
   );
