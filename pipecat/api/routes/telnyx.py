@@ -531,7 +531,7 @@ async def _store_senior_metadata(
     try:
         from services.conversations import create
 
-        conv = await create(senior["id"], call_control_id)
+        conv = await create(senior["id"], call_control_id, direction="outbound" if is_outbound else "inbound")
         conversation_id = str(conv["id"]) if conv else None
     except Exception as exc:
         logger.error("[{cid}] Error creating Telnyx conversation: {err}", cid=call_control_id, err=str(exc))
@@ -630,7 +630,7 @@ async def _store_prospect_metadata(
     try:
         from services.conversations import create
 
-        conv = await create(None, call_control_id, prospect_id=prospect_id)
+        conv = await create(None, call_control_id, prospect_id=prospect_id, direction="inbound")
         conversation_id = str(conv["id"]) if conv else None
     except Exception as exc:
         logger.error("[{cid}] Error creating Telnyx onboarding conversation: {err}", cid=call_control_id, err=str(exc))
@@ -1066,6 +1066,19 @@ async def telnyx_events(request: Request, background_tasks: BackgroundTasks):
     elif event_type in {"streaming.started", "streaming.failed", "streaming.stopped"} and call_control_id:
         background_tasks.add_task(_record_streaming_event, call_control_id, event_type, payload)
     elif event_type in _TERMINAL_EVENTS and call_control_id:
+        metadata = call_metadata.get(call_control_id) or {}
+        if metadata.get("telnyx_voicemail_detected") and metadata.get("conversation_id"):
+            try:
+                from services.conversations import complete
+                duration = round(time.time() - float(metadata.get("telnyx_outbound_seeded_at", time.time())))
+                await complete(call_control_id, {
+                    "duration_seconds": duration,
+                    "status": "completed",
+                    "transcript": None,
+                })
+                logger.info("[{cid}] Completed voicemail conversation dur={dur}s", cid=call_control_id, dur=duration)
+            except Exception as exc:
+                logger.error("[{cid}] Failed to complete voicemail conversation: {err}", cid=call_control_id, err=str(exc))
         await _cleanup_metadata(call_control_id)
         logger.info("[{cid}] Cleaned up Telnyx metadata event={event}", cid=call_control_id, event=event_type)
 

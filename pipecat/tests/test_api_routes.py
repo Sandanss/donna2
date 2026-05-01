@@ -291,7 +291,7 @@ class TestTelnyxAndCallContext:
                 await telnyx._handle_call_answered("v3:unknown-caller")
 
             mock_create_prospect.assert_awaited_once_with("+14078856316")
-            mock_create_conversation.assert_awaited_once_with(None, "v3:unknown-caller", prospect_id="prospect-1")
+            mock_create_conversation.assert_awaited_once_with(None, "v3:unknown-caller", prospect_id="prospect-1", direction="inbound")
             mock_start_stream.assert_awaited_once_with("v3:unknown-caller", metadata["ws_token"])
             assert call_metadata["v3:unknown-caller"]["telnyx_stream_started"] is True
         finally:

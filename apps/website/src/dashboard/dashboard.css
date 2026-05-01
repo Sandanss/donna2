@@ -403,6 +403,16 @@
   color: var(--color-warn);
 }
 
+.db-badge--answered {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+}
+
+.db-badge--inbound {
+  background: #E3F2FD;
+  color: #1565C0;
+}
+
 .db-badge--daily {
   background: var(--color-cream-deep);
   color: var(--fg-2);

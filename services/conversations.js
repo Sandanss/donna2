@@ -30,8 +30,24 @@ async function addSummaryFallbacks(rows) {
 
   return rows.map(row => {
     const analysis = analyses.get(row.id) || null;
-    const summary = decryptSummary(row) || analysis?.summary || null;
+    const rawSummary = decryptSummary(row) || analysis?.summary || null;
     const sentiment = row.sentiment || analysis?.sentiment || null;
+    const direction = row.direction || null;
+
+    // Compute displayStatus from direction + summary + duration
+    let displayStatus;
+    if (direction === 'inbound') {
+      displayStatus = 'Inbound';
+    } else if (!rawSummary && (row.durationSeconds == null || row.durationSeconds < 60)) {
+      displayStatus = 'Missed';
+    } else {
+      displayStatus = 'Answered';
+    }
+
+    // Fallback summary for missed calls
+    const summary = rawSummary || (displayStatus === 'Missed'
+      ? "Donna called but didn\u2019t reach them. A voicemail was left."
+      : null);
 
     return {
       id: row.id,
@@ -41,6 +57,8 @@ async function addSummaryFallbacks(rows) {
       endedAt: row.endedAt,
       durationSeconds: row.durationSeconds,
       status: row.status,
+      direction,
+      displayStatus,
       summary,
       sentiment,
     };
@@ -163,6 +181,7 @@ export const conversationService = {
       endedAt: conversations.endedAt,
       durationSeconds: conversations.durationSeconds,
       status: conversations.status,
+      direction: conversations.direction,
       summary: conversations.summary,
       summaryEncrypted: conversations.summaryEncrypted,
       sentiment: conversations.sentiment,
@@ -320,6 +339,7 @@ export const conversationService = {
       endedAt: conversations.endedAt,
       durationSeconds: conversations.durationSeconds,
       status: conversations.status,
+      direction: conversations.direction,
       summary: conversations.summary,
       summaryEncrypted: conversations.summaryEncrypted,
       sentiment: conversations.sentiment,

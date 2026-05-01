@@ -37,6 +37,7 @@ export const conversations = pgTable('conversations', {
   endedAt: timestamp('ended_at'),
   durationSeconds: integer('duration_seconds'),
   status: varchar('status', { length: 50 }),
+  direction: varchar('direction', { length: 20 }),
   summary: text('summary'),
   summaryEncrypted: text('summary_encrypted'),
   sentiment: varchar('sentiment', { length: 50 }),

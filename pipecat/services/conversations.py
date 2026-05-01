@@ -14,19 +14,20 @@ from lib.encryption import encrypt, decrypt, encrypt_json, decrypt_json
 from services.time_context import format_call_time_label
 
 
-async def create(senior_id: str | None, call_sid: str, prospect_id: str | None = None) -> dict:
+async def create(senior_id: str | None, call_sid: str, prospect_id: str | None = None, direction: str | None = None) -> dict:
     """Create a new conversation record.
 
     Pass senior_id for subscriber calls, prospect_id for onboarding calls.
     """
     row = await query_one(
-        """INSERT INTO conversations (senior_id, prospect_id, call_sid, started_at, status)
-           VALUES ($1, $2, $3, $4, 'in_progress')
+        """INSERT INTO conversations (senior_id, prospect_id, call_sid, started_at, status, direction)
+           VALUES ($1, $2, $3, $4, 'in_progress', $5)
            RETURNING *""",
         senior_id,
         prospect_id,
         call_sid,
         datetime.now(timezone.utc).replace(tzinfo=None),
+        direction,
     )
     logger.info("Created conversation {id} callSid={cs}", id=row["id"], cs=call_sid)
     return row
