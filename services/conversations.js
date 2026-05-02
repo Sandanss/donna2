@@ -191,8 +191,8 @@ export const conversationService = {
   },
 
   // Get summary-only call records for caregiver-facing views.
-  async getCallSummariesForSenior(seniorId, limit = 10) {
-    const rows = await db.select({
+  async getCallSummariesForSenior(seniorId, limit = 10, offset = 0) {
+    let query = db.select({
       id: conversations.id,
       seniorId: conversations.seniorId,
       startedAt: conversations.startedAt,
@@ -210,6 +210,9 @@ export const conversationService = {
     .orderBy(desc(conversations.startedAt))
     .limit(limit);
 
+    if (offset > 0) query = query.offset(offset);
+
+    const rows = await query;
     return addSummaryFallbacks(rows);
   },
 

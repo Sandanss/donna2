@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useUser } from '@clerk/clerk-react';
+import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useDashboard } from './DashboardContext';
 import CallCard from './components/CallCard';
@@ -10,12 +11,18 @@ const fadeUp = {
   transition: { duration: 0.25, ease: [0.22, 1, 0.36, 1] },
 };
 
+const INITIAL_LIMIT = 8;
+const PAGE_SIZE = 10;
+
 export default function HomePage() {
   const { user } = useUser();
+  const navigate = useNavigate();
   const { senior, loading: ctxLoading, error: ctxError, reload, api } = useDashboard();
   const [conversations, setConversations] = useState([]);
   const [schedule, setSchedule] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
 
   useEffect(() => {
     if (!senior) { setLoading(false); return; }
@@ -23,11 +30,13 @@ export default function HomePage() {
     async function load() {
       try {
         const [convos, schedData] = await Promise.all([
-          api.getConversations(senior.id),
+          api.getConversations(senior.id, { limit: INITIAL_LIMIT }),
           api.getSchedule(senior.id),
         ]);
         if (!cancelled) {
-          setConversations(Array.isArray(convos) ? convos.slice(0, 5) : []);
+          const list = Array.isArray(convos) ? convos : [];
+          setConversations(list);
+          setHasMore(list.length >= INITIAL_LIMIT);
           const sched = schedData?.schedule;
           setSchedule(Array.isArray(sched) ? sched : []);
         }
@@ -40,6 +49,21 @@ export default function HomePage() {
     load();
     return () => { cancelled = true; };
   }, [senior]);
+
+  const loadMore = useCallback(async () => {
+    if (!senior || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const more = await api.getConversations(senior.id, { limit: PAGE_SIZE, offset: conversations.length });
+      const list = Array.isArray(more) ? more : [];
+      setConversations(prev => [...prev, ...list]);
+      setHasMore(list.length >= PAGE_SIZE);
+    } catch (err) {
+      console.error('Failed to load more calls:', err);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [senior, conversations.length, loadingMore, api]);
 
   if (ctxLoading) {
     return <div className="db-loading"><div className="db-spinner" /></div>;
@@ -90,13 +114,16 @@ export default function HomePage() {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
         {/* Next Call Card */}
         {nextCall && (
-          <motion.div className="db-card db-card--sage" {...fadeUp} transition={{ delay: 0.1, duration: 0.25, ease: [0.22, 1, 0.36, 1] }}>
+          <motion.div
+            className="db-card db-card--sage"
+            {...fadeUp}
+            transition={{ delay: 0.1, duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+            onClick={() => navigate('/dashboard/schedule')}
+            style={{ cursor: 'pointer' }}
+          >
             <div className="db-card__label">Next Call</div>
             <div style={{ fontSize: 26, fontWeight: 600, fontFamily: 'var(--font-heading)' }}>
               {nextCall.day} at {nextCall.time}
-            </div>
-            <div style={{ opacity: 0.75, fontSize: 13, marginTop: 4 }}>
-              with {seniorName}
             </div>
           </motion.div>
         )}
@@ -118,6 +145,16 @@ export default function HomePage() {
               {conversations.map((convo) => (
                 <CallCard key={convo.id} conversation={convo} seniorName={seniorName} />
               ))}
+              {hasMore && (
+                <button
+                  className="db-btn db-btn--secondary"
+                  onClick={loadMore}
+                  disabled={loadingMore}
+                  style={{ alignSelf: 'center', marginTop: 4 }}
+                >
+                  {loadingMore ? 'Loading...' : 'Show More'}
+                </button>
+              )}
             </div>
           )}
         </motion.div>

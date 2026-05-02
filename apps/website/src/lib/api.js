@@ -64,7 +64,13 @@ export function useApi() {
     deleteReminder: (id) => del(`/api/reminders/${id}`),
 
     // Conversations / Calls
-    getConversations: (seniorId) => get(`/api/seniors/${seniorId}/conversations`),
+    getConversations: (seniorId, { limit, offset } = {}) => {
+      const params = new URLSearchParams();
+      if (limit) params.set('limit', limit);
+      if (offset) params.set('offset', offset);
+      const qs = params.toString();
+      return get(`/api/seniors/${seniorId}/conversations${qs ? `?${qs}` : ''}`);
+    },
     getCalls: () => get('/api/calls'),
     initiateCall: (data) => post('/api/call', data),
 

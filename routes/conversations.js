@@ -46,9 +46,11 @@ router.get('/api/seniors/:id/conversations', requireAuth, validateParams(seniorI
       userAgent: req.get('user-agent'),
       metadata: { seniorId: req.params.id },
     });
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 20, 1), 50);
+    const offset = Math.max(parseInt(req.query.offset) || 0, 0);
     const convos = req.auth.isAdmin
-      ? await conversationService.getForSenior(req.params.id, 20)
-      : await conversationService.getCallSummariesForSenior(req.params.id, 20);
+      ? await conversationService.getForSenior(req.params.id, limit)
+      : await conversationService.getCallSummariesForSenior(req.params.id, limit, offset);
     res.json(convos);
   } catch (error) {
     routeError(res, error, 'GET /api/seniors/:id/conversations');

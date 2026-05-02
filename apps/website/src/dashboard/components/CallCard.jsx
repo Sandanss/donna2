@@ -1,10 +1,18 @@
+function formatRelativeDate(date) {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const callDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
+  if (callDay.getTime() === today.getTime()) return 'Today';
+  if (callDay.getTime() === yesterday.getTime()) return 'Yesterday';
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
 export default function CallCard({ conversation, seniorName }) {
   const date = new Date(conversation.startedAt || conversation.createdAt);
-  const dateStr = date.toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  });
+  const dateStr = formatRelativeDate(date);
   const timeStr = date.toLocaleTimeString('en-US', {
     hour: 'numeric',
     minute: '2-digit',
