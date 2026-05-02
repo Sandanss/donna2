@@ -147,6 +147,9 @@ export const notificationPreferences = pgTable('notification_preferences', {
   concernDetected: boolean('concern_detected').default(true),
   reminderMissed: boolean('reminder_missed').default(true),
   weeklySummary: boolean('weekly_summary').default(true),
+  // Call summaries & pause
+  callSummaries: boolean('call_summaries').default(true),
+  pauseCalls: boolean('pause_calls').default(false),
   // Channel preferences
   smsEnabled: boolean('sms_enabled').default(false),
   emailEnabled: boolean('email_enabled').default(true),

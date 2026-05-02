@@ -920,10 +920,25 @@ export function startScheduler(baseUrl, intervalMs = 60000) {
       }
 
       // Fetch both sources in parallel
-      const [dueScheduledCalls, welfareSeniors] = await Promise.all([
+      let [dueScheduledCalls, welfareSeniors] = await Promise.all([
         schedulerService.getDueScheduledCalls(),
         schedulerService.getSeniorsNeedingWelfareCheck(),
       ]);
+
+      // Filter out seniors whose caregiver has paused calls
+      const pausedResult = await db.execute(sql`
+        SELECT DISTINCT c.senior_id AS "seniorId"
+        FROM caregivers c
+        JOIN notification_preferences np ON np.caregiver_id = c.id
+        WHERE np.pause_calls = true
+      `);
+      const pausedSeniorIds = new Set((pausedResult.rows || []).map(r => r.seniorId));
+
+      if (pausedSeniorIds.size > 0) {
+        dueScheduledCalls = dueScheduledCalls.filter(s => !pausedSeniorIds.has(s.senior.id));
+        welfareSeniors = welfareSeniors.filter(s => !pausedSeniorIds.has(s.id));
+        log.info('Filtered paused seniors', { count: pausedSeniorIds.size });
+      }
 
       // Merge and deduplicate into a single call plan
       const callPlan = schedulerService.buildCallPlan(dueScheduledCalls, welfareSeniors);

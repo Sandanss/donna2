@@ -20,6 +20,7 @@ export default function HomePage() {
   const { senior, loading: ctxLoading, error: ctxError, reload, api } = useDashboard();
   const [conversations, setConversations] = useState([]);
   const [schedule, setSchedule] = useState([]);
+  const [notifPrefs, setNotifPrefs] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
@@ -29,9 +30,10 @@ export default function HomePage() {
     let cancelled = false;
     async function load() {
       try {
-        const [convos, schedData] = await Promise.all([
+        const [convos, schedData, nPrefs] = await Promise.all([
           api.getConversations(senior.id, { limit: INITIAL_LIMIT }),
           api.getSchedule(senior.id),
+          api.getNotificationPrefs().catch(() => null),
         ]);
         if (!cancelled) {
           const list = Array.isArray(convos) ? convos : [];
@@ -39,6 +41,7 @@ export default function HomePage() {
           setHasMore(list.length >= INITIAL_LIMIT);
           const sched = schedData?.schedule;
           setSchedule(Array.isArray(sched) ? sched : []);
+          setNotifPrefs(nPrefs || { callSummaries: true, pauseCalls: false });
         }
       } catch (err) {
         console.error('Failed to load home data:', err);
@@ -112,8 +115,22 @@ export default function HomePage() {
       </motion.div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-        {/* Next Call Card */}
-        {nextCall && (
+        {/* Next Call Card — paused state or normal */}
+        {notifPrefs?.pauseCalls ? (
+          <motion.div
+            className="db-card db-card--sage"
+            {...fadeUp}
+            transition={{ delay: 0.1, duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+            onClick={() => navigate('/dashboard/settings/notifications')}
+            style={{ cursor: 'pointer' }}
+          >
+            <div className="db-card__label">Next Call</div>
+            <div style={{ fontSize: 16, color: 'var(--fg-2)', lineHeight: 1.5 }}>
+              Donna calls have been paused. Resume them in{' '}
+              <span style={{ fontWeight: 600, color: 'var(--fg-1)', textDecoration: 'underline' }}>Notifications</span>.
+            </div>
+          </motion.div>
+        ) : nextCall ? (
           <motion.div
             className="db-card db-card--sage"
             {...fadeUp}
@@ -125,6 +142,20 @@ export default function HomePage() {
             <div style={{ fontSize: 26, fontWeight: 600, fontFamily: 'var(--font-heading)' }}>
               {nextCall.day} at {nextCall.time}
             </div>
+          </motion.div>
+        ) : null}
+
+        {/* Summaries-off banner */}
+        {notifPrefs && notifPrefs.callSummaries === false && conversations.length > 0 && (
+          <motion.div
+            className="db-card"
+            {...fadeUp}
+            transition={{ delay: 0.12, duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+            onClick={() => navigate('/dashboard/settings/notifications')}
+            style={{ cursor: 'pointer', padding: '12px 16px', background: 'var(--bg-2)', fontSize: 14, color: 'var(--fg-2)' }}
+          >
+            Call summaries are off. Turn on in{' '}
+            <span style={{ fontWeight: 600, color: 'var(--fg-1)', textDecoration: 'underline' }}>Notifications</span>.
           </motion.div>
         )}
 
@@ -143,7 +174,7 @@ export default function HomePage() {
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {conversations.map((convo) => (
-                <CallCard key={convo.id} conversation={convo} seniorName={seniorName} />
+                <CallCard key={convo.id} conversation={convo} seniorName={seniorName} hideSummary={notifPrefs?.callSummaries === false} />
               ))}
               {hasMore && (
                 <button

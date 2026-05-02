@@ -10,7 +10,7 @@ function formatRelativeDate(date) {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-export default function CallCard({ conversation, seniorName }) {
+export default function CallCard({ conversation, seniorName, hideSummary }) {
   const date = new Date(conversation.startedAt || conversation.createdAt);
   const dateStr = formatRelativeDate(date);
   const timeStr = date.toLocaleTimeString('en-US', {
@@ -43,7 +43,7 @@ export default function CallCard({ conversation, seniorName }) {
         </div>
         <span className={`db-badge ${badgeClass}`}>{displayStatus}</span>
       </div>
-      {summary && (
+      {summary && !hideSummary && (
         <p style={{ fontSize: 14, color: 'var(--fg-2)', lineHeight: 1.5, marginTop: 4 }}>
           {summary}
         </p>

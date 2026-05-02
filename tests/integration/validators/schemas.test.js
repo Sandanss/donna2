@@ -48,15 +48,23 @@ describe('notificationPreferencesSchema', () => {
 
   it('strips unknown fields (old mobile field names)', () => {
     const result = notificationPreferencesSchema.safeParse({
-      callSummaries: true,
       missedCallAlerts: true,
       completedCallAlerts: true,
-      pauseCalls: false,
     });
     // Zod strips unknown keys by default — all fields are optional so this succeeds
     // but the result has NO data (all unknown keys stripped)
     expect(result.success).toBe(true);
     expect(result.data).toEqual({});
+  });
+
+  it('accepts callSummaries and pauseCalls', () => {
+    const result = notificationPreferencesSchema.safeParse({
+      callSummaries: true,
+      pauseCalls: false,
+    });
+    expect(result.success).toBe(true);
+    expect(result.data.callSummaries).toBe(true);
+    expect(result.data.pauseCalls).toBe(false);
   });
 
   it('accepts smsEnabled and emailEnabled', () => {

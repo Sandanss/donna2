@@ -332,6 +332,8 @@ export const notificationPreferencesSchema = z.object({
   concernDetected: z.boolean().optional(),
   reminderMissed: z.boolean().optional(),
   weeklySummary: z.boolean().optional(),
+  callSummaries: z.boolean().optional(),
+  pauseCalls: z.boolean().optional(),
   smsEnabled: z.boolean().optional(),
   emailEnabled: z.boolean().optional(),
   quietHoursStart: z.string().regex(/^\d{2}:\d{2}$/, 'Must be HH:MM format').optional().nullable(),

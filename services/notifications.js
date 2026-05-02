@@ -115,6 +115,8 @@ export const notificationService = {
         concernDetected: true,
         reminderMissed: true,
         weeklySummary: true,
+        callSummaries: true,
+        pauseCalls: false,
         smsEnabled: false,
         emailEnabled: true,
         quietHoursStart: null,

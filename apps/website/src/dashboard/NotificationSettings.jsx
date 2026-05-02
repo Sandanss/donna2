@@ -1,11 +1,15 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useDashboard } from './DashboardContext';
 import BackButton from './components/BackButton';
+
+const DEFAULTS = { callSummaries: true, pauseCalls: false };
 
 export default function NotificationSettings() {
   const { api } = useDashboard();
   const [prefs, setPrefs] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const savedPrefs = useRef(null);
 
   useEffect(() => {
     loadPrefs();
@@ -14,22 +18,39 @@ export default function NotificationSettings() {
   async function loadPrefs() {
     try {
       const data = await api.getNotificationPrefs();
-      setPrefs(data);
+      const merged = { ...DEFAULTS, ...data };
+      setPrefs(merged);
+      savedPrefs.current = merged;
     } catch {
-      setPrefs({ callSummaries: true, missedCallAlerts: true, completedCallAlerts: true, pauseCalls: false });
+      setPrefs({ ...DEFAULTS });
+      savedPrefs.current = { ...DEFAULTS };
     } finally {
       setLoading(false);
     }
   }
 
-  const togglePref = async (key) => {
-    const updated = { ...prefs, [key]: !prefs[key] };
-    setPrefs(updated);
+  const togglePref = (key) => {
+    setPrefs(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const isDirty = prefs && savedPrefs.current && (
+    prefs.callSummaries !== savedPrefs.current.callSummaries ||
+    prefs.pauseCalls !== savedPrefs.current.pauseCalls
+  );
+
+  const handleSave = async () => {
+    setSaving(true);
     try {
-      await api.updateNotificationPrefs(updated);
+      await api.updateNotificationPrefs({
+        callSummaries: prefs.callSummaries,
+        pauseCalls: prefs.pauseCalls,
+      });
+      savedPrefs.current = { ...prefs };
     } catch (err) {
-      setPrefs(prefs);
-      alert('Failed to update preference: ' + err.message);
+      setPrefs({ ...savedPrefs.current });
+      alert('Failed to save: ' + err.message);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -52,23 +73,20 @@ export default function NotificationSettings() {
           onChange={() => togglePref('callSummaries')}
         />
         <ToggleRow
-          label="Missed Call Alerts"
-          description="Get notified when a scheduled call is missed"
-          checked={prefs?.missedCallAlerts}
-          onChange={() => togglePref('missedCallAlerts')}
-        />
-        <ToggleRow
-          label="Completed Call Alerts"
-          description="Get notified when a call is completed"
-          checked={prefs?.completedCallAlerts}
-          onChange={() => togglePref('completedCallAlerts')}
-        />
-        <ToggleRow
           label="Pause All Calls"
           description="Temporarily stop all scheduled calls"
           checked={prefs?.pauseCalls}
           onChange={() => togglePref('pauseCalls')}
         />
+
+        <button
+          className="db-btn db-btn--primary"
+          onClick={handleSave}
+          disabled={!isDirty || saving}
+          style={{ marginTop: 20, width: '100%' }}
+        >
+          {saving ? 'Saving...' : 'Save'}
+        </button>
       </div>
     </div>
   );
