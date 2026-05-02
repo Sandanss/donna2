@@ -95,16 +95,19 @@ export default function SchedulePage() {
 
   const safeSchedule = Array.isArray(schedule) ? schedule : [];
 
-  const scheduledDays = useMemo(() => {
+  const { scheduledDays, scheduledDates } = useMemo(() => {
     const days = new Set();
+    const dates = new Set();
     for (const call of safeSchedule) {
       if (call.frequency === 'daily') {
         DAYS_FULL.forEach((d) => days.add(d));
       } else if (call.frequency === 'recurring' && call.recurringDays) {
         call.recurringDays.forEach((idx) => days.add(DAYS_FULL[idx]));
+      } else if (call.frequency === 'one_time' && call.date) {
+        dates.add(call.date);
       }
     }
-    return days;
+    return { scheduledDays: days, scheduledDates: dates };
   }, [safeSchedule]);
 
   const reminderMap = useMemo(() => {
@@ -121,6 +124,10 @@ export default function SchedulePage() {
     .filter((c) => {
       if (c.frequency === 'daily') return true;
       if (c.frequency === 'recurring' && c.recurringDays?.includes(selectedDayIdx)) return true;
+      if (c.frequency === 'one_time') {
+        const dateStr = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
+        return c.date === dateStr;
+      }
       return false;
     });
 
@@ -168,6 +175,7 @@ export default function SchedulePage() {
         selectedDate={selectedDate}
         onSelectDate={setSelectedDate}
         scheduledDays={scheduledDays}
+        scheduledDates={scheduledDates}
         onPrevWeek={() => navigateWeek(-1)}
         onNextWeek={() => navigateWeek(1)}
       />

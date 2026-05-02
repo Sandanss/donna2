@@ -785,6 +785,147 @@
   background: var(--color-sage-dark);
 }
 
+/* ===== Month Picker Year Nav ===== */
+.db-month-year-nav {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  margin-bottom: var(--space-3);
+}
+
+.db-month-year-nav__year {
+  font-family: var(--font-heading);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--fg-1);
+  min-width: 56px;
+  text-align: center;
+}
+
+.db-month-year-nav__arrow {
+  background: none;
+  border: none;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--fg-2);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--dur-fast);
+}
+
+.db-month-year-nav__arrow:hover {
+  background: var(--color-cream);
+  color: var(--fg-1);
+}
+
+/* ===== Time Combobox ===== */
+.db-time-combobox {
+  position: relative;
+  width: 100%;
+}
+
+.db-time-combobox__control {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: var(--space-4);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+  cursor: text;
+  transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.db-time-combobox__control:focus-within {
+  border-color: var(--color-sage);
+  box-shadow: 0 0 0 3px rgba(95,116,100,0.15);
+}
+
+.db-time-combobox__display {
+  flex: 1;
+  font-family: var(--font-body);
+  font-size: 16px;
+  color: var(--fg-1);
+  user-select: none;
+}
+
+.db-time-combobox__input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-family: var(--font-body);
+  font-size: 16px;
+  color: var(--fg-1);
+  padding: 0;
+  width: 100%;
+}
+
+.db-time-combobox__arrow {
+  background: none;
+  border: none;
+  padding: 2px;
+  margin-left: var(--space-2);
+  color: var(--fg-3);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  transition: color var(--dur-fast);
+  flex-shrink: 0;
+}
+
+.db-time-combobox__arrow:hover {
+  color: var(--fg-1);
+}
+
+.db-time-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: 4px;
+  background: var(--bg-card);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  max-height: 240px;
+  overflow-y: auto;
+  z-index: 50;
+}
+
+.db-time-dropdown__item {
+  display: block;
+  width: 100%;
+  padding: var(--space-2) var(--space-4);
+  border: none;
+  background: none;
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--fg-1);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur-fast);
+}
+
+.db-time-dropdown__item:hover {
+  background: var(--color-cream);
+}
+
+.db-time-dropdown__item--active {
+  background: var(--color-sage-dark);
+  color: white;
+}
+
+.db-time-dropdown__item--active:hover {
+  background: var(--color-sage-dark);
+}
+
 /* ===== Reminder Card (app-style) ===== */
 .db-reminder {
   display: grid;

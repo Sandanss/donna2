@@ -15,7 +15,7 @@ function getWeekDates(referenceDate) {
   return dates;
 }
 
-export default function WeekStrip({ selectedDate, onSelectDate, scheduledDays, onPrevWeek, onNextWeek }) {
+export default function WeekStrip({ selectedDate, onSelectDate, scheduledDays, scheduledDates, onPrevWeek, onNextWeek }) {
   const weekDates = getWeekDates(selectedDate);
 
   return (
@@ -29,8 +29,9 @@ export default function WeekStrip({ selectedDate, onSelectDate, scheduledDays, o
       <div className="db-week__days">
         {weekDates.map((date, i) => {
           const dayName = DAYS_FULL[date.getDay()];
+          const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
           const isSelected = date.toDateString() === selectedDate.toDateString();
-          const hasCall = scheduledDays.has(dayName);
+          const hasCall = scheduledDays.has(dayName) || scheduledDates?.has(dateStr);
 
           return (
             <button
