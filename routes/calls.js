@@ -22,7 +22,7 @@ function formatPhoneForCall(phone) {
 
 // API: Initiate outbound call (strict rate limit: 5/min)
 router.post('/api/call', requireAuth, validateBody(initiateCallSchema), idempotencyMiddleware, callLimiter, async (req, res) => {
-  const { seniorId } = req.body;
+  const { seniorId, contextNotes } = req.body;
   const PIPECAT_URL = req.app.get('baseUrl');
 
   logAudit({
@@ -57,6 +57,7 @@ router.post('/api/call', requireAuth, validateBody(initiateCallSchema), idempote
     const call = await initiateTelnyxOutboundCall({
       seniorId: senior.id,
       callType: 'check-in',
+      contextNotes: contextNotes || undefined,
       baseUrl: PIPECAT_URL,
     });
     res.json({

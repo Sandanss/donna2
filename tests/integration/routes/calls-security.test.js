@@ -8,7 +8,7 @@ describe('call route security structure', () => {
   const source = fs.readFileSync(routePath, 'utf8');
 
   it('requires seniorId call initiation instead of client supplied phoneNumber', () => {
-    expect(source).toContain('const { seniorId } = req.body');
+    expect(source).toContain('const { seniorId, contextNotes } = req.body');
     expect(source).toContain('seniorService.getById(seniorId)');
     expect(source).not.toContain('const { phoneNumber } = req.body');
     expect(source).not.toContain('seniorService.findByPhone(phoneNumber)');

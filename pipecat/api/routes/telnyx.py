@@ -1372,6 +1372,16 @@ async def create_telnyx_outbound_call(body: TelnyxOutboundCallRequest) -> dict:
             reminder_prompt, reminder_context = await _prepare_schedule_context(body, senior)
         else:
             reminder_prompt, reminder_context = await _prepare_reminder_context(body, call_control_id)
+
+        # For instant calls with caregiver context, inject as reminder_prompt
+        if body.call_type == "check-in" and body.context_notes and not reminder_prompt:
+            reminder_prompt = (
+                "\nIMPORTANT MESSAGE FROM FAMILY TO SHARE ON THIS CALL:\n"
+                f"{body.context_notes}\n\n"
+                "Share this naturally and early in the conversation. "
+                "This is a one-time message for this call only."
+            )
+
         await _store_senior_metadata(
             call_control_id=call_control_id,
             senior=senior,

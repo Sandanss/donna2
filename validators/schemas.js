@@ -165,6 +165,7 @@ export const updateReminderSchema = z.object({
 
 export const initiateCallSchema = z.object({
   seniorId: uuidSchema,
+  contextNotes: z.string().max(1000).optional(),
 });
 
 // =============================================================================
