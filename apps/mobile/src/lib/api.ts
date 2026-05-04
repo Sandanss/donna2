@@ -298,6 +298,12 @@ export const api = {
         token,
         idempotencyKey: options?.idempotencyKey,
       }),
+    /** DELETE /api/caregivers/me/incomplete-account -- deletes a Clerk user only before Donna profile creation */
+    cancelIncompleteOnboarding: (token: string) =>
+      fetchJson<AccountDeletionResult>("/api/caregivers/me/incomplete-account", {
+        method: "DELETE",
+        token,
+      }),
   },
 
   onboarding: {

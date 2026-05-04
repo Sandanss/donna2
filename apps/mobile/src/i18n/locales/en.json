@@ -124,7 +124,9 @@
       "lastNameRequired": "Last name is required",
       "emailRequired": "Email is required",
       "invalidEmail": "Enter a valid email",
-      "phoneRequired": "Phone number is required"
+      "phoneRequired": "Phone number is required",
+      "exitFailedTitle": "Couldn't leave setup",
+      "exitFailedMessage": "We couldn't clear this pending signup yet. Please check your connection and try again."
     },
     "step2": {
       "title": "About Your Loved One",

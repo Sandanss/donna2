@@ -1,5 +1,6 @@
 import { useState } from "react";
 import {
+  Alert,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
@@ -16,18 +17,20 @@ import { useTranslation } from "react-i18next";
 import { ArrowLeft } from "lucide-react-native";
 import { Button, Input, KeyboardAwareFooter, ProgressBar } from "@/src/components/ui";
 import { COLORS } from "@/src/constants/theme";
+import { api, getErrorMessage } from "@/src/lib/api";
 import { getProfileQueryKey } from "@/src/lib/profileSession";
-import { useOnboardingStore } from "@/src/stores/onboarding";
+import { clearOnboardingDraft, useOnboardingStore } from "@/src/stores/onboarding";
 
 export default function Step1Screen() {
   const router = useRouter();
-  const { signOut, userId } = useAuth();
+  const { getToken, signOut, userId } = useAuth();
   const queryClient = useQueryClient();
   const { t } = useTranslation();
   const { firstName, lastName, phone, setField } =
     useOnboardingStore();
 
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [exiting, setExiting] = useState(false);
 
   function validate(): boolean {
     const next: Record<string, string> = {};
@@ -52,9 +55,24 @@ export default function Step1Screen() {
       return;
     }
 
-    queryClient.removeQueries({ queryKey: getProfileQueryKey(userId) });
-    await signOut();
-    router.replace("/");
+    setExiting(true);
+    try {
+      const token = await getToken();
+      if (!token) throw new Error(t("onboarding.step1.exitFailedMessage"));
+
+      await api.account.cancelIncompleteOnboarding(token);
+      await clearOnboardingDraft();
+      queryClient.removeQueries({ queryKey: getProfileQueryKey(userId) });
+      await signOut();
+      router.replace("/");
+    } catch (error: unknown) {
+      Alert.alert(
+        t("onboarding.step1.exitFailedTitle"),
+        getErrorMessage(error, t("onboarding.step1.exitFailedMessage"), "delete"),
+      );
+    } finally {
+      setExiting(false);
+    }
   }
 
   return (
@@ -76,6 +94,7 @@ export default function Step1Screen() {
           {/* Back */}
           <Pressable
             onPress={handleBack}
+            disabled={exiting}
             className="flex-row items-center mb-6 min-h-[48px] self-start"
             accessibilityRole="button"
             accessibilityLabel={t("common.back")}

@@ -57,6 +57,79 @@ router.get('/api/caregivers/me', requireAuth, async (req, res) => {
   }
 });
 
+// Cancel an auth account that has not completed Donna onboarding.
+// This intentionally refuses to delete any account already linked to caregiver data.
+router.delete('/api/caregivers/me/incomplete-account', requireAuth, writeLimiter, async (req, res) => {
+  try {
+    if (req.auth.provider !== 'clerk') {
+      return sendError(res, 400, { error: 'Clerk authentication required for incomplete account cleanup' });
+    }
+
+    const clerkUserId = req.auth.userId;
+    const [assignment] = await db.select({ id: caregivers.id })
+      .from(caregivers)
+      .where(eq(caregivers.clerkUserId, clerkUserId))
+      .limit(1);
+
+    if (assignment) {
+      return sendError(res, 409, {
+        error: 'Donna profile already exists. Use account deletion from settings.',
+        code: 'caregiver_profile_exists',
+      });
+    }
+
+    logAudit({
+      userId: clerkUserId,
+      userRole: authToRole(req.auth),
+      action: 'delete',
+      resourceType: 'pending_caregiver_account',
+      resourceId: clerkUserId,
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+      metadata: { reason: 'onboarding_cancelled_before_completion' },
+    });
+
+    let clerkUserDeleted = false;
+    try {
+      await clerkClient.users.deleteUser(clerkUserId);
+      clerkUserDeleted = true;
+    } catch (error) {
+      logAudit({
+        userId: clerkUserId,
+        userRole: authToRole(req.auth),
+        action: 'delete_clerk_user_failed',
+        resourceType: 'pending_caregiver_account',
+        resourceId: clerkUserId,
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent'),
+        metadata: {
+          error_name: error?.name,
+          error_code: error?.code,
+        },
+      });
+
+      return res.status(202).json({
+        success: true,
+        clerkUserDeleted,
+        deletedSeniors: [],
+        unlinkedSeniors: [],
+        deletionCounts: {},
+        message: 'Donna setup data was cleared. Contact support to finish deleting the sign-in account.',
+      });
+    }
+
+    res.json({
+      success: true,
+      clerkUserDeleted,
+      deletedSeniors: [],
+      unlinkedSeniors: [],
+      deletionCounts: {},
+    });
+  } catch (error) {
+    routeError(res, error, 'DELETE /api/caregivers/me/incomplete-account');
+  }
+});
+
 // Delete current caregiver account and associated Donna data.
 router.delete('/api/caregivers/me/account', requireAuth, idempotencyMiddleware, writeLimiter, async (req, res) => {
   try {

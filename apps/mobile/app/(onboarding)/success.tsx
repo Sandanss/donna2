@@ -247,9 +247,27 @@ export default function SuccessScreen() {
   }
 
   async function handleUseDifferentSignIn() {
-    queryClient.removeQueries({ queryKey: ["profile"] });
-    await signOut();
-    router.replace("/(auth)/sign-in" as any);
+    setLoading(true);
+    try {
+      const token = await getToken();
+      if (!token) throw new Error(t("onboarding.step1.exitFailedMessage"));
+
+      await api.account.cancelIncompleteOnboarding(token);
+      await clearOnboardingDraft();
+      queryClient.removeQueries({ queryKey: getProfileQueryKey(userId) });
+      await signOut();
+      router.replace("/(auth)/sign-in" as any);
+    } catch (err: unknown) {
+      setError(
+        getErrorMessage(
+          err,
+          t("onboarding.step1.exitFailedMessage"),
+          "delete",
+        ),
+      );
+    } finally {
+      setLoading(false);
+    }
   }
 
   // Generate confetti positions

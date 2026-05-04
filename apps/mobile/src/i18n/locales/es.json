@@ -124,7 +124,9 @@
       "lastNameRequired": "El apellido es obligatorio",
       "emailRequired": "El correo es obligatorio",
       "invalidEmail": "Ingresa un correo valido",
-      "phoneRequired": "El número de teléfono es obligatorio"
+      "phoneRequired": "El número de teléfono es obligatorio",
+      "exitFailedTitle": "No se pudo salir de la configuración",
+      "exitFailedMessage": "No pudimos borrar este registro pendiente. Revisa tu conexión e inténtalo de nuevo."
     },
     "step2": {
       "title": "Sobre Tu Ser Querido",
