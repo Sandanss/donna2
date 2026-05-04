@@ -298,9 +298,23 @@ export const api = {
         token,
         idempotencyKey: options?.idempotencyKey,
       }),
+    /** DELETE /api/caregivers/me/incomplete-account -- deletes a Clerk user only before Donna profile creation */
+    cancelIncompleteOnboarding: (token: string) =>
+      fetchJson<AccountDeletionResult>("/api/caregivers/me/incomplete-account", {
+        method: "DELETE",
+        token,
+      }),
   },
 
   onboarding: {
+    /** POST /api/onboarding/validate-phone -- checks whether a loved-one phone can be used */
+    validatePhone: (phone: string, token: string) =>
+      fetchJson<{ available: boolean }>("/api/onboarding/validate-phone", {
+        method: "POST",
+        body: JSON.stringify({ phone }),
+        token,
+      }),
+
     /** POST /api/onboarding -- creates senior + links to Clerk user + creates reminders */
     complete: (data: OnboardingInput, token: string, options?: WriteOptions) =>
       fetchJson<{ senior: Senior; reminders: Reminder[] }>("/api/onboarding", {

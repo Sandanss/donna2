@@ -15,6 +15,7 @@ appId: com.donna.caregiver
 - stopApp
 - launchApp:
     clearKeychain: true
+- runFlow: dismiss_dev_menu.yaml
 
 # Wait for landing page (clearKeychain signs user out → landing page)
 - extendedWaitUntil:
@@ -29,6 +30,7 @@ appId: com.donna.caregiver
 - tapOn:
     id: "landing-sign-in"
     optional: true
+- runFlow: dismiss_ios_account_prompt.yaml
 - runFlow:
     when:
       visible: "Donna"
@@ -37,6 +39,7 @@ appId: com.donna.caregiver
       # taps the visible Sign In button center, not random empty screen space.
       - tapOn:
           point: "50%,92%"
+      - runFlow: dismiss_ios_account_prompt.yaml
 
 # Wait for sign-in screen to render
 - extendedWaitUntil:

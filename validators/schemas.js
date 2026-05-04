@@ -291,6 +291,10 @@ export const onboardingSchema = z.object({
   }).optional(),
 });
 
+export const onboardingPhoneAvailabilitySchema = z.object({
+  phone: phoneSchema,
+});
+
 // =============================================================================
 // Schedule Schemas
 // =============================================================================
@@ -385,6 +389,7 @@ export const schemas = {
 
   // Onboarding
   onboarding: onboardingSchema,
+  onboardingPhoneAvailability: onboardingPhoneAvailabilitySchema,
 
   // Memories
   createMemory: createMemorySchema,

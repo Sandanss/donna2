@@ -1,5 +1,6 @@
 import { useState } from "react";
 import {
+  Alert,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
@@ -10,19 +11,26 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
+import { useAuth } from "@clerk/clerk-expo";
+import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft } from "lucide-react-native";
 import { Button, Input, KeyboardAwareFooter, ProgressBar } from "@/src/components/ui";
 import { COLORS } from "@/src/constants/theme";
-import { useOnboardingStore } from "@/src/stores/onboarding";
+import { api, getErrorMessage } from "@/src/lib/api";
+import { getProfileQueryKey } from "@/src/lib/profileSession";
+import { clearOnboardingDraft, useOnboardingStore } from "@/src/stores/onboarding";
 
 export default function Step1Screen() {
   const router = useRouter();
+  const { getToken, signOut, userId } = useAuth();
+  const queryClient = useQueryClient();
   const { t } = useTranslation();
   const { firstName, lastName, phone, setField } =
     useOnboardingStore();
 
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [exiting, setExiting] = useState(false);
 
   function validate(): boolean {
     const next: Record<string, string> = {};
@@ -37,6 +45,33 @@ export default function Step1Screen() {
     Keyboard.dismiss();
     if (validate()) {
       router.push("/(onboarding)/step2");
+    }
+  }
+
+  async function handleBack() {
+    Keyboard.dismiss();
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+
+    setExiting(true);
+    try {
+      const token = await getToken();
+      if (!token) throw new Error(t("onboarding.step1.exitFailedMessage"));
+
+      await api.account.cancelIncompleteOnboarding(token);
+      await clearOnboardingDraft();
+      queryClient.removeQueries({ queryKey: getProfileQueryKey(userId) });
+      await signOut();
+      router.replace("/");
+    } catch (error: unknown) {
+      Alert.alert(
+        t("onboarding.step1.exitFailedTitle"),
+        getErrorMessage(error, t("onboarding.step1.exitFailedMessage"), "delete"),
+      );
+    } finally {
+      setExiting(false);
     }
   }
 
@@ -58,7 +93,8 @@ export default function Step1Screen() {
 
           {/* Back */}
           <Pressable
-            onPress={() => router.back()}
+            onPress={handleBack}
+            disabled={exiting}
             className="flex-row items-center mb-6 min-h-[48px] self-start"
             accessibilityRole="button"
             accessibilityLabel={t("common.back")}

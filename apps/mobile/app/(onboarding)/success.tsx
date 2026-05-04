@@ -151,7 +151,7 @@ export default function SuccessScreen() {
   const router = useRouter();
   const { t } = useTranslation();
   const queryClient = useQueryClient();
-  const { getToken, userId } = useAuth();
+  const { getToken, signOut, userId } = useAuth();
   const store = useOnboardingStore();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -246,6 +246,30 @@ export default function SuccessScreen() {
     }
   }
 
+  async function handleUseDifferentSignIn() {
+    setLoading(true);
+    try {
+      const token = await getToken();
+      if (!token) throw new Error(t("onboarding.step1.exitFailedMessage"));
+
+      await api.account.cancelIncompleteOnboarding(token);
+      await clearOnboardingDraft();
+      queryClient.removeQueries({ queryKey: getProfileQueryKey(userId) });
+      await signOut();
+      router.replace("/(auth)/sign-in" as any);
+    } catch (err: unknown) {
+      setError(
+        getErrorMessage(
+          err,
+          t("onboarding.step1.exitFailedMessage"),
+          "delete",
+        ),
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
   // Generate confetti positions
   const confettiPieces = CONFETTI_COLORS.map((color, i) => ({
     color,
@@ -300,6 +324,22 @@ export default function SuccessScreen() {
           loading={loading}
           disabled={loading}
         />
+        {error && (
+          <View className="gap-3 mt-3">
+            <Button
+              title={t("onboarding.success.editProfile")}
+              onPress={() => router.back()}
+              variant="secondary"
+              disabled={loading}
+            />
+            <Button
+              title={t("onboarding.success.useDifferentSignIn")}
+              onPress={handleUseDifferentSignIn}
+              variant="ghost"
+              disabled={loading}
+            />
+          </View>
+        )}
       </View>
     </SafeAreaView>
   );

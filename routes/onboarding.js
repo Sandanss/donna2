@@ -1,11 +1,12 @@
 import { Router } from 'express';
+import { eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { caregivers, reminders, seniors } from '../db/schema.js';
 import { requireAuth } from '../middleware/auth.js';
 import { writeLimiter } from '../middleware/rate-limit.js';
 import { idempotencyMiddleware } from '../middleware/idempotency.js';
 import { validateBody } from '../middleware/validate.js';
-import { onboardingSchema } from '../validators/schemas.js';
+import { onboardingPhoneAvailabilitySchema, onboardingSchema } from '../validators/schemas.js';
 import { maskName } from '../lib/sanitize.js';
 import { cronExpressionFromTime, resolveTimezoneFromProfile, wallTimeTodayToUtcDate } from '../lib/timezone.js';
 import { sendError } from '../lib/http-response.js';
@@ -17,6 +18,31 @@ const router = Router();
 function normalizePhone(phone) {
   return String(phone || '').replace(/\D/g, '').slice(-10);
 }
+
+router.post('/api/onboarding/validate-phone', requireAuth, validateBody(onboardingPhoneAvailabilitySchema), writeLimiter, async (req, res) => {
+  try {
+    if (!req.auth.userId || req.auth.userId === 'cofounder') {
+      return sendError(res, 400, { error: 'Clerk authentication required for onboarding' });
+    }
+
+    const phone = normalizePhone(req.body.phone);
+    const [existing] = await db.select({ id: seniors.id })
+      .from(seniors)
+      .where(eq(seniors.phone, phone))
+      .limit(1);
+
+    if (existing) {
+      return sendError(res, 409, {
+        error: 'This phone number is already registered for another senior',
+        code: 'senior_phone_taken',
+      });
+    }
+
+    res.json({ available: true });
+  } catch (error) {
+    routeError(res, error, 'POST /api/onboarding/validate-phone');
+  }
+});
 
 // Complete onboarding - creates senior + links to Clerk user + creates reminders
 router.post('/api/onboarding', requireAuth, validateBody(onboardingSchema), idempotencyMiddleware, writeLimiter, async (req, res) => {

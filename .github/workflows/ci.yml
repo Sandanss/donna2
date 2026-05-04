@@ -126,13 +126,13 @@ jobs:
         run: npm install -g @railway/cli
 
       - name: Deploy Pipecat to staging
-        run: railway up --service donna-pipecat --environment staging
+        run: bash ../.github/scripts/railway-deploy-detached.sh donna-pipecat staging
         working-directory: pipecat
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
       - name: Deploy Node.js to staging
-        run: railway up --service donna-api --environment staging
+        run: bash .github/scripts/railway-deploy-detached.sh donna-api staging
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
