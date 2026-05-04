@@ -5,7 +5,20 @@ service="${1:?Usage: railway-deploy-detached.sh <service> [environment]}"
 environment="${2:-staging}"
 timeout_seconds="${RAILWAY_DEPLOY_TIMEOUT_SECONDS:-900}"
 poll_interval_seconds="${RAILWAY_DEPLOY_POLL_INTERVAL_SECONDS:-15}"
+failure_log_lines="${RAILWAY_DEPLOY_FAILURE_LOG_LINES:-200}"
 started_at_ms="$(node -e 'console.log(Date.now())')"
+
+print_failure_logs() {
+  local deployment_id="$1"
+
+  echo "::group::Railway build logs for ${deployment_id}"
+  railway logs "$deployment_id" --service "$service" --environment "$environment" --build --lines "$failure_log_lines" || true
+  echo "::endgroup::"
+
+  echo "::group::Railway deployment logs for ${deployment_id}"
+  railway logs "$deployment_id" --service "$service" --environment "$environment" --deployment --lines "$failure_log_lines" || true
+  echo "::endgroup::"
+}
 
 echo "Starting Railway deploy for service=${service} environment=${environment}"
 railway up --service "$service" --environment "$environment" --detach
@@ -75,6 +88,7 @@ if (deployment?.status) {
       ;;
     FAILED | CRASHED | REMOVED)
       echo "Railway deployment failed for ${service}: status=${status}"
+      print_failure_logs "$deployment_id"
       exit 1
       ;;
   esac
