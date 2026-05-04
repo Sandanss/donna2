@@ -18,7 +18,7 @@ jobs:
         run: npm install -g @railway/cli
 
       - name: Deploy Pipecat to production
-        run: railway up --service donna-pipecat
+        run: bash ../.github/scripts/railway-deploy-detached.sh donna-pipecat production
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
@@ -32,7 +32,7 @@ jobs:
         run: npm install -g @railway/cli
 
       - name: Deploy Node.js to production
-        run: railway up --service donna-api
+        run: bash .github/scripts/railway-deploy-detached.sh donna-api production
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
