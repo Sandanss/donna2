@@ -279,7 +279,7 @@ railway logs --service donna-pipecat --environment dev
 
 **Don't test voice locally with ngrok.** Always deploy to Railway dev environment and test with real phone calls.
 
-**API keys are shared across environments.** You don't need your own Anthropic, Deepgram, ElevenLabs, Cartesia, Groq, Google, OpenAI, or Telnyx keys for normal dev work — Railway injects the configured environment values. SMS is inactive for now. Production-like environments must also have `DONNA_API_KEYS`, `FIELD_ENCRYPTION_KEY`, `PIPECAT_PUBLIC_URL`, and Telnyx voice credentials set so Pipecat can fail closed.
+**Donna currently uses one shared secret set across dev, staging, and production.** You don't need your own Anthropic, Deepgram, ElevenLabs, Cartesia, Groq, Google, OpenAI, or Telnyx keys for normal dev work when Railway injects the configured environment values. SMS is inactive for now. Production-like environments must have `DONNA_API_KEYS`, `FIELD_ENCRYPTION_KEY`, `JWT_SECRET`, `CLERK_SECRET_KEY`, `PIPECAT_PUBLIC_URL`, and Telnyx voice credentials set so Pipecat can fail closed. Treat dev/staging Railway variable or runtime-log exposure as production secret exposure until these secrets are split by environment.
 
 **Commit messages should be specific.** Not `feat: update memory system` but `feat: reduce memory context to 20 items (recent turns already cover last 3 calls)`. See the commit message guidelines in `CLAUDE.md`.
 

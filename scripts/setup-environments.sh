@@ -166,7 +166,9 @@ get_public_url() {
   fi
 }
 
-# Read key production vars from Pipecat service
+# Read shared environment vars from production. Donna currently uses one shared
+# secret set across production, staging, and dev; rotate these together if any
+# lower environment can expose Railway variables or app runtime logs.
 ANTHROPIC_API_KEY=$(get_prod_var donna-pipecat ANTHROPIC_API_KEY)
 ANTHROPIC_MODEL=$(get_prod_var donna-pipecat ANTHROPIC_MODEL)
 DEEPGRAM_API_KEY=$(get_prod_var donna-pipecat DEEPGRAM_API_KEY)
@@ -195,7 +197,7 @@ STAGING_PIPECAT_PUBLIC_URL=$(get_public_url donna-pipecat staging)
 STAGING_NODE_API_URL=$(get_public_url donna-api staging)
 MISSING_PUBLIC_URLS=false
 
-if [ -z "$ANTHROPIC_API_KEY" ] || [ -z "$DONNA_API_KEYS" ] || [ -z "$FIELD_ENCRYPTION_KEY" ]; then
+if [ -z "$ANTHROPIC_API_KEY" ] || [ -z "$DONNA_API_KEYS" ] || [ -z "$FIELD_ENCRYPTION_KEY" ] || [ -z "$JWT_SECRET" ]; then
   warn "Could not read production vars. You may need to set vars manually in Railway dashboard."
   warn "The dev environment and Neon branches have been created — set vars in Railway UI."
   echo ""
@@ -203,32 +205,32 @@ if [ -z "$ANTHROPIC_API_KEY" ] || [ -z "$DONNA_API_KEYS" ] || [ -z "$FIELD_ENCRY
   echo "  ENVIRONMENT           = production"
   echo "  DATABASE_URL          = $DEV_DB_URL"
   echo "  PIPECAT_PUBLIC_URL    = https://<dev-pipecat-domain>"
-  echo "  DONNA_API_KEYS        = pipecat:<key>,scheduler:<key>,notifications:<key>"
-  echo "  FIELD_ENCRYPTION_KEY  = <32-byte base64url key>"
-  echo "  JWT_SECRET            = <non-default secret>"
+  echo "  DONNA_API_KEYS        = <shared pipecat/scheduler/notifications keys>"
+  echo "  FIELD_ENCRYPTION_KEY  = <shared 32-byte base64url key>"
+  echo "  JWT_SECRET            = <shared non-default secret>"
   echo "  TELNYX_API_KEY        = <Telnyx API key>"
   echo "  TELNYX_PUBLIC_KEY     = <Telnyx public key>"
   echo "  TELNYX_PHONE_NUMBER   = $DEV_TELNYX_NUMBER"
   echo "  TELNYX_CONNECTION_ID  = <Telnyx Voice API application id>"
   echo "  TELEPHONY_PROVIDER    = telnyx"
   echo "  NODE_API_URL          = https://<dev-node-domain>   (on donna-pipecat)"
-  echo "  CLERK_SECRET_KEY      = <Clerk secret>              (on donna-api)"
+  echo "  CLERK_SECRET_KEY      = <shared Clerk secret>       (on donna-api)"
   echo "  SCHEDULER_ENABLED     = false   (on donna-pipecat)"
   echo "  SCHEDULER_ENABLED     = false   (on donna-api; dev/staging must not place scheduled calls)"
   echo "  LOG_LEVEL             = INFO    (on donna-pipecat)"
-  echo "  + copy all API keys from production"
+  echo "  + copy the current shared secret set from production"
   echo ""
   echo "For staging environment:"
   echo "  ENVIRONMENT           = production"
   echo "  DATABASE_URL          = $STAGING_DB_URL"
   echo "  PIPECAT_PUBLIC_URL    = https://<staging-pipecat-domain>"
-  echo "  + same API keys and Telnyx dev number"
+  echo "  + same shared secret set and Telnyx dev number"
   echo ""
   ok "Neon branches created. Set Railway vars manually, then run: make deploy-dev"
   exit 0
 fi
 
-ok "Read production env vars"
+ok "Read shared production env vars"
 
 warn_missing_public_url() {
   local SERVICE=$1
