@@ -15,12 +15,18 @@ import {
 } from "react-native";
 import { useTranslation } from "react-i18next";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/src/components/ui/Button";
 import { Input } from "@/src/components/ui/Input";
 import { COLORS } from "@/src/constants/theme";
 import { api, getErrorMessage } from "@/src/lib/api";
 import { getClerkErrorMessage, getClerkFieldErrors } from "@/src/lib/clerkErrors";
+import {
+  clearPendingOnboardingSession,
+  markPendingOnboardingSession,
+} from "@/src/lib/pendingOnboardingSession";
 import { resolvePostAuthRoute } from "@/src/lib/profileSession";
+import { clearOnboardingDraft } from "@/src/stores/onboarding";
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -88,7 +94,8 @@ export default function CreateAccountScreen() {
   const { t } = useTranslation();
   const router = useRouter();
   const { signUp, setActive, isLoaded } = useSignUp();
-  const { getToken } = useAuth();
+  const { getToken, signOut } = useAuth();
+  const queryClient = useQueryClient();
   const { startOAuthFlow: startGoogleOAuth } = useOAuth({
     strategy: "oauth_google",
   });
@@ -129,13 +136,32 @@ export default function CreateAccountScreen() {
         return;
       }
       Alert.alert(
-        "Sign Up Complete",
+        "Sign Up Failed",
         getErrorMessage(
           error,
-          "We created your account, but couldn't load your Donna profile right now. Please try again in a moment.",
+          "We couldn't finish setup, so we cleared this incomplete sign-up. Please try again.",
           "auth",
         ),
       );
+      clearPendingOnboardingSession();
+      try {
+        await api.account.cancelIncompleteOnboarding(token);
+      } catch {
+        // Local sign-out still prevents an incomplete account from trapping the user.
+      } finally {
+        try {
+          await clearOnboardingDraft();
+        } catch {
+          // Continue; local auth cleanup is more important than draft cleanup.
+        }
+        queryClient.removeQueries({ queryKey: ["profile"] });
+        try {
+          await signOut();
+        } catch {
+          // The Clerk user may already be gone server-side.
+        }
+        router.replace("/");
+      }
       return;
     }
 
@@ -169,6 +195,7 @@ export default function CreateAccountScreen() {
       });
 
       if (result.createdSessionId) {
+        markPendingOnboardingSession();
         await setActive({ session: result.createdSessionId });
         await navigateAfterAuth();
         return;
@@ -241,6 +268,7 @@ export default function CreateAccountScreen() {
       const activateFn = result.setActive;
 
       if (sessionId && activateFn) {
+        markPendingOnboardingSession();
         await activateFn({ session: sessionId });
         await navigateAfterAuth();
         return;
@@ -258,6 +286,7 @@ export default function CreateAccountScreen() {
 
         const finalSessionId = resetResult?.createdSessionId;
         if (finalSessionId && result.setActive) {
+          markPendingOnboardingSession();
           await result.setActive({ session: finalSessionId });
           await navigateAfterAuth();
           return;

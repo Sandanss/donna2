@@ -1,0 +1,49 @@
+# Flow 12: Incomplete Account Cleanup
+# Creates a fresh Clerk test account, stops before Donna profile creation, then
+# restarts the app without clearing keychain. The app should treat the signed-in
+# no-profile session as incomplete, call the incomplete-account cleanup route,
+# clear onboarding draft state, and return to the signed-out landing screen.
+#
+# Human-like interaction rules:
+#   - Account creation goes through the visible Create Account screen.
+#   - Numeric entry uses the visible keypad helper where needed.
+#   - Do not tap random empty space to escape the keyboard or force navigation.
+
+appId: com.donna.caregiver
+
+---
+
+- evalScript: ${output.cleanupEmail = "maestro-cleanup-" + String(Date.now()) + "+clerk_test@calldonna.co"}
+
+- runFlow:
+    file: ../manual/auth_create_account.yaml
+    env:
+      TEST_CREATE_EMAIL: ${output.cleanupEmail}
+
+# The app has a temporary Clerk session and is allowed to be in onboarding only
+# because it came from Create Account in this same runtime.
+- extendedWaitUntil:
+    visible: "About You"
+    timeout: 15000
+
+# Restart without clearKeychain so the stored Clerk session is still present,
+# but the in-memory pending-onboarding marker is gone. This simulates a user
+# abandoning setup and reopening the app later.
+- stopApp
+- launchApp
+- runFlow: ../subflows/dismiss_dev_menu.yaml
+- runFlow: ../subflows/dismiss_ios_account_prompt.yaml
+
+# AuthGuard should delete/clear the incomplete account and sign out locally
+# instead of sending the user back into onboarding or settings.
+- extendedWaitUntil:
+    visible: "Get Started|Sign In"
+    timeout: 90000
+- extendedWaitUntil:
+    notVisible: "About You"
+    timeout: 5000
+- extendedWaitUntil:
+    notVisible: "Hello.*|Dashboard"
+    timeout: 5000
+
+- takeScreenshot: 12_incomplete_account_cleanup

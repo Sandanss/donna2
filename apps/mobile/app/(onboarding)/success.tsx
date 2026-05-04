@@ -18,6 +18,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/src/components/ui";
 import { COLORS } from "@/src/constants/theme";
 import { api, getErrorMessage } from "@/src/lib/api";
+import { clearPendingOnboardingSession } from "@/src/lib/pendingOnboardingSession";
 import { getProfileQueryKey } from "@/src/lib/profileSession";
 import { useStableIdempotencyKey } from "@/src/hooks/useStableIdempotencyKey";
 import {
@@ -231,6 +232,7 @@ export default function SuccessScreen() {
       }
 
       idempotency.reset();
+      clearPendingOnboardingSession();
       await clearOnboardingDraft();
       router.replace("/(tabs)");
     } catch (err: unknown) {
@@ -248,24 +250,28 @@ export default function SuccessScreen() {
 
   async function handleUseDifferentSignIn() {
     setLoading(true);
+
     try {
       const token = await getToken();
-      if (!token) throw new Error(t("onboarding.step1.exitFailedMessage"));
-
-      await api.account.cancelIncompleteOnboarding(token);
-      await clearOnboardingDraft();
-      queryClient.removeQueries({ queryKey: getProfileQueryKey(userId) });
-      await signOut();
-      router.replace("/(auth)/sign-in" as any);
-    } catch (err: unknown) {
-      setError(
-        getErrorMessage(
-          err,
-          t("onboarding.step1.exitFailedMessage"),
-          "delete",
-        ),
-      );
+      if (token) {
+        await api.account.cancelIncompleteOnboarding(token);
+      }
+    } catch {
+      // Continue with local cleanup. The pending Clerk account may already be gone.
     } finally {
+      clearPendingOnboardingSession();
+      try {
+        await clearOnboardingDraft();
+      } catch {
+        // Continue; changing sign-in must not be blocked by draft cleanup failure.
+      }
+      queryClient.removeQueries({ queryKey: ["profile"] });
+      try {
+        await signOut();
+      } catch {
+        // The Clerk user may already be deleted server-side.
+      }
+      router.replace("/(auth)/sign-in" as any);
       setLoading(false);
     }
   }

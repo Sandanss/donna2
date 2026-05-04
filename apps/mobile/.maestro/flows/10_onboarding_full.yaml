@@ -1,6 +1,7 @@
 # Flow 10: Full Onboarding (Fresh User)
-# Signs in with a fresh verified test user → completes all 6 onboarding steps → dashboard
-# NOTE: This flow creates a new senior — run separately or last
+# Creates a fresh Clerk test user through the visible Create Account UI →
+# completes all 6 onboarding steps → dashboard.
+# NOTE: This flow creates a new senior — run separately or last.
 #
 # KEY LEARNINGS:
 #   - Input component: use testID to reliably target TextInput fields.
@@ -13,18 +14,22 @@
 #     is visible before continuing so Maestro cannot silently miss focus.
 #   - Do not tap random headings or empty screen space to dismiss keyboards.
 #     The CTA should stay clear above the keyboard; tap it directly.
+#   - Do not sign in with a no-profile user to start onboarding. Sign-in without
+#     a Donna profile is now treated as an incomplete account and is cleaned up.
+#     Fresh onboarding must start from Create Account so the app can mark the
+#     temporary pending-onboarding session before profile creation.
 
 appId: com.donna.caregiver
 
 ---
 
 - evalScript: ${output.onboardingSeniorPhone = "555" + String(Date.now()).slice(-7)}
+- evalScript: ${output.onboardingEmail = "maestro-onboarding-" + String(Date.now()) + "+clerk_test@calldonna.co"}
 
 - runFlow:
-    file: ../subflows/sign_in.yaml
+    file: ../manual/auth_create_account.yaml
     env:
-      TEST_EMAIL: ${TEST_FRESH_EMAIL}
-      TEST_PASSWORD: ${TEST_FRESH_PASSWORD}
+      TEST_CREATE_EMAIL: ${output.onboardingEmail}
 
 # ── Step 1: About You (Caregiver) ──
 - extendedWaitUntil:

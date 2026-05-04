@@ -1,6 +1,10 @@
 # Manual Flow: Create Account
 # Pass a unique Clerk test-mode email with:
 # maestro test -e TEST_CREATE_EMAIL="maestro-create-<unique>+clerk_test@calldonna.co" .maestro/manual/auth_create_account.yaml
+#
+# This is the canonical setup path for fresh onboarding tests. Do not use the
+# sign-in subflow with a no-profile user to reach onboarding; no-profile sign-in
+# is intentionally cleaned up and signed out.
 
 appId: com.donna.caregiver
 
@@ -12,6 +16,7 @@ appId: com.donna.caregiver
 - launchApp:
     clearKeychain: true
 - runFlow: ../subflows/dismiss_dev_menu.yaml
+- runFlow: ../subflows/dismiss_ios_account_prompt.yaml
 
 - extendedWaitUntil:
     visible: "Get Started"

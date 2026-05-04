@@ -15,12 +15,15 @@ import {
 } from "react-native";
 import { useTranslation } from "react-i18next";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/src/components/ui/Button";
 import { Input } from "@/src/components/ui/Input";
 import { COLORS } from "@/src/constants/theme";
 import { api, getErrorMessage } from "@/src/lib/api";
 import { getClerkErrorMessage, getClerkFieldErrors } from "@/src/lib/clerkErrors";
+import { clearPendingOnboardingSession } from "@/src/lib/pendingOnboardingSession";
 import { resolvePostAuthRoute } from "@/src/lib/profileSession";
+import { clearOnboardingDraft } from "@/src/stores/onboarding";
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -106,7 +109,8 @@ export default function SignInScreen() {
   const { t } = useTranslation();
   const router = useRouter();
   const { signIn, setActive, isLoaded } = useSignIn();
-  const { getToken } = useAuth();
+  const { getToken, signOut } = useAuth();
+  const queryClient = useQueryClient();
   const { startOAuthFlow: startGoogleOAuth } = useOAuth({
     strategy: "oauth_google",
   });
@@ -152,7 +156,29 @@ export default function SignInScreen() {
     } catch (error) {
       const nextRoute = resolvePostAuthRoute({ error });
       if (nextRoute) {
-        router.replace(nextRoute as any);
+        clearPendingOnboardingSession();
+        try {
+          await api.account.cancelIncompleteOnboarding(token);
+        } catch {
+          // Local sign-out still prevents an incomplete account from trapping the user.
+        } finally {
+          try {
+            await clearOnboardingDraft();
+          } catch {
+            // Continue; local auth cleanup is more important than draft cleanup.
+          }
+          queryClient.removeQueries({ queryKey: ["profile"] });
+          try {
+            await signOut();
+          } catch {
+            // The Clerk user may already be gone server-side.
+          }
+        }
+        Alert.alert(
+          "No Donna profile found",
+          "We cleared the incomplete account for this sign-in. Create a new account to start setup again.",
+        );
+        router.replace("/");
         return;
       }
       Alert.alert(

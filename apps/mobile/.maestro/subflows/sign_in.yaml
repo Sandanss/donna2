@@ -1,7 +1,7 @@
 # Reusable sign-in subflow
 # Expects: TEST_EMAIL, TEST_PASSWORD env vars set by calling flow or .env
 # Starts from: Any state
-# Ends at: Dashboard (tabs) or Onboarding step 1
+# Ends at: Dashboard (tabs)
 #
 # Clerk test mode: +clerk_test emails auto-verify with code 424242
 # Maestro must enter any second-factor code through the same visible field users see.
@@ -104,7 +104,9 @@ appId: com.donna.caregiver
       - tapOn:
           id: "auth-verification-submit"
 
-# Landing destinations: "Hello" greeting (returning user) or "About You" (fresh user).
+# Landing destination: "Hello" greeting for a returning user with a valid Donna
+# profile. A signed-in Clerk user without a Donna profile is not a valid sign-in
+# state; the app should clear the incomplete account and return to landing.
 - extendedWaitUntil:
-    visible: "Hello.*|About You"
+    visible: "Hello.*"
     timeout: 90000

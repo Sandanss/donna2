@@ -1,11 +1,11 @@
 import "../global.css";
 import "@/src/i18n";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Stack, usePathname, useRouter, useSegments } from "expo-router";
 import { ClerkProvider, ClerkLoaded, useAuth } from "@clerk/clerk-expo";
 import { useQueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useProfile } from "@/src/hooks/useProfile";
-import { getErrorMessage } from "@/src/lib/api";
+import { api, getErrorMessage } from "@/src/lib/api";
 import { tokenCache } from "@/src/lib/auth";
 import {
   registerForPushNotifications,
@@ -34,20 +34,26 @@ import {
   hasCompletedOnboarding,
   resolvePostAuthRoute,
 } from "@/src/lib/profileSession";
+import {
+  clearPendingOnboardingSession,
+  hasPendingOnboardingSession,
+} from "@/src/lib/pendingOnboardingSession";
 import { getClerkPublishableKey } from "@/src/lib/runtimeConfig";
+import { clearOnboardingDraft } from "@/src/stores/onboarding";
 
 SplashScreen.preventAutoHideAsync();
 
 function AuthGuard() {
-  const { isLoaded, isSignedIn, signOut, userId } = useAuth();
+  const { getToken, isLoaded, isSignedIn, signOut, userId } = useAuth();
   const { data: profile, isLoading: profileLoading, isError: profileError, error: profileErrorObj } = useProfile();
   const segments = useSegments();
   const pathname = usePathname();
   const router = useRouter();
   const queryClient = useQueryClient();
+  const [cleaningIncompleteAccount, setCleaningIncompleteAccount] = useState(false);
 
   useEffect(() => {
-    if (!isLoaded) return;
+    if (!isLoaded || cleaningIncompleteAccount) return;
 
     const firstSegment = segments?.[0];
     const inTabsGroup = firstSegment === "(tabs)";
@@ -66,6 +72,40 @@ function AuthGuard() {
     if (!isSignedIn && inTabsGroup) {
       console.log(`[AuthGuard] Not signed in but in tabs → redirect to /`);
       router.replace("/");
+    } else if (
+      isSignedIn &&
+      !profileLoading &&
+      profileError &&
+      nextRoute === "/(onboarding)/step1" &&
+      !hasPendingOnboardingSession()
+    ) {
+      console.log("[AuthGuard] Signed in without Donna profile outside create-account flow → cleaning incomplete account");
+      setCleaningIncompleteAccount(true);
+      void (async () => {
+        try {
+          const token = await getToken();
+          if (token) {
+            await api.account.cancelIncompleteOnboarding(token);
+          }
+        } catch {
+          // Still sign out locally so an orphaned Clerk session cannot trap the app.
+        } finally {
+          clearPendingOnboardingSession();
+          try {
+            await clearOnboardingDraft();
+          } catch {
+            // Continue; local auth cleanup is more important than draft cleanup.
+          }
+          queryClient.removeQueries({ queryKey: ["profile"] });
+          try {
+            await signOut();
+          } catch {
+            // The Clerk user may already be gone server-side.
+          }
+          router.replace("/");
+          setCleaningIncompleteAccount(false);
+        }
+      })();
     } else if (isSignedIn && (isLanding || inAuthGroup)) {
       if (!profileLoading && nextRoute) {
         console.log(`[AuthGuard] Signed in + auth area → navigating to ${nextRoute}`);
@@ -82,7 +122,22 @@ function AuthGuard() {
     ) {
       router.replace("/(onboarding)/step1" as any);
     }
-  }, [isLoaded, isSignedIn, pathname, segments, profile, profileLoading, profileError, profileErrorObj, router]);
+  }, [
+    cleaningIncompleteAccount,
+    getToken,
+    isLoaded,
+    isSignedIn,
+    pathname,
+    profile,
+    profileError,
+    profileErrorObj,
+    profileLoading,
+    queryClient,
+    router,
+    segments,
+    signOut,
+    userId,
+  ]);
 
   // Register for push notifications once the user is signed in
   useEffect(() => {

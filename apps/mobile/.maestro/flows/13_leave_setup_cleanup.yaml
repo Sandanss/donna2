@@ -1,0 +1,41 @@
+# Flow 13: Leave Setup Cleanup
+# Creates a fresh Clerk test account, lands on onboarding Step 1, taps Back, and
+# verifies the user is returned to the signed-out landing screen. This covers
+# the explicit "leave setup" path: local onboarding draft is cleared and pending
+# account deletion is attempted without blocking the user on not-found errors.
+#
+# Human-like interaction rules:
+#   - Account creation goes through the visible Create Account screen.
+#   - Leave setup through the visible Back control, not by clearing app state.
+#   - Do not tap random empty space to dismiss alerts or force navigation.
+
+appId: com.donna.caregiver
+
+---
+
+- evalScript: ${output.leaveSetupEmail = "maestro-leave-setup-" + String(Date.now()) + "+clerk_test@calldonna.co"}
+
+- runFlow:
+    file: ../manual/auth_create_account.yaml
+    env:
+      TEST_CREATE_EMAIL: ${output.leaveSetupEmail}
+
+- extendedWaitUntil:
+    visible: "About You"
+    timeout: 15000
+
+- tapOn: "Back"
+
+# The app should leave setup and sign out instead of surfacing
+# "Couldn't leave setup".
+- extendedWaitUntil:
+    visible: "Get Started|Sign In"
+    timeout: 90000
+- extendedWaitUntil:
+    notVisible: "Couldn't leave setup"
+    timeout: 5000
+- extendedWaitUntil:
+    notVisible: "About You"
+    timeout: 5000
+
+- takeScreenshot: 13_leave_setup_cleanup
