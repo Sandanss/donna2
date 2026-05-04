@@ -35,6 +35,7 @@ import { mountRoutes } from './routes/index.js';
 import { startScheduler } from './services/scheduler.js';
 import { initGrowthBook, closeGrowthBook } from './lib/growthbook.js';
 import { assertNodeSecurityConfig, getPipecatPublicUrl, isProductionEnv } from './lib/security-config.js';
+import { getSchedulerStartupDecision } from './lib/scheduler-config.js';
 
 // Security middleware
 import { securityHeaders, requestId } from './middleware/security.js';
@@ -120,11 +121,13 @@ server.listen(PORT, async () => {
   // Initialize GrowthBook feature flags
   await initGrowthBook();
 
-  // Start the reminder scheduler (check every minute)
-  // Passes Pipecat URL so outbound calls point to the voice pipeline
-  if (process.env.SCHEDULER_ENABLED === 'false') {
-    console.log('Scheduler disabled (SCHEDULER_ENABLED=false)');
+  // Start the reminder scheduler (check every minute).
+  // Scheduled calls are live telephony; only production runs them by default.
+  const schedulerDecision = getSchedulerStartupDecision();
+  if (!schedulerDecision.enabled) {
+    console.log(`Scheduler disabled (${schedulerDecision.reason})`);
   } else {
+    console.log(`Scheduler enabled (${schedulerDecision.reason})`);
     startScheduler(PIPECAT_BASE_URL, 60000);
   }
 });

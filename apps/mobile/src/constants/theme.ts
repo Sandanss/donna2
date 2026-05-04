@@ -25,6 +25,7 @@ export const CALL_TITLE_OPTIONS = [
 ] as const;
 
 export const RELATIONSHIP_OPTIONS = [
+  "Myself",
   "Daughter",
   "Son",
   "Spouse",

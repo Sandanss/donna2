@@ -141,6 +141,7 @@
       "nameRequired": "El nombre es obligatorio",
       "phoneRequired": "El número de teléfono es obligatorio",
       "phoneInvalid": "Ingresa un número de teléfono de 10 dígitos",
+      "phoneMatchesCaregiver": "Usa otro número de teléfono a menos que Donna sea para ti.",
       "phoneAlreadyRegistered": "Ese número de teléfono ya está registrado. Usa otro número o contacta a soporte.",
       "phoneCheckFailed": "No pudimos verificar este número de teléfono. Inténtalo de nuevo.",
       "relationshipRequired": "Por favor selecciona una relacion",
@@ -446,6 +447,7 @@
     "sat": "Sab"
   },
   "relationships": {
+    "Myself": "Yo",
     "Daughter": "Hija",
     "Son": "Hijo",
     "Spouse": "Pareja",

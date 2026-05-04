@@ -214,7 +214,7 @@ if [ -z "$ANTHROPIC_API_KEY" ] || [ -z "$DONNA_API_KEYS" ] || [ -z "$FIELD_ENCRY
   echo "  NODE_API_URL          = https://<dev-node-domain>   (on donna-pipecat)"
   echo "  CLERK_SECRET_KEY      = <Clerk secret>              (on donna-api)"
   echo "  SCHEDULER_ENABLED     = false   (on donna-pipecat)"
-  echo "  SCHEDULER_ENABLED     = true    (on donna-api, if you want reminders)"
+  echo "  SCHEDULER_ENABLED     = false   (on donna-api; dev/staging must not place scheduled calls)"
   echo "  LOG_LEVEL             = INFO    (on donna-pipecat)"
   echo "  + copy all API keys from production"
   echo ""
@@ -309,7 +309,7 @@ set_dev_var donna-api JWT_SECRET "$JWT_SECRET"
 set_dev_var donna-api DONNA_API_KEYS "$DONNA_API_KEYS"
 set_dev_var donna-api FIELD_ENCRYPTION_KEY "$FIELD_ENCRYPTION_KEY"
 set_dev_var donna-api CLERK_SECRET_KEY "$CLERK_SECRET_KEY"
-set_dev_var donna-api SCHEDULER_ENABLED "true"
+set_dev_var donna-api SCHEDULER_ENABLED "false"
 
 # ─────────────────────────────────────────────
 # Step 6: Set staging environment variables
@@ -361,7 +361,7 @@ set_staging_var donna-api JWT_SECRET "$JWT_SECRET"
 set_staging_var donna-api DONNA_API_KEYS "$DONNA_API_KEYS"
 set_staging_var donna-api FIELD_ENCRYPTION_KEY "$FIELD_ENCRYPTION_KEY"
 set_staging_var donna-api CLERK_SECRET_KEY "$CLERK_SECRET_KEY"
-set_staging_var donna-api SCHEDULER_ENABLED "true"
+set_staging_var donna-api SCHEDULER_ENABLED "false"
 
 # ─────────────────────────────────────────────
 # Step 7: Summary

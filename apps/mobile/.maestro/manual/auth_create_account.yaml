@@ -33,6 +33,8 @@ appId: com.donna.caregiver
 - extendedWaitUntil:
     visible: "Create Account"
     timeout: 10000
+- assertVisible:
+    id: "create-account-sign-in"
 
 - tapOn:
     id: "create-account-email"

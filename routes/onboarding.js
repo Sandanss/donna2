@@ -19,6 +19,16 @@ function normalizePhone(phone) {
   return String(phone || '').replace(/\D/g, '').slice(-10);
 }
 
+function phonesMatch(a, b) {
+  const first = normalizePhone(a);
+  const second = normalizePhone(b);
+  return first.length === 10 && first === second;
+}
+
+function blocksCaregiverPhoneReuse({ seniorPhone, caregiverPhone, relation }) {
+  return Boolean(caregiverPhone) && relation !== 'Myself' && phonesMatch(seniorPhone, caregiverPhone);
+}
+
 router.post('/api/onboarding/validate-phone', requireAuth, validateBody(onboardingPhoneAvailabilitySchema), writeLimiter, async (req, res) => {
   try {
     if (!req.auth.userId || req.auth.userId === 'cofounder') {
@@ -26,6 +36,17 @@ router.post('/api/onboarding/validate-phone', requireAuth, validateBody(onboardi
     }
 
     const phone = normalizePhone(req.body.phone);
+    if (blocksCaregiverPhoneReuse({
+      seniorPhone: phone,
+      caregiverPhone: req.body.caregiverPhone,
+      relation: req.body.relation,
+    })) {
+      return sendError(res, 400, {
+        error: 'Senior phone can match caregiver phone only when relation is Myself',
+        code: 'senior_phone_matches_caregiver',
+      });
+    }
+
     const [existing] = await db.select({ id: seniors.id })
       .from(seniors)
       .where(eq(seniors.phone, phone))
@@ -49,7 +70,7 @@ router.post('/api/onboarding', requireAuth, validateBody(onboardingSchema), idem
   let clerkUserId;
 
   try {
-    const { senior: seniorData, relation, interests, additionalInfo, reminders: reminderStrings, topicsToAvoid, callSchedule } = req.body;
+    const { senior: seniorData, relation, interests, additionalInfo, reminders: reminderStrings, topicsToAvoid, callSchedule, caregiverPhone } = req.body;
 
     // Get Clerk user ID from auth
     clerkUserId = req.auth.userId;
@@ -63,6 +84,17 @@ router.post('/api/onboarding', requireAuth, validateBody(onboardingSchema), idem
     const topicsToAvoidText = Array.isArray(topicsToAvoid)
       ? topicsToAvoid.filter(Boolean).join('; ')
       : topicsToAvoid || '';
+
+    if (blocksCaregiverPhoneReuse({
+      seniorPhone: seniorData.phone,
+      caregiverPhone,
+      relation,
+    })) {
+      return sendError(res, 400, {
+        error: 'Senior phone can match caregiver phone only when relation is Myself',
+        code: 'senior_phone_matches_caregiver',
+      });
+    }
 
     // Prepare senior data with structured info in JSON fields
     const seniorCreateData = {

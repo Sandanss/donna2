@@ -13,6 +13,7 @@ import {
   createReminderSchema,
   updateReminderSchema,
   onboardingSchema,
+  onboardingPhoneAvailabilitySchema,
   notificationPreferencesSchema,
   updateScheduleSchema,
   initiateCallSchema,
@@ -534,7 +535,7 @@ describe('onboardingSchema', () => {
 
   it('accepts all valid relationship types', () => {
     const relations = [
-      'Mother', 'Father', 'Daughter', 'Son', 'Spouse', 'Sibling',
+      'Myself', 'Mother', 'Father', 'Daughter', 'Son', 'Spouse', 'Sibling',
       'Grandchild', 'Uncle', 'Aunt', 'Cousin',
       'Friend', 'Professional Caregiver', 'Client', 'Other Loved One', 'Other',
     ];
@@ -553,6 +554,31 @@ describe('onboardingSchema', () => {
       relation: 'Boss',
     });
     expect(result.success).toBe(false);
+  });
+
+  it('accepts caregiverPhone for same-phone relationship validation', () => {
+    const result = onboardingSchema.safeParse({
+      ...validPayload,
+      relation: 'Myself',
+      caregiverPhone: '(555) 123-4567',
+      senior: { name: 'Dorothy Smith', phone: '(555) 123-4567' },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.data.caregiverPhone).toBe('+15551234567');
+    expect(result.data.senior.phone).toBe('+15551234567');
+  });
+
+  it('accepts relation and caregiverPhone in phone availability checks', () => {
+    const result = onboardingPhoneAvailabilitySchema.safeParse({
+      phone: '(555) 123-4567',
+      caregiverPhone: '+1 555 123 4567',
+      relation: 'Myself',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.data.phone).toBe('+15551234567');
+    expect(result.data.caregiverPhone).toBe('+15551234567');
   });
 
   it('accepts callSchedule with days and 24h time', () => {

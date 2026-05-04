@@ -26,6 +26,16 @@ function phoneDigitCount(value: string): number {
   return value.replace(/\D/g, "").length;
 }
 
+function normalizedPhoneDigits(value: string): string {
+  return value.replace(/\D/g, "").slice(-10);
+}
+
+function phonesMatch(a: string, b: string): boolean {
+  const first = normalizedPhoneDigits(a);
+  const second = normalizedPhoneDigits(b);
+  return first.length === 10 && first === second;
+}
+
 function isPhoneAlreadyRegisteredError(error: unknown): boolean {
   if (!(error instanceof ApiError)) return false;
 
@@ -40,11 +50,25 @@ function isPhoneAlreadyRegisteredError(error: unknown): boolean {
   );
 }
 
+function isCaregiverPhoneMatchError(error: unknown): boolean {
+  if (!(error instanceof ApiError)) return false;
+
+  const code = typeof error.body.code === "string" ? error.body.code : undefined;
+  const message =
+    typeof error.body.error === "string" ? error.body.error.toLowerCase() : "";
+
+  return (
+    code === "senior_phone_matches_caregiver" ||
+    message.includes("match caregiver phone")
+  );
+}
+
 export default function Step2Screen() {
   const router = useRouter();
   const { getToken } = useAuth();
   const { t } = useTranslation();
   const {
+    phone,
     lovedOneName,
     lovedOnePhone,
     relationship,
@@ -66,6 +90,13 @@ export default function Step2Screen() {
       next.lovedOnePhone = t("onboarding.step2.phoneInvalid");
     }
     if (!relationship) next.relationship = t("onboarding.step2.relationshipRequired");
+    if (
+      relationship &&
+      relationship !== "Myself" &&
+      phonesMatch(phone, lovedOnePhone)
+    ) {
+      next.lovedOnePhone = t("onboarding.step2.phoneMatchesCaregiver");
+    }
     if (state.trim() && state.trim().length !== 2)
       next.state = t("onboarding.step2.stateFormat");
     if (zipcode.trim() && zipcode.trim().length !== 5)
@@ -89,9 +120,20 @@ export default function Step2Screen() {
         return;
       }
 
-      await api.onboarding.validatePhone(lovedOnePhone, token);
+      await api.onboarding.validatePhone(lovedOnePhone, token, {
+        caregiverPhone: phone,
+        relationship,
+      });
       router.push("/(onboarding)/language");
     } catch (error: unknown) {
+      if (isCaregiverPhoneMatchError(error)) {
+        setErrors((current) => ({
+          ...current,
+          lovedOnePhone: t("onboarding.step2.phoneMatchesCaregiver"),
+        }));
+        return;
+      }
+
       if (isPhoneAlreadyRegisteredError(error)) {
         setErrors((current) => ({
           ...current,
@@ -280,6 +322,20 @@ export default function Step2Screen() {
               key={option}
               onPress={() => {
                 setField("relationship", option);
+                if (errors.lovedOnePhone) {
+                  setErrors((current) => {
+                    const next = { ...current };
+                    delete next.lovedOnePhone;
+                    return next;
+                  });
+                }
+                if (errors.relationship) {
+                  setErrors((current) => {
+                    const next = { ...current };
+                    delete next.relationship;
+                    return next;
+                  });
+                }
                 setShowRelationshipPicker(false);
               }}
               className="flex-row items-center justify-between py-3.5 px-2 rounded-xl active:bg-beige"

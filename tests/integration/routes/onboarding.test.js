@@ -108,4 +108,10 @@ describe('Onboarding Route — Security', () => {
     expect(routeSource).not.toContain('caregiverService.linkUserToSenior');
     expect(routeSource).not.toContain('Reused existing senior');
   });
+
+  it('blocks caregiver and senior phone reuse unless relation is Myself', () => {
+    expect(routeSource).toContain('blocksCaregiverPhoneReuse');
+    expect(routeSource).toContain("relation !== 'Myself'");
+    expect(routeSource).toContain('senior_phone_matches_caregiver');
+  });
 });
