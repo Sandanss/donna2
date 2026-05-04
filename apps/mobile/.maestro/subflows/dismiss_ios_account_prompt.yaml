@@ -4,6 +4,9 @@
 appId: com.donna.caregiver
 
 ---
+- tapOn:
+    text: "Not Now"
+    optional: true
 - runFlow:
     when:
       visible: "Apple Account|Apple Account Verification"
