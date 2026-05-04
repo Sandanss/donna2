@@ -87,6 +87,10 @@
     "signInFailed": "Sign In Failed",
     "oauthError": "OAuth Error",
     "signUpFailed": "Sign Up Failed",
+    "accountAlreadyExists": "This email already has a Donna account. Sign in instead.",
+    "accountAlreadyExistsTitle": "Account already exists",
+    "accountAlreadyExistsOAuth": "This email is already connected to a Donna account. Sign in with the method you used before.",
+    "signInInstead": "Sign in instead",
     "couldNotSignIn": "Could not sign in",
     "couldNotCreateAccount": "Could not create account",
     "couldNotVerify": "Could not verify that code",
@@ -134,6 +138,9 @@
       "zipCode": "Zip Code",
       "nameRequired": "Name is required",
       "phoneRequired": "Phone number is required",
+      "phoneInvalid": "Enter a 10-digit phone number",
+      "phoneAlreadyRegistered": "That phone number is already registered. Use a different number or contact support.",
+      "phoneCheckFailed": "We couldn't check this phone number. Please try again.",
       "relationshipRequired": "Please select a relationship",
       "stateFormat": "Use 2-letter code",
       "zipFormat": "Use 5-digit zip"
@@ -185,7 +192,9 @@
       "goToDashboard": "Go to Dashboard",
       "settingUp": "Setting up {{name}}'s profile...",
       "errorTitle": "Setup Error",
-      "errorMessage": "There was an issue setting up the profile. Please try again."
+      "errorMessage": "There was an issue setting up the profile. Please try again.",
+      "editProfile": "Edit profile info",
+      "useDifferentSignIn": "Use a different sign-in method"
     }
   },
   "dashboard": {

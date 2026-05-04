@@ -1,0 +1,19 @@
+# Dismiss the iOS Apple Account sheet that can appear on unsigned-in simulators.
+# This is simulator/system chrome, not Donna's Sign in with Apple flow.
+
+appId: com.donna.caregiver
+
+---
+- runFlow:
+    when:
+      visible: "Apple Account"
+    commands:
+      - tapOn:
+          text: "Return to Donna.*"
+          optional: true
+      - tapOn:
+          point: "10%,6%"
+          optional: true
+      - extendedWaitUntil:
+          notVisible: "Apple Account"
+          timeout: 5000

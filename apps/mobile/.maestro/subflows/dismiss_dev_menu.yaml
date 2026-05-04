@@ -1,0 +1,24 @@
+# Dismiss the Expo development-client menu when it appears after launchApp.
+# This sheet only appears in simulator/dev-client builds; TestFlight builds skip it.
+
+appId: com.donna.caregiver
+
+---
+- runFlow:
+    when:
+      visible: "This is the developer menu.*|Continue"
+    commands:
+      - tapOn: "Continue"
+      - extendedWaitUntil:
+          notVisible: "This is the developer menu.*"
+          timeout: 5000
+- runFlow:
+    when:
+      visible: "Reload|Go home|Toggle performance monitor"
+    commands:
+      # The dev-menu close button has no stable accessible label in XCTest.
+      - tapOn:
+          point: "90%,48%"
+      - extendedWaitUntil:
+          notVisible: "Reload|Go home|Toggle performance monitor"
+          timeout: 5000

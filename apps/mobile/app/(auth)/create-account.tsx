@@ -54,6 +54,36 @@ function isBreachedPasswordError(error: unknown): boolean {
     : false;
 }
 
+function isExistingAccountError(error: unknown): boolean {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    Array.isArray((error as { errors?: unknown[] }).errors)
+  ) {
+    return (error as {
+      errors: Array<{ code?: string; message?: string; longMessage?: string }>;
+    }).errors.some((entry) => {
+      const text = `${entry.code ?? ""} ${entry.message ?? ""} ${
+        entry.longMessage ?? ""
+      }`.toLowerCase();
+      return (
+        text.includes("identifier_exists") ||
+        text.includes("form_identifier_exists") ||
+        text.includes("already exists") ||
+        text.includes("already in use") ||
+        text.includes("already an account") ||
+        text.includes("already registered")
+      );
+    });
+  }
+
+  return error instanceof Error
+    ? /identifier_exists|form_identifier_exists|already exists|already in use|already an account|already registered/i.test(
+        error.message,
+      )
+    : false;
+}
+
 export default function CreateAccountScreen() {
   const { t } = useTranslation();
   const router = useRouter();
@@ -72,6 +102,9 @@ export default function CreateAccountScreen() {
   >(null);
   const [errors, setErrors] = useState<{ email?: string; password?: string }>(
     {}
+  );
+  const [existingAccountEmail, setExistingAccountEmail] = useState<string | null>(
+    null,
   );
 
   async function navigateAfterAuth() {
@@ -155,6 +188,15 @@ export default function CreateAccountScreen() {
         t("auth.couldNotCreateAccount"),
       );
     } catch (err: unknown) {
+      if (isExistingAccountError(err)) {
+        setExistingAccountEmail(email.trim());
+        setErrors((current) => ({
+          ...current,
+          email: t("auth.accountAlreadyExists"),
+        }));
+        return;
+      }
+
       const clerkFieldErrors = getClerkFieldErrors(err);
       const nextFieldErrors = {
         email: clerkFieldErrors.emailAddress,
@@ -222,6 +264,21 @@ export default function CreateAccountScreen() {
         }
       }
     } catch (err: unknown) {
+      if (isExistingAccountError(err)) {
+        Alert.alert(
+          t("auth.accountAlreadyExistsTitle"),
+          t("auth.accountAlreadyExistsOAuth"),
+          [
+            { text: t("common.cancel"), style: "cancel" },
+            {
+              text: t("auth.signIn"),
+              onPress: () => router.replace("/(auth)/sign-in"),
+            },
+          ],
+        );
+        return;
+      }
+
       const message = getClerkErrorMessage(err, "");
       if (message) {
         Alert.alert(
@@ -270,6 +327,7 @@ export default function CreateAccountScreen() {
               value={email}
               onChangeText={(value) => {
                 setEmail(value);
+                if (existingAccountEmail) setExistingAccountEmail(null);
                 if (errors.email) {
                   setErrors((current) => ({ ...current, email: undefined }));
                 }
@@ -282,6 +340,15 @@ export default function CreateAccountScreen() {
               autoComplete="email"
               testID="create-account-email"
             />
+            {existingAccountEmail && (
+              <Button
+                title={t("auth.signInInstead")}
+                onPress={() => router.replace("/(auth)/sign-in")}
+                variant="secondary"
+                className="mt-3"
+                testID="create-account-existing-email-sign-in"
+              />
+            )}
           </View>
 
           <View className="mb-6">

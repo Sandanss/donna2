@@ -11,6 +11,7 @@ appId: com.donna.caregiver
 - stopApp
 - launchApp:
     clearKeychain: true
+- runFlow: ../subflows/dismiss_dev_menu.yaml
 
 - extendedWaitUntil:
     visible: "Get Started"
@@ -22,6 +23,7 @@ appId: com.donna.caregiver
 - tapOn:
     id: "landing-get-started"
     optional: true
+- runFlow: ../subflows/dismiss_ios_account_prompt.yaml
 
 - extendedWaitUntil:
     visible: "Create Account"

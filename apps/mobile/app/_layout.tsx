@@ -39,7 +39,7 @@ import { getClerkPublishableKey } from "@/src/lib/runtimeConfig";
 SplashScreen.preventAutoHideAsync();
 
 function AuthGuard() {
-  const { isLoaded, isSignedIn, userId } = useAuth();
+  const { isLoaded, isSignedIn, signOut, userId } = useAuth();
   const { data: profile, isLoading: profileLoading, isError: profileError, error: profileErrorObj } = useProfile();
   const segments = useSegments();
   const pathname = usePathname();
@@ -182,6 +182,16 @@ function AuthGuard() {
               void queryClient.invalidateQueries({
                 queryKey: getProfileQueryKey(userId),
               });
+            }}
+          />
+          <Button
+            title="Use a different sign-in method"
+            variant="secondary"
+            className="mt-3"
+            onPress={async () => {
+              queryClient.removeQueries({ queryKey: ["profile"] });
+              await signOut();
+              router.replace("/(auth)/sign-in" as any);
             }}
           />
         </View>

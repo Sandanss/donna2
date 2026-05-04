@@ -105,6 +105,18 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
 - **Consumer App** - React + Vite + Clerk (`apps/consumer/`) on Vercel
 - **Observability Dashboard** - React (`apps/observability/`)
 
+### Mobile Simulator, EAS, and Maestro
+- **Codex instruction file** - Codex uses root `AGENTS.md` as its equivalent of Claude's `claude.md`/`CLAUDE.md`.
+- **Active mobile app** - `apps/mobile` is the Expo/React Native app. It talks to the repo-root Node API and Clerk; it does not call Pipecat directly.
+- **Required public mobile config** - Every local or EAS build must resolve `EXPO_PUBLIC_API_URL` and `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY` through `apps/mobile/.env` or the selected EAS environment. Print variable names only, not values.
+- **Clean worktree simulator rule** - If testing latest `main` from a clean temporary worktree, copy only `apps/mobile/.env` from the primary checkout before building. Without it, Clerk/API config can be missing from the native bundle and sign-in/profile loading will fail.
+- **EAS environment rule** - `development`, `preview`, and `production` EAS environments must all contain `EXPO_PUBLIC_API_URL` and `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY`. `development`/`preview` builds are common for simulator/internal testing, so do not assume production env coverage is enough.
+- **Dev-client requirement** - EAS simulator development builds require `expo-dev-client` in `apps/mobile/package.json`. After adding it or changing dependencies, regenerate the lockfile with npm 10: `cd apps/mobile && npx --yes npm@10.9.3 install --package-lock-only --include=dev`.
+- **Lockfile preflight** - EAS runs `npm ci --include=dev`. Always run `cd apps/mobile && npx --yes npm@10.9.3 ci --include=dev` before starting an EAS simulator build. If this fails, fix `package-lock.json`; otherwise EAS will fail in `INSTALL_DEPENDENCIES`.
+- **Fresh simulator build path** - Local `expo run:ios` can fail when Apple Sign-In entitlements require Apple Development signing. When local signing is unavailable, use `cd apps/mobile && npx eas build:dev --platform ios --profile development`, then install with `npx eas build:run --platform ios --id <build-id>`.
+- **Apple sign-in simulator caveat** - A stale simulator dev client can load fresh JS but still lack native entitlements. For Apple auth issues, verify the installed app includes `com.apple.developer.applesignin`, or test with a fresh EAS simulator build/TestFlight build.
+- **Maestro input rule** - Maestro must exercise visible human paths. For iOS `phone-pad` and `number-pad`, focus the field and tap visible keypad digits using `.maestro/subflows/tap_digits.yaml`; do not use `inputText` for numeric keypad fields. Tests must assert real entered values, not placeholders.
+
 ---
 
 ## Architecture

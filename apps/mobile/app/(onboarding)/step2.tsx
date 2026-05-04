@@ -10,18 +10,39 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
+import { useAuth } from "@clerk/clerk-expo";
 import { ArrowLeft, ChevronDown, Check } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
 import { Button, Input, KeyboardAwareFooter, Modal, ProgressBar } from "@/src/components/ui";
 import { COLORS, RELATIONSHIP_OPTIONS } from "@/src/constants/theme";
+import { ApiError, api } from "@/src/lib/api";
 import { useOnboardingStore } from "@/src/stores/onboarding";
 
 function sanitizePhoneInput(value: string): string {
   return value.replace(/[^\d+\-\s()]/g, "").slice(0, 20);
 }
 
+function phoneDigitCount(value: string): number {
+  return value.replace(/\D/g, "").length;
+}
+
+function isPhoneAlreadyRegisteredError(error: unknown): boolean {
+  if (!(error instanceof ApiError)) return false;
+
+  const code = typeof error.body.code === "string" ? error.body.code : undefined;
+  const message =
+    typeof error.body.error === "string" ? error.body.error.toLowerCase() : "";
+
+  return (
+    error.status === 409 &&
+    (code === "senior_phone_taken" ||
+      message.includes("phone number is already registered"))
+  );
+}
+
 export default function Step2Screen() {
   const router = useRouter();
+  const { getToken } = useAuth();
   const { t } = useTranslation();
   const {
     lovedOneName,
@@ -34,12 +55,16 @@ export default function Step2Screen() {
   } = useOnboardingStore();
 
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [checkingPhone, setCheckingPhone] = useState(false);
   const [showRelationshipPicker, setShowRelationshipPicker] = useState(false);
 
   function validate(): boolean {
     const next: Record<string, string> = {};
     if (!lovedOneName.trim()) next.lovedOneName = t("onboarding.step2.nameRequired");
     if (!lovedOnePhone.trim()) next.lovedOnePhone = t("onboarding.step2.phoneRequired");
+    else if (phoneDigitCount(lovedOnePhone) < 10) {
+      next.lovedOnePhone = t("onboarding.step2.phoneInvalid");
+    }
     if (!relationship) next.relationship = t("onboarding.step2.relationshipRequired");
     if (state.trim() && state.trim().length !== 2)
       next.state = t("onboarding.step2.stateFormat");
@@ -49,10 +74,38 @@ export default function Step2Screen() {
     return Object.keys(next).length === 0;
   }
 
-  function handleNext() {
+  async function handleNext() {
     Keyboard.dismiss();
-    if (validate()) {
+    if (!validate()) return;
+
+    setCheckingPhone(true);
+    try {
+      const token = await getToken();
+      if (!token) {
+        setErrors((current) => ({
+          ...current,
+          lovedOnePhone: t("onboarding.step2.phoneCheckFailed"),
+        }));
+        return;
+      }
+
+      await api.onboarding.validatePhone(lovedOnePhone, token);
       router.push("/(onboarding)/language");
+    } catch (error: unknown) {
+      if (isPhoneAlreadyRegisteredError(error)) {
+        setErrors((current) => ({
+          ...current,
+          lovedOnePhone: t("onboarding.step2.phoneAlreadyRegistered"),
+        }));
+        return;
+      }
+
+      setErrors((current) => ({
+        ...current,
+        lovedOnePhone: t("onboarding.step2.phoneCheckFailed"),
+      }));
+    } finally {
+      setCheckingPhone(false);
     }
   }
 
@@ -110,9 +163,16 @@ export default function Step2Screen() {
               label={t("onboarding.step2.phone")}
               placeholder="(555) 987-6543"
               value={lovedOnePhone}
-              onChangeText={(v) =>
-                setField("lovedOnePhone", sanitizePhoneInput(v))
-              }
+              onChangeText={(v) => {
+                setField("lovedOnePhone", sanitizePhoneInput(v));
+                if (errors.lovedOnePhone) {
+                  setErrors((current) => {
+                    const next = { ...current };
+                    delete next.lovedOnePhone;
+                    return next;
+                  });
+                }
+              }}
               error={errors.lovedOnePhone}
               keyboardType="phone-pad"
               autoComplete="off"
@@ -199,7 +259,12 @@ export default function Step2Screen() {
 
         {/* Fixed bottom button */}
         <KeyboardAwareFooter>
-          <Button title={t("common.next")} onPress={handleNext} />
+          <Button
+            title={t("common.next")}
+            onPress={handleNext}
+            loading={checkingPhone}
+            disabled={checkingPhone}
+          />
         </KeyboardAwareFooter>
       </KeyboardAvoidingView>
 

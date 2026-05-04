@@ -87,6 +87,10 @@
     "signInFailed": "Error al iniciar sesión",
     "oauthError": "Error de OAuth",
     "signUpFailed": "Error al registrarse",
+    "accountAlreadyExists": "Este correo ya tiene una cuenta de Donna. Inicia sesión en su lugar.",
+    "accountAlreadyExistsTitle": "La cuenta ya existe",
+    "accountAlreadyExistsOAuth": "Este correo ya está conectado a una cuenta de Donna. Inicia sesión con el método que usaste antes.",
+    "signInInstead": "Iniciar sesión en su lugar",
     "couldNotSignIn": "No se pudo iniciar sesión",
     "couldNotCreateAccount": "No se pudo crear la cuenta",
     "couldNotVerify": "No se pudo verificar el código",
@@ -134,6 +138,9 @@
       "zipCode": "Código Postal",
       "nameRequired": "El nombre es obligatorio",
       "phoneRequired": "El número de teléfono es obligatorio",
+      "phoneInvalid": "Ingresa un número de teléfono de 10 dígitos",
+      "phoneAlreadyRegistered": "Ese número de teléfono ya está registrado. Usa otro número o contacta a soporte.",
+      "phoneCheckFailed": "No pudimos verificar este número de teléfono. Inténtalo de nuevo.",
       "relationshipRequired": "Por favor selecciona una relacion",
       "stateFormat": "Usa código de 2 letras",
       "zipFormat": "Usa código de 5 digitos"
@@ -185,7 +192,9 @@
       "goToDashboard": "Ir al Panel",
       "settingUp": "Configurando el perfil de {{name}}...",
       "errorTitle": "Error de Configuración",
-      "errorMessage": "Hubo un problema al configurar el perfil. Por favor intenta de nuevo."
+      "errorMessage": "Hubo un problema al configurar el perfil. Por favor intenta de nuevo.",
+      "editProfile": "Editar información del perfil",
+      "useDifferentSignIn": "Usar otro método de inicio de sesión"
     }
   },
   "dashboard": {

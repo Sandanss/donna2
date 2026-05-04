@@ -12,12 +12,14 @@ env:
 - stopApp
 - launchApp:
     clearKeychain: true
+- runFlow: ../subflows/dismiss_dev_menu.yaml
 
 - extendedWaitUntil:
     visible: "Sign In"
     timeout: 15000
 - tapOn: "Sign In"
 - tapOn: "Sign In"
+- runFlow: ../subflows/dismiss_ios_account_prompt.yaml
 
 - extendedWaitUntil:
     visible: "Welcome Back"
