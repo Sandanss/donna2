@@ -30,7 +30,7 @@ Do NOT confuse the Node.js `services/` with `pipecat/services/` — they are sep
 
 ## Current Status: v5.3
 
-The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (repo root) serves admin/consumer APIs and the reminder scheduler. See "Architecture Decision: Two Backends" below.
+The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (repo root) serves admin, website, and mobile APIs plus the reminder scheduler. See "Architecture Decision: Two Backends" below.
 
 ### Working Features (Pipecat)
 - **2-Layer Observer Architecture + Post-Call**
@@ -100,9 +100,10 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
 - **PII-Safe Logging** - `maskName()` and `maskPhone()` helpers across both backends
 - **Compliance Documentation** - Full HIPAA docs in `docs/compliance/`: overview, BAA tracker (active vendors plus inactive legacy providers), breach notification runbook, data retention policy, vendor security evaluations
 
-### Frontend Apps (unchanged, on Vercel/separate)
+### Frontend Apps
 - **Admin Dashboard (v2)** - React + Vite + Tailwind (`apps/admin-v2/`) on Vercel
-- **Consumer App** - React + Vite + Clerk (`apps/consumer/`) on Vercel
+- **Website/caregiver web** - React + Vite + Clerk (`apps/website/`) on Vercel at `calldonna.co`
+- **Mobile App** - Expo + React Native + Clerk (`apps/mobile/`), EAS project `@dmdzco/donna-caregiver`, bundle ID `com.donna.caregiver`
 - **Observability Dashboard** - React (`apps/observability/`)
 
 ### Mobile Simulator, EAS, and Maestro
@@ -115,6 +116,8 @@ The voice pipeline runs on **Python Pipecat** (`pipecat/` directory). Node.js (r
 - **Lockfile preflight** - EAS runs `npm ci --include=dev`. Always run `cd apps/mobile && npx --yes npm@10.9.3 ci --include=dev` before starting an EAS simulator build. If this fails, fix `package-lock.json`; otherwise EAS will fail in `INSTALL_DEPENDENCIES`.
 - **Fresh simulator build path** - Local `expo run:ios` can fail when Apple Sign-In entitlements require Apple Development signing. When local signing is unavailable, use `cd apps/mobile && npx eas build:dev --platform ios --profile development`, then install with `npx eas build:run --platform ios --id <build-id>`.
 - **Apple sign-in simulator caveat** - A stale simulator dev client can load fresh JS but still lack native entitlements. For Apple auth issues, verify the installed app includes `com.apple.developer.applesignin`, or test with a fresh EAS simulator build/TestFlight build.
+- **Mobile onboarding invariant** - Fresh setup starts from the visible Create Account flow. A Clerk user with no Donna profile is not a valid sign-in destination; `AuthGuard` cleans it up through `DELETE /api/caregivers/me/incomplete-account`, clears the encrypted onboarding draft, signs out, and returns to landing.
+- **Onboarding Maestro coverage** - `10_onboarding_full.yaml` covers successful setup, `12_incomplete_account_cleanup.yaml` covers abandoned no-profile accounts after relaunch, and `13_leave_setup_cleanup.yaml` covers explicit leave-setup cleanup.
 - **Maestro input rule** - Maestro must exercise visible human paths. For iOS `phone-pad` and `number-pad`, focus the field and tap visible keypad digits using `.maestro/subflows/tap_digits.yaml`; do not use `inputText` for numeric keypad fields. Tests must assert real entered values, not placeholders.
 
 ---
@@ -268,16 +271,17 @@ pipecat/
 
 ```
 /
-├── index.js                    ← Express server (port 3001, admin/consumer APIs)
+├── index.js                    ← Express server (port 3001, admin/website/mobile APIs)
 ├── lib/
 │   ├── growthbook.js           ← GrowthBook feature flag SDK helper (Node.js)
 │   └── encryption.js           ← AES-256-GCM field encryption for PHI (mirrors pipecat/lib/encryption.py)
 ├── services/                   ← 12 service files (dual implementation with pipecat/services/)
 ├── routes/                     ← 16 route modules (all /api/* endpoints) + helpers.js (routeError, canAccessSenior)
 ├── middleware/                  ← 7 middleware files (auth w/ dual-key JWT + revocation, rate-limit, security)
-└── apps/                       ← Frontend apps (still active)
+└── apps/                       ← Frontend apps (active)
     ├── admin-v2/               ← Admin dashboard (Vercel)
-    ├── consumer/               ← Consumer app (Vercel)
+    ├── website/                ← Public website + caregiver web app (Vercel)
+    ├── mobile/                 ← Expo caregiver app (EAS/TestFlight/App Store)
     └── observability/          ← Observability dashboard
 ```
 
@@ -385,7 +389,7 @@ The Railway project has four services per environment:
 | Service | Railway Name | Port | Responsibility |
 |---|---|---|---|
 | Pipecat (Python) | `donna-pipecat` | 7860 | Voice pipeline: STT → Observer → Director → Claude → TTS |
-| Node.js API | `donna-api` | 3001 | Admin/consumer APIs, reminder scheduler, call initiation |
+| Node.js API | `donna-api` | 3001 | Admin, website, and mobile APIs; reminder scheduler; call initiation |
 **GrowthBook (feature flags):** Hosted on GrowthBook Cloud (app.growthbook.io), not self-hosted. Admin UI at app.growthbook.io, SDK connects to cdn.growthbook.io. No Railway services needed.
 
 **Railway CLI in the repo root is linked to `donna-api` (Node.js) by default.** This means bare `railway logs` shows API request logs, NOT voice/call pipeline logs.
@@ -416,7 +420,7 @@ Use `--environment dev` or `--environment staging` flags for other environments.
 
 ### Frontend E2E Tests (Playwright)
 
-Browser tests for admin, consumer, and observability apps. Tests mock API responses by default — no backend needed.
+Browser tests for admin, website/caregiver web, and observability apps. Tests mock API responses by default — no backend needed.
 
 ```bash
 # Run all E2E tests (starts dev servers automatically)
@@ -424,10 +428,11 @@ npm run test:e2e
 
 # Run specific app tests
 npm run test:e2e:admin            # Admin dashboard (17 tests)
-npm run test:e2e:consumer         # Consumer public pages (4 tests)
+npm run test:e2e:consumer         # Website public pages (legacy project/script name)
+npm run test:e2e:website          # Alias for the same website tests
 npm run test:e2e:observability    # Observability dashboard (4 tests)
 
-# Run authenticated consumer tests (requires .env.test with Clerk credentials)
+# Run authenticated website/caregiver tests (requires .env.test with Clerk credentials)
 npx playwright test --project=clerk-setup --project=consumer-authenticated
 
 # Debug with UI mode
@@ -443,8 +448,8 @@ npx playwright install chromium
 |---------|-------|------|
 | `clerk-setup` | Global Clerk token init | — |
 | `admin` | Login, navigation, seniors, calls, reminders | JWT via localStorage |
-| `consumer` | Landing page, protected route redirects | None |
-| `consumer-authenticated` | Dashboard access, onboarding, sign out | Clerk `@clerk/testing` |
+| `consumer` | Website landing page, protected route redirects; legacy project name | None |
+| `consumer-authenticated` | Website dashboard access, onboarding, sign out; legacy project name | Clerk `@clerk/testing` |
 | `observability` | Call history, navigation, view switching | JWT via localStorage |
 
 **Key files:**

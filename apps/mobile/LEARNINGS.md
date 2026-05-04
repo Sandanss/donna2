@@ -63,13 +63,13 @@
 
 **Date:** 2026-04-10
 
-**Problem:** The iPhone simulator opened the app, but Metro failed to bundle with `Unable to resolve "expo-updates" from "app/(tabs)/settings.tsx"`. The native rebuild also exposed that the installed dev client was `com.donna.mobile`, while `app.json` claimed `com.donna.caregiver`.
+**Problem:** The iPhone simulator opened the app, but Metro failed to bundle with `Unable to resolve "expo-updates" from "app/(tabs)/settings.tsx"`. The native rebuild also exposed that an older installed dev client could have a bundle identifier that did not match `app.json`.
 
 **Root cause:**
 1. `app/(tabs)/settings.tsx` imported and called `Updates.reloadAsync()`, but `expo-updates` was never added to `apps/mobile/package.json`.
 2. `npx expo install expo-updates` was blocked by existing npm peer dependency conflicts in the project, so the missing package was never added automatically.
 3. `app.json` and the asset verifier expect `./assets/images/adaptive-icon.png`, but the repo had the same asset tracked as `assets/images/adaptive_icon.png`.
-4. Because `ios/` already exists, Expo does not sync `app.json` bundle settings into the native project. The actual iOS bundle identifier lives in `ios/Donna.xcodeproj/project.pbxproj`, which is currently `com.donna.mobile`.
+4. Because `ios/` already exists, Expo does not sync `app.json` bundle settings into the native project. The actual iOS bundle identifier lives in `ios/Donna.xcodeproj/project.pbxproj`; it must stay aligned with `com.donna.caregiver`.
 
 **Fix:**
 1. Installed the Expo SDK 54 pinned package directly with `npm install expo-updates@~29.0.16 --legacy-peer-deps`.
@@ -83,6 +83,55 @@
 3. In prebuilt Expo projects with `ios/` or `android/` checked in, treat the native project as the source of truth for bundle identifiers and other synced config.
 4. Keep asset filenames in `app.json` exact; Expo config validation will fail on even small naming mismatches.
 
-**Remaining warnings:**
-1. `expo-doctor` still warns that `assets/images/icon.png` and `assets/images/adaptive-icon.png` are not square.
-2. `expo-doctor` also warns that native config fields in `app.json` are not auto-synced because this is not a pure CNG project.
+**Remaining warning:**
+1. `expo-doctor` warns that native config fields in `app.json` are not auto-synced because this is not a pure CNG project. Keep `ios/Donna/Info.plist`, `ios/Donna/Donna.entitlements`, and the Xcode project in sync manually.
+
+## Splash Screen Must Be Native And Kept Until Bootstrap Is Ready
+
+**Date:** 2026-05-04
+
+**Problem:** The app could show a blank launch gap even though a splash draft existed in the repo. The checked-in iOS launch storyboard referenced splash constraints but had no splash image view, and `_layout.tsx` hid the native splash as soon as fonts loaded, before Clerk and profile routing finished.
+
+**Fix:**
+1. Inserted the draft from `docs/plans/screenshots/splash-screen-draft.jpg` as `assets/images/splash.png`.
+2. Pointed Expo splash config at `splash.png` with `resizeMode: "cover"` and sage background `#4A5D4F`.
+3. Added the checked-in iOS `SplashScreenLegacy.imageset` and full-screen `SplashScreen.storyboard` image view so EAS/TestFlight builds show the splash without relying on prebuild.
+4. Moved `SplashScreen.hideAsync()` behind the initial fonts, Clerk auth, incomplete-account cleanup, and profile-route readiness gate.
+
+**Rule:** In this prebuilt Expo app, changing `app.json` splash fields is not enough. Keep `app.json`, `assets/images/splash.png`, `ios/Donna/SplashScreen.storyboard`, and `ios/Donna/Images.xcassets/SplashScreenLegacy.imageset` in sync.
+
+## No-Profile Clerk Sessions Must Not Enter Onboarding
+
+**Date:** 2026-05-04
+
+**Problem:** Test users and abandoned sign-ups could leave a Clerk session in the keychain without a linked Donna profile. On restart or sign-in, the app used to route that session back into onboarding, which trapped users who needed to start over or use a different sign-in.
+
+**Root cause:** The auth guard only knew "signed in" plus "no seniors", not whether that no-profile session came from the current Create Account flow. After an app restart, that missing context made an abandoned account look like a legitimate onboarding session.
+
+**Fix:**
+1. Added `src/lib/pendingOnboardingSession.ts`, an in-memory marker set only by the Create Account and native OAuth account-creation paths before Donna profile creation.
+2. `AuthGuard` now treats signed-in/no-profile sessions without that marker as incomplete accounts. It calls `DELETE /api/caregivers/me/incomplete-account`, clears the encrypted onboarding draft, removes profile queries, signs out locally, and returns to landing.
+3. Step 1 Back and Success "Use a different sign-in" use the same cleanup path and do not block the user if the Clerk account was already deleted server-side.
+4. Sign-in no longer treats a no-profile Clerk user as an onboarding entry point. Fresh onboarding must start from Create Account.
+
+**Rules to follow:**
+1. Do not use sign-in with a no-profile user to test fresh onboarding.
+2. Maestro fresh onboarding should call `.maestro/manual/auth_create_account.yaml` with a unique `+clerk_test` email.
+3. Keep incomplete-account cleanup idempotent from the app's point of view. Server-side deletion can fail or already be done; the app should still clear local state and return to landing.
+4. Never persist the pending-onboarding marker. Its runtime-only nature is what distinguishes the current Create Account flow from an abandoned keychain session after restart.
+
+**Coverage:**
+- `src/lib/pendingOnboardingSession.test.ts`
+- `.maestro/flows/10_onboarding_full.yaml`
+- `.maestro/flows/12_incomplete_account_cleanup.yaml`
+- `.maestro/flows/13_leave_setup_cleanup.yaml`
+
+## Apple Account Prompt Can Break Maestro Unless Dismissed Explicitly
+
+**Date:** 2026-05-04
+
+**Problem:** iOS simulators can show an "Apple Account" or "Apple Account Verification" sheet during auth/onboarding tests. If Maestro ignores it, subsequent taps target the wrong UI and the flow fails for the wrong reason.
+
+**Fix:** `.maestro/subflows/dismiss_ios_account_prompt.yaml` now handles both prompt titles, taps "Not Now" when present, and falls back to returning to Donna or tapping the top-left escape area.
+
+**Rule:** Include the prompt-dismissal subflow immediately after app launch in mobile auth/onboarding flows that can run on a fresh simulator.

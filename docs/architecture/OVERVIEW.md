@@ -28,8 +28,9 @@ This document describes the Donna v5.3 system architecture with the **Pipecat vo
 ├──────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
 │   ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐            │
-│   │  Admin Dashboard │  │  Consumer App   │  │  Observability  │            │
-│   │  apps/admin-v2/  │  │ apps/consumer/  │  │   Dashboard     │            │
+│   │  Admin Dashboard │  │ Website/Mobile  │  │  Observability  │            │
+│   │  apps/admin-v2/  │  │ apps/website +  │  │   Dashboard     │            │
+│   │                  │  │ apps/mobile     │  │                 │            │
 │   └────────┬─────────┘  └────────┬────────┘  └────────┬────────┘            │
 │            │                     │                     │                     │
 │            ▼                     ▼                     ▼                     │
@@ -251,7 +252,8 @@ Quick Observer pattern categories:
 | App | Tech | URL |
 |-----|------|-----|
 | **Admin Dashboard v2** | React 18 + Vite + Tailwind + Radix UI | [admin-v2-liart.vercel.app](https://admin-v2-liart.vercel.app) |
-| **Consumer App** | React 18 + Vite + Clerk + Framer Motion | [consumer-ruddy.vercel.app](https://consumer-ruddy.vercel.app) |
+| **Website / caregiver web** | React 18 + Vite + Clerk + Framer Motion | [calldonna.co](https://calldonna.co) |
+| **Mobile app** | Expo SDK 54 + React Native + Clerk | TestFlight/App Store build, bundle ID `com.donna.caregiver` |
 | **Observability** | React 18 + Vite (vanilla CSS) | [observability-five.vercel.app](https://observability-five.vercel.app) |
 
 ---
@@ -353,7 +355,8 @@ Three environments: **dev** (experiments), **staging** (CI), **production** (cus
 | Pipecat voice pipeline | Railway | 7860 | donna-pipecat-production.up.railway.app |
 | Node.js API | Railway | 3001 | donna-api-production-2450.up.railway.app |
 | Admin Dashboard | Vercel | — | admin-v2-liart.vercel.app |
-| Consumer App | Vercel | — | consumer-ruddy.vercel.app |
+| Website / caregiver web | Vercel | — | calldonna.co |
+| Mobile app | EAS/TestFlight/App Store | — | com.donna.caregiver |
 | Observability | Vercel | — | observability-five.vercel.app |
 | Database | Neon | — | Managed PostgreSQL + pgvector (3 branches) |
 
@@ -361,4 +364,4 @@ Three environments: **dev** (experiments), **staging** (CI), **production** (cus
 
 ---
 
-*Last updated: April 2026 — v5.3 with Groq Director fast path, memory prefetch, GrowthBook feature flags, and updated active-tool surface*
+*Last updated: May 2026 — v5.3 with Groq Director fast path, memory prefetch, GrowthBook feature flags, updated active-tool surface, and mobile onboarding cleanup*

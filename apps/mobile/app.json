@@ -9,9 +9,9 @@
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/images/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#FDFCF8"
+      "image": "./assets/images/splash.png",
+      "resizeMode": "cover",
+      "backgroundColor": "#4A5D4F"
     },
     "ios": {
       "supportsTablet": false,
@@ -46,7 +46,25 @@
         }
       ],
       "expo-font",
-      "expo-splash-screen",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/splash.png",
+          "resizeMode": "cover",
+          "backgroundColor": "#4A5D4F",
+          "ios": {
+            "image": "./assets/images/splash.png",
+            "resizeMode": "cover",
+            "backgroundColor": "#4A5D4F",
+            "enableFullScreenImage_legacy": true
+          },
+          "android": {
+            "image": "./assets/images/splash.png",
+            "resizeMode": "cover",
+            "backgroundColor": "#4A5D4F"
+          }
+        }
+      ],
       "expo-system-ui",
       "expo-apple-authentication",
       "@sentry/react-native"

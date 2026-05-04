@@ -28,7 +28,7 @@ Three authentication methods, checked in priority order:
 |------|--------|----------|--------|
 | 1. Cofounder API Key | Static key (constant-time comparison) | Full access bypass | `X-Api-Key` |
 | 2. Admin JWT | HS256 Bearer token | Admin dashboard | `Authorization: Bearer <token>` |
-| 3. Clerk Session | RS256 session token | Consumer app users | `X-Clerk-Token` or `__session` cookie |
+| 3. Clerk Session | RS256 session token | Caregiver website/mobile users | `X-Clerk-Token` or `__session` cookie |
 
 ```python
 # FastAPI dependency injection
@@ -54,6 +54,13 @@ async def list_seniors(auth: AuthContext = Depends(require_auth)):
 - Constant-time comparison via `crypto.timingSafeEqual()`
 - Route prefixes that own JWT/Clerk auth are exempt
 - Missing service keys fail closed in production
+
+### Node Clerk Caregiver Auth (`middleware/auth.js`, `routes/caregivers.js`)
+- Caregiver website and mobile clients authenticate to the repo-root Node API with Clerk session tokens.
+- `/api/caregivers/me` returns linked senior profiles only after Clerk auth and caregiver-link lookup.
+- A signed-in Clerk user with no Donna profile is not a valid mobile destination. The mobile app calls `DELETE /api/caregivers/me/incomplete-account` for abandoned setup or no-profile sign-in recovery.
+- The incomplete-account cleanup route refuses to delete if any caregiver profile exists for the Clerk user, audit-logs the pending account deletion, deletes the Clerk user when possible, and returns a recoverable `202` if Clerk deletion fails after local cleanup can proceed.
+- Full account deletion remains separate at `DELETE /api/caregivers/me/account`, with idempotency, senior unlink/delete behavior, and audit logging.
 
 ---
 
@@ -216,6 +223,16 @@ Global exception handlers prevent internal details from leaking:
 - API keys stored as env vars, never committed to code
 - Sentry configured with `send_default_pii=False`
 
+### Mobile Public Build Environment
+
+`apps/mobile/app.config.js` resolves public mobile runtime config from the selected EAS environment into Expo `extra`.
+
+- `EXPO_PUBLIC_API_URL` and `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY` are required for local Expo and every EAS build profile.
+- `apps/mobile/eas.json` maps `development`, `preview`, and `production` build profiles to matching EAS environments.
+- Publishable Clerk keys are not secrets, but logs and docs should still print only variable names/presence, never full values.
+- The mobile bundle does not fall back to production when either value is missing; the app throws a clear runtime config error instead.
+- Native Apple auth requires the checked-in iOS entitlement plus Clerk/Apple Developer configuration for bundle ID `com.donna.caregiver`. A stale dev-client binary can load fresh JS while missing the entitlement, so rebuild before debugging Apple auth failures.
+
 ### Deployment Checklist
 
 Before deploying any public Railway environment, including staging and production:
@@ -226,6 +243,7 @@ Before deploying any public Railway environment, including staging and productio
 - Verify `FIELD_ENCRYPTION_KEY` decodes to 32 bytes.
 - Verify Telnyx credentials exist on Pipecat and the Node service can reach Pipecat's `/telnyx/outbound` route.
 - Verify `CLERK_SECRET_KEY` exists on Node.
+- Verify the EAS `development`, `preview`, and `production` environments include `EXPO_PUBLIC_API_URL` and `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY` before building mobile binaries.
 - Set `REDIS_URL` before running more than one Pipecat instance.
 - Set Pipecat `LOG_LEVEL=INFO` for Railway dev/staging/prod before smoke testing or promotion.
 - Verify Railway logs do not contain prompt context, transcripts, medical notes, caregiver notes, raw WebSocket parameters, or `ws_token` values.

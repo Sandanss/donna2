@@ -57,6 +57,7 @@ AI-powered companion that provides elderly individuals with friendly phone conve
 ### Frontend Apps
 - **Admin Dashboard v2** — React + Vite + Tailwind ([admin-v2-liart.vercel.app](https://admin-v2-liart.vercel.app))
 - **Public Website** — Marketing, signup, legal pages, and caregiver dashboard ([calldonna.co](https://calldonna.co))
+- **Mobile App** — Expo + React Native caregiver app (`apps/mobile`, bundle ID `com.donna.caregiver`)
 - **Observability Dashboard** — Live call monitoring ([observability-five.vercel.app](https://observability-five.vercel.app))
 
 ### Security
@@ -78,7 +79,7 @@ cd pipecat && uv sync && cd ..
 cp apps/mobile/.env.example apps/mobile/.env
 ```
 
-Set `EXPO_PUBLIC_API_URL` in `apps/mobile/.env` before running the mobile app. The mobile client no longer falls back to production when that variable is missing.
+Set `EXPO_PUBLIC_API_URL` and `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY` in `apps/mobile/.env` before running the mobile app. The mobile client no longer falls back to production when either value is missing.
 
 ### Railway-First Development
 
@@ -122,7 +123,19 @@ See [`docs/guides/FRONTEND_TESTING.md`](docs/guides/FRONTEND_TESTING.md) for ful
 - Admin dashboard: `cd apps/admin-v2 && npm run dev` → http://localhost:5175
 - Public website and caregiver web app: `cd apps/website && npm run dev` → http://localhost:5174
 - Observability: `cd apps/observability && npm run dev` → http://localhost:3002
-- Mobile app: `cd apps/mobile && npm run ios` after setting `EXPO_PUBLIC_API_URL` in `apps/mobile/.env`
+- Mobile app: `cd apps/mobile && npm run ios` after setting `EXPO_PUBLIC_API_URL` and `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY` in `apps/mobile/.env`
+
+**Mobile checks**:
+```bash
+cd apps/mobile
+npm run test:unit
+npm run test:auth-guard
+npm run verify:assets
+npx tsc --noEmit
+maestro check-syntax .maestro/subflows/sign_in.yaml
+```
+
+Fresh mobile onboarding must start from the visible Create Account screen. A Clerk session with no Donna profile is treated as incomplete setup, cleaned up through the Node API, signed out locally, and returned to landing. Maestro flow `10_onboarding_full.yaml` covers successful setup; `12_incomplete_account_cleanup.yaml` and `13_leave_setup_cleanup.yaml` cover abandoned setup and explicit leave-setup cleanup.
 
 ## Architecture
 
@@ -265,6 +278,7 @@ pipecat/                                # Voice pipeline (Python, Railway port 7
 apps/                                   # Frontend apps (Vercel)
 ├── admin-v2/                           # Admin dashboard (React + Vite + Tailwind)
 ├── website/                            # Public site + caregiver onboarding/dashboard (React + Clerk)
+├── mobile/                             # Expo/React Native caregiver app + Maestro flows
 ├── _old-consumer-do-not-use/           # Archived previous caregiver web app
 └── observability/                      # Live call monitoring dashboard
 ```

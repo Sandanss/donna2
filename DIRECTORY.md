@@ -36,7 +36,7 @@
 | Change admin dashboard UI | `apps/admin-v2/src/pages/` |
 | Change admin API client | `apps/admin-v2/src/lib/api.ts` |
 | Change public website / caregiver web app | `apps/website/src/` |
-| Change admin/consumer API endpoints | `routes/*.js` (Node.js — serves all /api/* for frontends) |
+| Change admin, website, or mobile API endpoints | `routes/*.js` (Node.js — serves all /api/* for frontends) |
 | Change admin API middleware/auth | `middleware/*.js` (Node.js) |
 | Change database schema | `db/schema.js` (Drizzle ORM, shared app/API schema) + `pipecat/db/migrations/` (Pipecat/shared runtime additions) |
 | Add/modify frontend E2E tests | `tests/e2e/` + `playwright.config.ts` — see [guide](docs/guides/FRONTEND_TESTING.md) |
@@ -61,8 +61,8 @@ Donna runs two backend services. Change the wrong one and nothing happens.
                      Shared DB (Neon PostgreSQL)
                                  │
                   ┌──────────────┴──────────────────┐
-  Admin UI ─────► │  Node.js (Express, Railway:3001) │  Admin/consumer APIs, scheduler,
-  Consumer UI ──► │  repo root: index.js              │  call initiation
+  Admin UI ─────► │  Node.js (Express, Railway:3001) │  Admin, website, mobile APIs,
+  Website/Mobile► │  repo root: index.js              │  scheduler, call initiation
                   └─────────────────────────────────┘
 
   Frontends (Vercel) ──► Node.js APIs only ──► never talk to Pipecat directly
@@ -186,10 +186,21 @@ apps/
 │   ├── src/dashboard/   Caregiver dashboard
 │   └── Live: https://calldonna.co
 │
+├── mobile/          Active iOS/Android caregiver app (Expo + React Native + Clerk)
+│   ├── app/(auth)/       Sign-in, create-account, password reset, OAuth/Apple auth
+│   ├── app/(onboarding)/ Fresh caregiver setup; creates senior through Node /api/onboarding
+│   ├── app/(tabs)/       Dashboard, schedule, reminders, settings
+│   ├── src/lib/          API client, runtime config, auth cache, onboarding-session marker
+│   ├── src/stores/       Encrypted onboarding draft store
+│   ├── .maestro/         Mobile E2E flows and subflows
+│   └── EAS: @dmdzco/donna-caregiver / com.donna.caregiver
+│
 ├── _old-consumer-do-not-use/  Archived previous caregiver web app
 │
 └── observability/   Call monitoring dashboard (REST polling, low use)
 ```
+
+**Mobile onboarding invariant:** a Clerk user without a Donna profile is not a valid sign-in destination. Fresh setup must start from the visible Create Account flow, which marks a runtime pending-onboarding session before profile creation. If a no-profile Clerk session appears after app restart or sign-in, `AuthGuard` calls Node `DELETE /api/caregivers/me/incomplete-account`, clears the encrypted onboarding draft, signs out locally, and returns to landing. Maestro flows `10_onboarding_full.yaml`, `12_incomplete_account_cleanup.yaml`, and `13_leave_setup_cleanup.yaml` cover the success, abandoned-account, and explicit leave-setup paths.
 
 ### `tests/e2e/` — Frontend E2E Tests (Playwright, 31 tests)
 
@@ -252,11 +263,11 @@ Serves all API endpoints that frontends consume. Also runs the reminder schedule
 │   ├── notifications.js Notification preferences, in-app notifications, service-triggered sends (184 LOC)
 │   ├── waitlist.js      Public /waitlist endpoint (56 LOC)
 │   ├── onboarding.js    Consumer onboarding flow (113 LOC)
+│   ├── caregivers.js    Caregiver links, current profile, account deletion, incomplete onboarding cleanup
 │   ├── admin-auth.js    JWT admin login (196 LOC)
 │   ├── stats.js         Dashboard statistics (78 LOC)
 │   ├── memories.js      Memory search/store (92 LOC)
 │   ├── daily-context.js Daily context queries (68 LOC)
-│   ├── caregivers.js    Caregiver management (180 LOC)
 │   ├── conversations.js Conversation history (85 LOC)
 │   ├── call-analyses.js Analysis results (54 LOC)
 │   └── health.js, helpers.js, index.js (118 LOC combined)

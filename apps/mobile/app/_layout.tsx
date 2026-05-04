@@ -2,7 +2,7 @@ import "../global.css";
 import "@/src/i18n";
 import { useEffect, useState } from "react";
 import { Stack, usePathname, useRouter, useSegments } from "expo-router";
-import { ClerkProvider, ClerkLoaded, useAuth } from "@clerk/clerk-expo";
+import { ClerkProvider, useAuth } from "@clerk/clerk-expo";
 import { useQueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useProfile } from "@/src/hooks/useProfile";
 import { api, getErrorMessage } from "@/src/lib/api";
@@ -41,7 +41,7 @@ import {
 import { getClerkPublishableKey } from "@/src/lib/runtimeConfig";
 import { clearOnboardingDraft } from "@/src/stores/onboarding";
 
-SplashScreen.preventAutoHideAsync();
+void SplashScreen.preventAutoHideAsync().catch(() => {});
 
 function AuthGuard() {
   const { getToken, isLoaded, isSignedIn, signOut, userId } = useAuth();
@@ -52,17 +52,35 @@ function AuthGuard() {
   const queryClient = useQueryClient();
   const [cleaningIncompleteAccount, setCleaningIncompleteAccount] = useState(false);
 
+  const firstSegment = segments?.[0];
+  const inTabsGroup = firstSegment === "(tabs)";
+  const inAuthGroup = firstSegment === "(auth)";
+  const isLanding = pathname === "/";
+  const inAuthBootstrap = isLanding || inAuthGroup;
+  const nextRoute = resolvePostAuthRoute({
+    profile,
+    error: profileError ? profileErrorObj : undefined,
+  });
+  const needsIncompleteAccountCleanup =
+    isLoaded &&
+    isSignedIn &&
+    !profileLoading &&
+    profileError &&
+    nextRoute === "/(onboarding)/step1" &&
+    !hasPendingOnboardingSession();
+  const splashReady =
+    isLoaded &&
+    !cleaningIncompleteAccount &&
+    !needsIncompleteAccountCleanup &&
+    (!isSignedIn || !profileLoading);
+
+  useEffect(() => {
+    if (!splashReady) return;
+    void SplashScreen.hideAsync().catch(() => {});
+  }, [splashReady]);
+
   useEffect(() => {
     if (!isLoaded || cleaningIncompleteAccount) return;
-
-    const firstSegment = segments?.[0];
-    const inTabsGroup = firstSegment === "(tabs)";
-    const inAuthGroup = firstSegment === "(auth)";
-    const isLanding = pathname === "/";
-    const nextRoute = resolvePostAuthRoute({
-      profile,
-      error: profileError ? profileErrorObj : undefined,
-    });
 
     console.log(`[AuthGuard]`, JSON.stringify({
       isSignedIn, pathname, firstSegment, profileLoading, profileError: !!profileError,
@@ -72,13 +90,7 @@ function AuthGuard() {
     if (!isSignedIn && inTabsGroup) {
       console.log(`[AuthGuard] Not signed in but in tabs → redirect to /`);
       router.replace("/");
-    } else if (
-      isSignedIn &&
-      !profileLoading &&
-      profileError &&
-      nextRoute === "/(onboarding)/step1" &&
-      !hasPendingOnboardingSession()
-    ) {
+    } else if (needsIncompleteAccountCleanup) {
       console.log("[AuthGuard] Signed in without Donna profile outside create-account flow → cleaning incomplete account");
       setCleaningIncompleteAccount(true);
       void (async () => {
@@ -124,9 +136,15 @@ function AuthGuard() {
     }
   }, [
     cleaningIncompleteAccount,
+    firstSegment,
     getToken,
+    inAuthGroup,
+    inTabsGroup,
     isLoaded,
+    isLanding,
     isSignedIn,
+    needsIncompleteAccountCleanup,
+    nextRoute,
     pathname,
     profile,
     profileError,
@@ -134,7 +152,6 @@ function AuthGuard() {
     profileLoading,
     queryClient,
     router,
-    segments,
     signOut,
     userId,
   ]);
@@ -163,19 +180,13 @@ function AuthGuard() {
     return () => subscription.remove();
   }, [isSignedIn]);
 
-  const firstSegment = segments?.[0];
-  const inAuthBootstrap = pathname === "/" || firstSegment === "(auth)";
-  const bootstrapRoute = resolvePostAuthRoute({
-    profile,
-    error: profileError ? profileErrorObj : undefined,
-  });
   const showBootstrapError =
     isLoaded &&
     isSignedIn &&
     inAuthBootstrap &&
     !profileLoading &&
     profileError &&
-    !bootstrapRoute;
+    !nextRoute;
 
   if (!isLoaded) {
     return (
@@ -257,6 +268,51 @@ function AuthGuard() {
   return <Stack screenOptions={{ headerShown: false }} />;
 }
 
+function ConfigErrorScreen({ error }: { error: unknown }) {
+  useEffect(() => {
+    void SplashScreen.hideAsync().catch(() => {});
+  }, []);
+
+  return (
+    <View
+      style={{
+        flex: 1,
+        alignItems: "center",
+        justifyContent: "center",
+        paddingHorizontal: 24,
+        backgroundColor: COLORS.cream,
+      }}
+    >
+      <View style={{ width: "100%", maxWidth: 360 }}>
+        <Text
+          style={{
+            fontSize: 28,
+            lineHeight: 34,
+            fontWeight: "600",
+            color: COLORS.charcoal,
+            textAlign: "center",
+          }}
+        >
+          Donna is missing mobile auth configuration
+        </Text>
+        <Text
+          style={{
+            marginTop: 12,
+            fontSize: 15,
+            lineHeight: 22,
+            color: COLORS.muted,
+            textAlign: "center",
+          }}
+        >
+          {error instanceof Error
+            ? error.message
+            : "Set the public Clerk key for this build and relaunch the app."}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
 function RootLayout() {
   const [fontsLoaded] = useFonts({
     PlayfairDisplay_400Regular,
@@ -265,69 +321,28 @@ function RootLayout() {
     PlayfairDisplay_700Bold,
   });
 
-  useEffect(() => {
-    if (fontsLoaded) SplashScreen.hideAsync();
-  }, [fontsLoaded]);
-
   if (!fontsLoaded) return null;
 
   let clerkKey: string;
   try {
     clerkKey = getClerkPublishableKey();
   } catch (error) {
-    return (
-      <View
-        style={{
-          flex: 1,
-          alignItems: "center",
-          justifyContent: "center",
-          paddingHorizontal: 24,
-          backgroundColor: COLORS.cream,
-        }}
-      >
-        <View style={{ width: "100%", maxWidth: 360 }}>
-          <Text
-            style={{
-              fontSize: 28,
-              lineHeight: 34,
-              fontWeight: "600",
-              color: COLORS.charcoal,
-              textAlign: "center",
-            }}
-          >
-            Donna is missing mobile auth configuration
-          </Text>
-          <Text
-            style={{
-              marginTop: 12,
-              fontSize: 15,
-              lineHeight: 22,
-              color: COLORS.muted,
-              textAlign: "center",
-            }}
-          >
-            {error instanceof Error ? error.message : "Set the public Clerk key for this build and relaunch the app."}
-          </Text>
-        </View>
-      </View>
-    );
+    return <ConfigErrorScreen error={error} />;
   }
 
   return (
     <ErrorBoundary>
       <ClerkProvider publishableKey={clerkKey} tokenCache={tokenCache}>
-        <ClerkLoaded>
-          <QueryClientProvider client={queryClient}>
-            <GestureHandlerRootView style={{ flex: 1 }}>
-              <SafeAreaProvider>
-                <NetworkProvider>
-                  <StatusBar style="dark" />
-                  <AuthGuard />
-                </NetworkProvider>
-              </SafeAreaProvider>
-            </GestureHandlerRootView>
-          </QueryClientProvider>
-        </ClerkLoaded>
+        <QueryClientProvider client={queryClient}>
+          <GestureHandlerRootView style={{ flex: 1 }}>
+            <SafeAreaProvider>
+              <NetworkProvider>
+                <StatusBar style="dark" />
+                <AuthGuard />
+              </NetworkProvider>
+            </SafeAreaProvider>
+          </GestureHandlerRootView>
+        </QueryClientProvider>
       </ClerkProvider>
     </ErrorBoundary>
   );

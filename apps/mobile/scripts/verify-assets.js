@@ -13,7 +13,7 @@ const path = require('path');
 const ASSETS_DIR = path.join(__dirname, '..', 'assets', 'images');
 const REQUIRED_ASSETS = {
   'icon.png': { minSize: 1024, desc: 'App icon' },
-  'splash-icon.png': { minSize: 200, desc: 'Splash screen icon' },
+  'splash.png': { minSize: 200, desc: 'Splash screen' },
   'adaptive-icon.png': { minSize: 1024, desc: 'Android adaptive icon' },
   'favicon.png': { minSize: 32, desc: 'Web favicon' }
 };

@@ -11,7 +11,7 @@ Donna runs two backends sharing the same PostgreSQL database:
 | Backend | Language | Platform | Responsibility |
 |---------|----------|----------|----------------|
 | **Pipecat** | Python 3.12 | Railway (port 7860) | Real-time voice pipeline, WebSocket, health monitoring |
-| **Node.js** | Express | Railway (port 3001) | Admin/consumer REST APIs, reminder scheduler, call initiation |
+| **Node.js** | Express | Railway (port 3001) | Admin, website, and mobile REST APIs; reminder scheduler; call initiation |
 
 This is an **explicit architectural decision** — each backend owns a clear domain. Dual service implementations (e.g., `services/memory.js` and `pipecat/services/memory.py`) exist because each backend needs database access for its own purpose.
 
@@ -193,7 +193,8 @@ Step 4: Daily context (depends on Step 2)        ── sequential
 | Server (Node.js) | Express | — |
 | Monitoring | Sentry | FastAPI integration |
 | Deployment | Railway | Docker (python:3.12-slim) |
-| Frontend | React + Vite + Tailwind | Vercel |
+| Website/Admin Frontends | React + Vite + Tailwind | Vercel |
+| Mobile App | Expo SDK 54 + React Native + Clerk | EAS/TestFlight/App Store, bundle ID `com.donna.caregiver` |
 
 ---
 

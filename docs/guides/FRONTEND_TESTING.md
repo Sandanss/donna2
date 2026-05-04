@@ -2,7 +2,7 @@
 
 ## Overview
 
-We use [Playwright](https://playwright.dev/) for end-to-end browser testing across all three frontend apps. Tests mock API responses by default (no backend needed) and verify that UI components, navigation, and user flows work correctly.
+We use [Playwright](https://playwright.dev/) for end-to-end browser testing across the admin dashboard, website/caregiver web app, and observability dashboard. Tests mock API responses by default (no backend needed) and verify that UI components, navigation, and user flows work correctly.
 
 **Current coverage:** 31 tests across 5 projects (~15s total runtime).
 
@@ -20,10 +20,11 @@ npm run test:e2e
 
 # Run a specific app's tests
 npm run test:e2e:admin
-npm run test:e2e:consumer
+npm run test:e2e:consumer   # legacy project/script name for website tests
+npm run test:e2e:website
 npm run test:e2e:observability
 
-# Run authenticated consumer tests only
+# Run authenticated website/caregiver tests only
 npx playwright test --project=clerk-setup --project=consumer-authenticated
 
 # Run with UI mode (interactive debugging)
@@ -33,7 +34,7 @@ npx playwright test --ui
 npx playwright show-report
 ```
 
-The root repo and each frontend app keep separate `package-lock.json` files. If `apps/admin-v2`, `apps/consumer`, or `apps/observability` fail to boot under Playwright, run `npm run install:apps` again from the repo root before debugging the tests.
+The root repo and each frontend app keep separate `package-lock.json` files. If `apps/admin-v2`, `apps/website`, or `apps/observability` fail to boot under Playwright, run `npm run install:apps` again from the repo root before debugging the tests.
 
 ## Project Structure
 
@@ -50,7 +51,7 @@ tests/e2e/
 │   ├── seniors.spec.ts              # Senior list, create form
 │   ├── calls.spec.ts                # Call history, transcript modal
 │   └── reminders.spec.ts            # Reminder CRUD
-├── consumer/
+├── consumer/                           # Legacy test directory name; targets apps/website
 │   ├── landing.spec.ts              # Landing page, FAQ
 │   ├── dashboard.spec.ts            # Protected route redirect tests
 │   └── authenticated/
@@ -71,8 +72,8 @@ The config (`playwright.config.ts`) defines 5 test projects:
 |---------|-----|------|-------------|
 | `clerk-setup` | — | — | Initializes Clerk testing token |
 | `admin` | Admin Dashboard | 5175 | JWT via localStorage |
-| `consumer` | Consumer (public) | 5174 | None |
-| `consumer-authenticated` | Consumer (auth) | 5174 | Clerk `@clerk/testing` |
+| `consumer` | Website/caregiver web (public), legacy project name | 5174 | None |
+| `consumer-authenticated` | Website/caregiver web (auth), legacy project name | 5174 | Clerk `@clerk/testing` |
 | `observability` | Observability | 3002 | JWT via localStorage |
 
 Dev servers are started automatically by Playwright (configured in `webServer`).
@@ -107,9 +108,9 @@ await page.route('**/api/new-endpoint', route =>
 );
 ```
 
-## Clerk Authentication (Consumer App)
+## Clerk Authentication (Website/Caregiver Web)
 
-Authenticated consumer tests use `@clerk/testing` to sign in as a real Clerk test user.
+Authenticated website/caregiver tests use `@clerk/testing` to sign in as a real Clerk test user.
 
 ### How It Works
 
@@ -179,7 +180,7 @@ test('your test', async ({ page }) => {
 });
 ```
 
-### Consumer Public Pages
+### Website Public Pages
 
 ```typescript
 import { test, expect } from '@playwright/test';
@@ -190,7 +191,7 @@ test('landing page works', async ({ page }) => {
 });
 ```
 
-### Consumer Authenticated Pages
+### Website Authenticated Pages
 
 Place test files in `tests/e2e/consumer/authenticated/`. They run in the `consumer-authenticated` project which depends on `clerk-setup`.
 
@@ -249,7 +250,7 @@ Expected when the Node.js API isn't running locally. The authenticated tests acc
 
 ### Proxy errors for `/api/caregivers/me`
 
-Expected in authenticated tests — the consumer app tries to fetch from the API which isn't running. These are Vite proxy errors and don't affect test results.
+Expected in authenticated tests when the Node API is not running locally. The website/caregiver web app tries to fetch from the API; these Vite proxy errors do not affect mocked test results.
 
 ### `__dirname is not defined in ES module scope`
 

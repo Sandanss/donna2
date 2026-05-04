@@ -86,11 +86,11 @@ Ask David to invite you to each of these:
 | **GitHub** | Code, PRs, CI/CD | github.com |
 | **Railway** | Hosting (Pipecat + Node.js API) | railway.app |
 | **Neon** | PostgreSQL database | console.neon.tech |
-| **Vercel** | Frontend deploys (admin, consumer, observability) | vercel.com |
+| **Vercel** | Frontend deploys (admin, website/caregiver web, observability) | vercel.com |
 | **GrowthBook** | Feature flags | app.growthbook.io |
 | **Sentry** | Error monitoring | sentry.io |
 | **Telnyx** | Voice calls, phone numbers, media streaming | portal.telnyx.com |
-| **Clerk** | Consumer auth (if working on consumer app) | clerk.com |
+| **Clerk** | Caregiver auth for website and mobile | clerk.com |
 
 After you have access:
 
@@ -135,7 +135,7 @@ Donna makes friendly phone calls to elderly people. Two backends work together:
 | Backend | Language | Port | Responsibility |
 |---------|----------|------|----------------|
 | **Pipecat** | Python | 7860 | Voice pipeline: microphone audio in → speech-to-text → AI conversation → text-to-speech → audio out |
-| **Node.js API** | JavaScript | 3001 | REST APIs for admin/consumer frontends, reminder scheduler, call initiation |
+| **Node.js API** | JavaScript | 3001 | REST APIs for admin, website, and mobile clients; reminder scheduler; call initiation |
 
 Both share the same PostgreSQL database (Neon).
 
@@ -146,9 +146,40 @@ Both share the same PostgreSQL database (Neon).
 | App | Directory | URL |
 |-----|-----------|-----|
 | Admin Dashboard | `apps/admin-v2/` | admin-v2-liart.vercel.app |
-| Consumer (marketing) | `apps/consumer/` | consumer-ruddy.vercel.app |
+| Website/caregiver web | `apps/website/` | calldonna.co |
 | Observability | `apps/observability/` | — |
 | Mobile (iOS/Android) | `apps/mobile/` | — |
+
+### Mobile Setup And Onboarding Validation
+
+The mobile app is an Expo/React Native app with a checked-in native `ios/` project. It talks to Clerk and the repo-root Node API, never directly to Pipecat.
+
+Before running Expo or Maestro from a clean worktree:
+
+```bash
+cd apps/mobile
+test -f .env
+node -e 'const fs=require("fs"); const text=fs.readFileSync(".env","utf8"); for (const k of ["EXPO_PUBLIC_API_URL","EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY"]) { console.log(`${k}: ${new RegExp(`^${k}=.+`, "m").test(text) ? "present" : "missing"}`); }'
+```
+
+For EAS builds, verify all build environments without printing values:
+
+```bash
+for env in development preview production; do
+  echo "== $env =="
+  npx eas env:exec "$env" 'node -e "const c=require(\"./app.config.js\")(); const e=c.extra||{}; const ok=Boolean(e.apiUrl)&&Boolean(e.clerkPublishableKey)&&e.apiUrl.startsWith(\"https://\")&&/^pk_(test|live)_/.test(e.clerkPublishableKey); console.log({apiUrlPresent:Boolean(e.apiUrl),clerkKeyPresent:Boolean(e.clerkPublishableKey),ok}); process.exit(ok?0:1)"'
+done
+```
+
+Fresh onboarding tests must create a Clerk account through the visible Create Account screen. Do not sign in with a no-profile user to start onboarding; the app now treats that as an incomplete account and cleans it up. Useful checks:
+
+```bash
+npm run test:unit
+npm run test:auth-guard
+npm run test:e2e:onboarding
+maestro test .maestro/flows/12_incomplete_account_cleanup.yaml
+maestro test .maestro/flows/13_leave_setup_cleanup.yaml
+```
 
 ---
 

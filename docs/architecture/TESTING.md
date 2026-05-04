@@ -1,6 +1,6 @@
 # Testing Architecture
 
-> Testing infrastructure for the Donna voice pipeline — unit tests, integration tests, load tests, and regression scenarios.
+> Testing infrastructure for Donna's voice pipeline, Node/frontend API clients, and mobile app.
 
 ---
 
@@ -12,6 +12,7 @@
 | Skipped (require APIs) | 14 | Integration, LLM, simulation tests |
 | Test files | 61 | Across 3 testing levels |
 | Load test files | 5 | DB, WebSocket, scheduler throughput |
+| Mobile tests | App-local | Runtime config, API helpers, onboarding session marker, Maestro flows |
 
 ### Quick Start
 
@@ -24,6 +25,11 @@ cd pipecat && uv run python -m pytest tests/ -m "not integration and not llm" --
 
 # Run specific test markers
 cd pipecat && uv run python -m pytest tests/ -m regression -q
+
+# Run mobile release/auth checks
+cd apps/mobile && npm run test:unit
+cd apps/mobile && npm run test:auth-guard
+cd apps/mobile && npm run verify:assets
 ```
 
 ---
@@ -76,6 +82,52 @@ Full call lifecycle from WebSocket connect to post-call processing:
 | `llm` | Requires ANTHROPIC_API_KEY | LLM response validation |
 | `llm_simulation` | LLM-vs-LLM simulation (slow) | Manual validation |
 | `regression` | Full pipeline scenario tests | Before deployment |
+
+---
+
+## Mobile App Testing
+
+Target surface: `apps/mobile/`. The app talks to Clerk and the repo-root Node API; it does not call Pipecat directly.
+
+### Local Checks
+
+```bash
+cd apps/mobile
+npx --yes npm@10.9.3 ci --include=dev
+npm run test:unit
+npm run test:auth-guard
+npm run verify:assets
+npx tsc --noEmit
+```
+
+`npm run test:unit` covers app-local helpers such as runtime config, API behavior, encrypted draft storage, profile session state, and the pending onboarding session marker. `npm run test:auth-guard` scans auth tests for forbidden bypass patterns so Maestro and unit coverage keep exercising visible caregiver paths.
+
+### EAS Environment Verification
+
+Before any development, preview, or production EAS build, verify that the selected build profile resolves the public runtime config from the matching EAS environment:
+
+```bash
+cd apps/mobile
+for env in development preview production; do
+  echo "== $env =="
+  npx eas env:exec "$env" 'node -e "const c=require(\"./app.config.js\")(); const e=c.extra||{}; const ok=Boolean(e.apiUrl)&&Boolean(e.clerkPublishableKey)&&e.apiUrl.startsWith(\"https://\")&&/^pk_(test|live)_/.test(e.clerkPublishableKey); console.log({apiUrlPresent:Boolean(e.apiUrl),clerkKeyPresent:Boolean(e.clerkPublishableKey),ok}); process.exit(ok?0:1)"'
+done
+```
+
+This command intentionally prints booleans only. If any environment reports `ok: false`, update the EAS environment, rebuild, and retest; OTA JavaScript cannot fix a binary built with missing public config.
+
+### Maestro Coverage
+
+Maestro flows must use visible user input paths. For iOS `phone-pad` and `number-pad` fields, use `.maestro/subflows/tap_digits.yaml` instead of `inputText`.
+
+```bash
+cd apps/mobile
+npm run test:e2e:onboarding
+maestro test .maestro/flows/12_incomplete_account_cleanup.yaml
+maestro test .maestro/flows/13_leave_setup_cleanup.yaml
+```
+
+Fresh onboarding starts from the visible Create Account screen. Do not sign in with a no-profile Clerk user to start setup; the app now treats that as an incomplete account, calls `DELETE /api/caregivers/me/incomplete-account`, clears local onboarding state, signs out, and returns to landing.
 
 ---
 

@@ -16,19 +16,19 @@ The Donna mobile app requires brand-appropriate icon and splash screen assets fo
 - **Status**: ✅ Present — verified at 1024×1024
 - **Design notes**: Should incorporate Donna's sage green (#4A5D4F) and cream (#FDFCF8) colors with a clear, recognizable mark at any size
 
-### Splash Screen Icon (200×200+ PNG)
-- **File**: `assets/images/splash-icon.png`
-- **Size**: Minimum 200×200 pixels (recommend 1000×1000 for Retina displays)
-- **Format**: PNG with transparency
-- **Background**: Cream (#FDFCF8) as defined in `app.json`
-- **Purpose**: Centered icon shown during app launch on iOS and Android
-- **Status**: ✅ Present — verified at 483×1044
-- **Design notes**: Simple, centered mark that scales well. Used with `resizeMode: "contain"` and cream background.
+### Splash Screen (200×200+ PNG)
+- **File**: `assets/images/splash.png`
+- **Size**: Minimum 200×200 pixels; current draft is 483×1044
+- **Format**: PNG without transparency
+- **Background**: Donna sage (#4A5D4F) as defined in `app.json`
+- **Purpose**: Full-screen launch screen shown while the native app, Clerk, fonts, and initial profile route load
+- **Status**: ✅ Present — inserted from `docs/plans/screenshots/splash-screen-draft.jpg`
+- **Design notes**: Uses `resizeMode: "cover"` and native iOS `SplashScreenLegacy.imageset` so App Store/TestFlight builds show the Donna splash instead of a blank launch screen.
 
 ### Adaptive Icon (1024×1024 PNG)
 - **File**: `assets/images/adaptive-icon.png`
 - **Size**: 1024×1024 pixels
-- **Format**: PNG with transparency
+- **Format**: PNG; current source is opaque RGB
 - **Purpose**: Android adaptive icon foreground layer
 - **Background**: Cream (#FDFCF8) (defined in `app.json` as `android.adaptiveIcon.backgroundColor`)
 - **Status**: ✅ Present — verified at 1024×1024
@@ -50,7 +50,8 @@ The Donna mobile app requires brand-appropriate icon and splash screen assets fo
 ## Donna Brand Colors
 
 - **Primary**: #4A5D4F (sage green) — use for text, logos, accents
-- **Background**: #FDFCF8 (cream) — splash screen, adaptive icon background
+- **Background**: #FDFCF8 (cream) — app UI and adaptive icon background
+- **Splash background**: #4A5D4F (sage green)
 - **Accent**: #1A1A1A (charcoal) — text, borders
 - **Secondary**: Consider warm accent colors for elderly-friendly interface
 
@@ -62,7 +63,8 @@ The Donna mobile app requires brand-appropriate icon and splash screen assets fo
 apps/mobile/assets/
 ├── images/
 │   ├── icon.png              (1024×1024)
-│   ├── splash-icon.png       (483×1044)
+│   ├── splash.png            (483×1044)
+│   ├── splash-icon.png       (legacy draft copy, not referenced by app.json)
 │   ├── adaptive-icon.png     (1024×1024)
 │   └── favicon.png           (32×32)
 └── README.md
@@ -79,9 +81,9 @@ apps/mobile/assets/
   "expo": {
     "icon": "./assets/images/icon.png",
     "splash": {
-      "image": "./assets/images/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#FDFCF8"
+      "image": "./assets/images/splash.png",
+      "resizeMode": "cover",
+      "backgroundColor": "#4A5D4F"
     },
     "ios": {
       "bundleIdentifier": "com.donna.caregiver"
@@ -108,7 +110,7 @@ apps/mobile/assets/
 1. Create a Figma file or use existing design system
 2. Export at specified dimensions with transparency
 3. Place in `assets/images/`
-4. Run: `npm run test:app` to verify assets load
+4. Run: `npm run verify:assets` to verify required files, PNG headers, and minimum dimensions
 
 ### Option 2: Use Expo's Presets (Quick Dev)
 For development/testing, Expo can auto-generate icons if you provide a single source image:
@@ -156,14 +158,17 @@ Favicon will appear in browser tab.
 ## Before App Store Submission
 
 - [x] App icon (1024×1024) created and placed at `assets/images/icon.png`
-- [x] Splash screen icon present and placed at `assets/images/splash-icon.png`
+- [x] Splash screen present and placed at `assets/images/splash.png`
 - [x] Adaptive icon (1024×1024) created and placed at `assets/images/adaptive-icon.png`
 - [x] Favicon (32×32) created and placed at `assets/images/favicon.png`
-- [x] All PNGs verified to be valid image files (`file assets/images/*.png`)
+- [x] Required PNGs verified with `npm run verify:assets`
+- [x] Native iOS launch storyboard includes the full-screen splash image view and `SplashScreenLegacy.imageset`
+- [x] App icon visually inspected as recognizable and nonblank for App Store review
+- [x] Checked-in native iOS app icon visually matches `assets/images/icon.png`
 - [x] Icons tested in native build: `npx expo run:ios -d "iPhone 17 Pro" --no-install --no-bundler`
 - [ ] Adaptive icon safe zone validated (center 480×480 clear)
 - [ ] Brand colors consistent across all assets
-- [ ] No transparency issues or color bleeding at edges
+- [x] No app-icon transparency issues
 - [ ] iOS build succeeds with assets included
 - [ ] Android build succeeds with adaptive icon
 - [ ] App Store submission attempted (will request icons if missing)

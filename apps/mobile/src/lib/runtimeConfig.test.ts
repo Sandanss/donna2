@@ -48,6 +48,9 @@ describe("runtime config", () => {
   });
 
   it("throws clearly when required public config is absent", async () => {
+    delete process.env.EXPO_PUBLIC_API_URL;
+    delete process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
+
     const config = await loadRuntimeConfig();
 
     expect(() => config.getApiUrl()).toThrow("EXPO_PUBLIC_API_URL is required");

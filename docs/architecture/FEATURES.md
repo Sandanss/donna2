@@ -144,11 +144,14 @@
 
 ## Caregiver Features
 
-### Caregiver Dashboard (Consumer App)
-- Clerk OAuth authentication
-- Link caregiver to senior
-- View call summaries and engagement scores
-- View concern alerts
+### Caregiver Website And Mobile App
+- Clerk authentication for caregiver web and mobile users
+- Website/caregiver web app at `apps/website/` for public pages, onboarding, and caregiver dashboard access
+- Mobile caregiver app at `apps/mobile/` for iOS/Android dashboard, schedule, reminders, settings, and account management
+- Native iOS Sign in with Apple uses Clerk's `useSignInWithApple()` flow; Google remains browser OAuth
+- Fresh mobile onboarding starts from the visible Create Account screen and creates/links the senior through the Node `/api/onboarding` path
+- Mobile sign-in is valid only for Clerk users with an existing Donna profile; no-profile Clerk sessions are treated as incomplete setup and cleaned up through `DELETE /api/caregivers/me/incomplete-account`
+- View call summaries, engagement scores, and concern alerts
 
 ### Caregiver Notes
 - Caregivers can leave notes for Donna to deliver during calls
