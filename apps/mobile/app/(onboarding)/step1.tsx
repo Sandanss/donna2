@@ -10,14 +10,19 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
+import { useAuth } from "@clerk/clerk-expo";
+import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft } from "lucide-react-native";
 import { Button, Input, KeyboardAwareFooter, ProgressBar } from "@/src/components/ui";
 import { COLORS } from "@/src/constants/theme";
+import { getProfileQueryKey } from "@/src/lib/profileSession";
 import { useOnboardingStore } from "@/src/stores/onboarding";
 
 export default function Step1Screen() {
   const router = useRouter();
+  const { signOut, userId } = useAuth();
+  const queryClient = useQueryClient();
   const { t } = useTranslation();
   const { firstName, lastName, phone, setField } =
     useOnboardingStore();
@@ -40,6 +45,18 @@ export default function Step1Screen() {
     }
   }
 
+  async function handleBack() {
+    Keyboard.dismiss();
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+
+    queryClient.removeQueries({ queryKey: getProfileQueryKey(userId) });
+    await signOut();
+    router.replace("/");
+  }
+
   return (
     <SafeAreaView className="flex-1 bg-cream">
       <KeyboardAvoidingView
@@ -58,7 +75,7 @@ export default function Step1Screen() {
 
           {/* Back */}
           <Pressable
-            onPress={() => router.back()}
+            onPress={handleBack}
             className="flex-row items-center mb-6 min-h-[48px] self-start"
             accessibilityRole="button"
             accessibilityLabel={t("common.back")}
