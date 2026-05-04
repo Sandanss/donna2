@@ -80,5 +80,18 @@ export function useApi() {
 
     // Account
     deleteAccount: () => del('/api/caregivers/me/account'),
+
+    // Chat (returns raw Response for SSE streaming)
+    streamChat: async (seniorId, messages) => {
+      const token = await getToken();
+      return fetch(`${API_URL}/api/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ seniorId, messages }),
+      });
+    },
   };
 }

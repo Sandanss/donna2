@@ -318,7 +318,7 @@ const scheduleItemSchema = z.object({
 });
 
 export const updateScheduleSchema = z.object({
-  schedule: z.array(scheduleItemSchema).max(20).optional(),
+  schedule: z.array(scheduleItemSchema).max(200).optional(),
   topicsToAvoid: z.array(z.string().max(100)).max(10).optional(),
 }).refine(data => Object.keys(data).length > 0, {
   message: 'At least one field must be provided',

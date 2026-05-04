@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { DashboardProvider, useDashboard } from './DashboardContext';
 import FloatingActionButton from './components/FloatingActionButton';
 import InstantCallModal from './components/InstantCallModal';
+import ChatPanel from './components/ChatPanel';
 import './dashboard.css';
 
 const navItems = [
@@ -56,9 +57,18 @@ const pageVariants = {
   exit: { opacity: 0, y: -10 },
 };
 
+function ChatIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+    </svg>
+  );
+}
+
 function DashboardInner() {
   const { senior, api } = useDashboard();
   const [callModalOpen, setCallModalOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
   const location = useLocation();
 
   return (
@@ -81,6 +91,10 @@ function DashboardInner() {
             </NavLink>
           ))}
         </nav>
+        <button className="db-sidebar__chat-btn" onClick={() => setChatOpen(true)}>
+          <ChatIcon />
+          <span>Ask Donna</span>
+        </button>
       </aside>
 
       {/* Main content */}
@@ -119,6 +133,11 @@ function DashboardInner() {
       {/* FAB */}
       <FloatingActionButton onClick={() => setCallModalOpen(true)} />
 
+      {/* Mobile chat button */}
+      <button className="db-chat-fab" onClick={() => setChatOpen(true)} aria-label="Ask Donna">
+        <ChatIcon />
+      </button>
+
       {/* Instant Call Modal */}
       {callModalOpen && senior && (
         <InstantCallModal
@@ -126,6 +145,11 @@ function DashboardInner() {
           api={api}
           onClose={() => setCallModalOpen(false)}
         />
+      )}
+
+      {/* Chat Panel */}
+      {chatOpen && senior && (
+        <ChatPanel onClose={() => setChatOpen(false)} />
       )}
     </div>
   );

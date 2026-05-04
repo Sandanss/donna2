@@ -326,8 +326,8 @@ describe('updateScheduleSchema', () => {
     expect(result.success).toBe(false);
   });
 
-  it('limits schedule array to 20 items', () => {
-    const items = Array.from({ length: 21 }, (_, i) => ({
+  it('limits schedule array to 200 items', () => {
+    const items = Array.from({ length: 201 }, (_, i) => ({
       title: `Call ${i}`,
       frequency: 'daily',
       time: '9:00 AM',
