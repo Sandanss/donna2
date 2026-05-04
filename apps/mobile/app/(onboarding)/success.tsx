@@ -191,6 +191,7 @@ export default function SuccessScreen() {
       }
 
       const payload = {
+        caregiverPhone: store.phone || undefined,
         senior: {
           name: store.lovedOneName,
           phone: store.lovedOnePhone,

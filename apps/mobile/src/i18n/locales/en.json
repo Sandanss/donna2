@@ -141,6 +141,7 @@
       "nameRequired": "Name is required",
       "phoneRequired": "Phone number is required",
       "phoneInvalid": "Enter a 10-digit phone number",
+      "phoneMatchesCaregiver": "Use a different phone number unless Donna is for you.",
       "phoneAlreadyRegistered": "That phone number is already registered. Use a different number or contact support.",
       "phoneCheckFailed": "We couldn't check this phone number. Please try again.",
       "relationshipRequired": "Please select a relationship",
@@ -446,6 +447,7 @@
     "sat": "Sat"
   },
   "relationships": {
+    "Myself": "Myself",
     "Daughter": "Daughter",
     "Son": "Son",
     "Spouse": "Spouse",

@@ -308,10 +308,18 @@ export const api = {
 
   onboarding: {
     /** POST /api/onboarding/validate-phone -- checks whether a loved-one phone can be used */
-    validatePhone: (phone: string, token: string) =>
+    validatePhone: (
+      phone: string,
+      token: string,
+      options?: { caregiverPhone?: string; relationship?: string },
+    ) =>
       fetchJson<{ available: boolean }>("/api/onboarding/validate-phone", {
         method: "POST",
-        body: JSON.stringify({ phone }),
+        body: JSON.stringify({
+          phone,
+          caregiverPhone: options?.caregiverPhone,
+          relation: options?.relationship,
+        }),
         token,
       }),
 

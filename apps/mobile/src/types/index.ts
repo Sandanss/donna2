@@ -89,6 +89,7 @@ export interface NotificationPreferences {
  * Must match the onboardingSchema in validators/schemas.js on the backend.
  */
 export interface OnboardingInput {
+  caregiverPhone?: string;
   senior: {
     name: string;
     phone: string;

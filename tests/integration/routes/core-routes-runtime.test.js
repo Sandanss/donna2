@@ -310,6 +310,60 @@ describe('core route runtime behavior', () => {
     expect(harness.tx.insert).toHaveBeenCalledTimes(3);
   });
 
+  it('rejects onboarding phone validation when senior and caregiver phones match without Myself relation', async () => {
+    const response = await requestJson(onboardingRouter, {
+      method: 'POST',
+      path: '/api/onboarding/validate-phone',
+      body: {
+        phone: '(555) 123-4567',
+        caregiverPhone: '+1 555 123 4567',
+        relation: 'Mother',
+      },
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.body.code).toBe('senior_phone_matches_caregiver');
+    expect(harness.db.select).not.toHaveBeenCalled();
+  });
+
+  it('allows onboarding phone validation when senior and caregiver phones match with Myself relation', async () => {
+    harness.selectLimitResults.push([]);
+
+    const response = await requestJson(onboardingRouter, {
+      method: 'POST',
+      path: '/api/onboarding/validate-phone',
+      body: {
+        phone: '(555) 123-4567',
+        caregiverPhone: '+1 555 123 4567',
+        relation: 'Myself',
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ available: true });
+    expect(harness.db.select).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects onboarding creation when senior and caregiver phones match without Myself relation', async () => {
+    const response = await requestJson(onboardingRouter, {
+      method: 'POST',
+      path: '/api/onboarding',
+      body: validOnboardingBody({
+        caregiverPhone: '+1 555 123 4567',
+        senior: {
+          name: 'Test Senior',
+          phone: '(555) 123-4567',
+          timezone: 'America/Chicago',
+        },
+        relation: 'Mother',
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.body.code).toBe('senior_phone_matches_caregiver');
+    expect(harness.db.transaction).not.toHaveBeenCalled();
+  });
+
   it('rejects onboarding when only cofounder API-key auth is present', async () => {
     harness.state.auth = {
       isAdmin: true,

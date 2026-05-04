@@ -234,6 +234,7 @@ export const updateCaregiverSchema = z.object({
 // =============================================================================
 
 const relationEnum = z.enum([
+  'Myself',
   'Mother', 'Father', 'Daughter', 'Son', 'Spouse', 'Sibling',
   'Grandchild', 'Uncle', 'Aunt', 'Cousin',
   'Friend', 'Professional Caregiver', 'Client', 'Other Loved One', 'Other',
@@ -268,6 +269,7 @@ export const onboardingSchema = z.object({
     email: z.string().email().max(255),
     clerkUserId: z.string().max(255).optional(),
   }).optional(),
+  caregiverPhone: phoneSchema.optional(),
   senior: z.object({
     name: z.string().min(1).max(255).trim(),
     phone: phoneSchema,
@@ -293,6 +295,8 @@ export const onboardingSchema = z.object({
 
 export const onboardingPhoneAvailabilitySchema = z.object({
   phone: phoneSchema,
+  caregiverPhone: phoneSchema.optional(),
+  relation: relationEnum.optional(),
 });
 
 // =============================================================================

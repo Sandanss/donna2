@@ -457,17 +457,18 @@ export default function CreateAccountScreen() {
             />
           </View>
 
-          <View className="flex-row justify-center mb-8">
-            <Text className="text-muted text-[15px]">
-              {t("auth.hasAccount")}{" "}
+          <View className="items-center mb-8">
+            <Text className="text-muted text-[15px] text-center mb-1">
+              {t("auth.hasAccount")}
             </Text>
             <Pressable
               onPress={() => router.replace("/(auth)/sign-in")}
-              className="min-h-[48px] justify-center"
+              className="min-h-[48px] px-6 items-center justify-center"
               accessibilityRole="link"
               accessibilityLabel={t("auth.signIn")}
+              testID="create-account-sign-in"
             >
-              <Text className="text-sage text-[15px] font-semibold">
+              <Text className="text-sage text-[17px] font-semibold text-center">
                 {t("auth.signIn")}
               </Text>
             </Pressable>

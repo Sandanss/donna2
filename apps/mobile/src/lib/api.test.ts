@@ -76,4 +76,23 @@ describe("mobile API client", () => {
       "That request changed before Donna finished the first try. Check the latest information, then try again.",
     );
   });
+
+  it("sends caregiver phone and relationship when validating onboarding phone", async () => {
+    const { api } = await loadApi();
+
+    await api.onboarding.validatePhone("(555) 123-4567", "token-1", {
+      caregiverPhone: "(555) 123-4567",
+      relationship: "Myself",
+    });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const [url, options] = vi.mocked(fetch).mock.calls[0];
+    expect(url).toBe("https://api.example.test/api/onboarding/validate-phone");
+    expect(options?.method).toBe("POST");
+    expect(JSON.parse(String(options?.body))).toEqual({
+      phone: "(555) 123-4567",
+      caregiverPhone: "(555) 123-4567",
+      relation: "Myself",
+    });
+  });
 });
