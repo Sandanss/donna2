@@ -1,11 +1,12 @@
-import { useState } from 'react';
+import React, { useState, Suspense } from 'react';
 import { Outlet, NavLink, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { DashboardProvider, useDashboard } from './DashboardContext';
 import FloatingActionButton from './components/FloatingActionButton';
 import InstantCallModal from './components/InstantCallModal';
-import ChatPanel from './components/ChatPanel';
 import './dashboard.css';
+
+const ChatPanel = React.lazy(() => import('./components/ChatPanel'));
 
 const navItems = [
   { to: '/dashboard', label: 'Home', icon: 'home', end: true },
@@ -149,7 +150,9 @@ function DashboardInner() {
 
       {/* Chat Panel */}
       {chatOpen && senior && (
-        <ChatPanel onClose={() => setChatOpen(false)} />
+        <Suspense fallback={null}>
+          <ChatPanel onClose={() => setChatOpen(false)} />
+        </Suspense>
       )}
     </div>
   );

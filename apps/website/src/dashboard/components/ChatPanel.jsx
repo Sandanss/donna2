@@ -1,13 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
-import { useAuth } from '@clerk/clerk-react';
 import { useDashboard } from '../DashboardContext';
 import ProposalCard from './ProposalCard';
 
-const API_URL = 'https://donna-api-production-2450.up.railway.app';
-
 export default function ChatPanel({ onClose }) {
-  const { senior } = useDashboard();
-  const { getToken } = useAuth();
+  const { senior, api } = useDashboard();
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
@@ -40,18 +36,10 @@ export default function ChatPanel({ onClose }) {
     setMessages(prev => [...prev, { role: 'assistant', content: '', proposals: [] }]);
 
     try {
-      const token = await getToken();
-      const response = await fetch(`${API_URL}/api/chat`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          seniorId: senior.id,
-          messages: newMessages.map(m => ({ role: m.role, content: m.content })),
-        }),
-      });
+      const response = await api.streamChat(
+        senior.id,
+        newMessages.map(m => ({ role: m.role, content: m.content })),
+      );
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
