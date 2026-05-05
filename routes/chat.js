@@ -15,6 +15,7 @@ import { seniors } from '../db/schema.js';
 import { eq } from 'drizzle-orm';
 import { toolDefinitions, executeTool } from '../services/chat-tools.js';
 import { logAudit } from '../services/audit.js';
+import { decryptSeniorPhi } from '../lib/phi.js';
 
 const router = Router();
 
@@ -58,10 +59,11 @@ router.post('/api/chat', requireAuth, async (req, res) => {
     }
 
     // Load senior profile
-    const [senior] = await db.select().from(seniors).where(eq(seniors.id, seniorId)).limit(1);
-    if (!senior) {
+    const [rawSenior] = await db.select().from(seniors).where(eq(seniors.id, seniorId)).limit(1);
+    if (!rawSenior) {
       return res.status(404).json({ error: 'Senior not found' });
     }
+    const senior = decryptSeniorPhi(rawSenior);
 
     const caregiverName = 'Caregiver';
 

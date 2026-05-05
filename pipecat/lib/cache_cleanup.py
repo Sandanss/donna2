@@ -4,6 +4,7 @@ Runs every 5 minutes and evicts stale entries from in-memory caches:
 - context_cache._cache: entries past their expires_at TTL
 - scheduler.pending_reminder_calls: entries older than 30 minutes
 - scheduler.prefetched_context_by_phone: entries older than 30 minutes
+- call_context.call_metadata: PHI-bearing call metadata past its TTL
 """
 
 from __future__ import annotations
@@ -82,6 +83,14 @@ def _run_cleanup() -> int:
     except Exception:
         pass
 
+    # 4. Call metadata — stores PHI-bearing context for active Telnyx calls.
+    try:
+        from api.routes.call_context import cleanup_expired_call_metadata
+
+        total += cleanup_expired_call_metadata(now)
+    except Exception:
+        pass
+
     return total
 
 
@@ -100,6 +109,12 @@ def get_cache_sizes() -> dict[str, int]:
     except Exception:
         sizes["pending_calls"] = -1
         sizes["prefetched_phones"] = -1
+    try:
+        from api.routes.call_context import call_metadata
+
+        sizes["call_metadata"] = len(call_metadata)
+    except Exception:
+        sizes["call_metadata"] = -1
     return sizes
 
 

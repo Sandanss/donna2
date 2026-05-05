@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import time
 from unittest.mock import AsyncMock
@@ -12,11 +13,13 @@ from api.routes.call_context import call_metadata
 
 @pytest.fixture(autouse=True)
 def reset_websocket_state():
+    original_semaphore = pipecat_main._call_semaphore
     call_metadata.clear()
     pipecat_main._active_calls = 0
     yield
     call_metadata.clear()
     pipecat_main._active_calls = 0
+    pipecat_main._call_semaphore = original_semaphore
 
 
 def test_telnyx_websocket_accepts_authenticated_l16_media_smoke(monkeypatch):
@@ -103,3 +106,40 @@ def test_telnyx_websocket_rejects_bad_token_before_pipeline(monkeypatch):
             websocket.receive_text()
 
     run_bot.assert_not_awaited()
+
+
+def test_telnyx_websocket_hangs_up_and_cleans_metadata_when_at_capacity(monkeypatch):
+    call_control_id = "v3:capacity-call"
+    ws_token = "capacity-token"
+    run_bot = AsyncMock()
+    hangup = AsyncMock()
+    monkeypatch.setattr(pipecat_main, "run_bot", run_bot)
+    monkeypatch.setattr("api.routes.telnyx._hangup_telnyx_call", hangup)
+    pipecat_main._call_semaphore = asyncio.Semaphore(0)
+
+    call_metadata[call_control_id] = {
+        "ws_token": ws_token,
+        "ws_token_expires_at": time.time() + 300,
+        "ws_token_consumed": False,
+        "telephony_provider": "telnyx",
+        "senior": {"id": "senior-capacity"},
+        "call_type": "check-in",
+    }
+
+    client = TestClient(pipecat_main.app)
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect(f"/ws?ws_token={ws_token}") as websocket:
+            websocket.send_json({"event": "connected"})
+            websocket.send_json({
+                "event": "start",
+                "stream_id": "stream-capacity",
+                "start": {
+                    "call_control_id": call_control_id,
+                    "media_format": {"encoding": "L16", "sample_rate": 16000},
+                },
+            })
+            websocket.receive_text()
+
+    hangup.assert_awaited_once_with(call_control_id)
+    run_bot.assert_not_awaited()
+    assert call_control_id not in call_metadata

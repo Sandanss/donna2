@@ -94,6 +94,38 @@ async def test_upstash_rest_state_set_and_get_json_with_ttl():
 
 
 @pytest.mark.asyncio
+async def test_in_memory_state_set_if_absent_claims_once():
+    state = InMemoryState()
+
+    assert await state.set_if_absent("ws_token_consumed:CA123", {"ok": True}, ttl=30) is True
+    assert await state.set_if_absent("ws_token_consumed:CA123", {"ok": True}, ttl=30) is False
+
+
+@pytest.mark.asyncio
+async def test_upstash_rest_state_set_if_absent_uses_nx_with_ttl():
+    client = _FakeClient([
+        {"result": "OK"},
+        {"result": None},
+    ])
+    state = UpstashRestState("https://example.upstash.io/", "token")
+    state._client = client
+
+    first = await state.set_if_absent("ws_token_consumed:CA123", {"consumed": True}, ttl=300)
+    second = await state.set_if_absent("ws_token_consumed:CA123", {"consumed": True}, ttl=300)
+
+    assert first is True
+    assert second is False
+    assert client.commands[0][1] == [
+        "SET",
+        "ws_token_consumed:CA123",
+        json.dumps({"consumed": True}),
+        "EX",
+        300,
+        "NX",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_upstash_rest_state_hash_roundtrip_shape():
     client = _FakeClient([
         {"result": 2},
