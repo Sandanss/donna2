@@ -3,6 +3,8 @@ name: CI
 on:
   pull_request:
     branches: [main]
+  push:
+    branches: [main]
 
 jobs:
   python-tests:
@@ -116,6 +118,7 @@ jobs:
         run: uv run python -m pytest tests/ -m regression --tb=short -q
 
   deploy-staging:
+    if: github.event_name == 'push'
     needs: [python-tests, node-tests, frontend-tests, mobile-checks, regression-tests]
     runs-on: ubuntu-latest
     environment: staging
@@ -137,6 +140,7 @@ jobs:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
   smoke-test:
+    if: github.event_name == 'push'
     needs: [deploy-staging]
     runs-on: ubuntu-latest
     steps:
