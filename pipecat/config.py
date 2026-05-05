@@ -135,8 +135,12 @@ class Settings:
     retention_call_analyses_days: int = 365
     retention_daily_context_days: int = 90
     retention_call_metrics_days: int = 180
+    retention_inactive_reminders_days: int = 365
     retention_reminder_deliveries_days: int = 90
     retention_notifications_days: int = 180
+    retention_caregiver_notes_days: int = 365
+    retention_prospects_days: int = 90
+    retention_inactive_senior_review_days: int = 365
     retention_waitlist_days: int = 365
     retention_audit_logs_days: int = 2190
 
@@ -378,8 +382,12 @@ def _load_settings() -> Settings:
         retention_call_analyses_days=int(_env("RETENTION_CALL_ANALYSES_DAYS", "365")),
         retention_daily_context_days=int(_env("RETENTION_DAILY_CONTEXT_DAYS", "90")),
         retention_call_metrics_days=int(_env("RETENTION_CALL_METRICS_DAYS", "180")),
+        retention_inactive_reminders_days=int(_env("RETENTION_INACTIVE_REMINDERS_DAYS", "365")),
         retention_reminder_deliveries_days=int(_env("RETENTION_REMINDER_DELIVERIES_DAYS", "90")),
         retention_notifications_days=int(_env("RETENTION_NOTIFICATIONS_DAYS", "180")),
+        retention_caregiver_notes_days=int(_env("RETENTION_CAREGIVER_NOTES_DAYS", "365")),
+        retention_prospects_days=int(_env("RETENTION_PROSPECTS_DAYS", "90")),
+        retention_inactive_senior_review_days=int(_env("RETENTION_INACTIVE_SENIOR_REVIEW_DAYS", "365")),
         retention_waitlist_days=int(_env("RETENTION_WAITLIST_DAYS", "365")),
         retention_audit_logs_days=int(_env("RETENTION_AUDIT_LOGS_DAYS", "2190")),
     )

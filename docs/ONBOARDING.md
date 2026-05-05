@@ -187,10 +187,10 @@ maestro test .maestro/flows/13_leave_setup_cleanup.yaml
 
 Before writing any code, read these two files:
 
-1. **[`CLAUDE.md`](../CLAUDE.md)** — Full project context, architecture, every feature, environment variables, deployment workflow
+1. **[`claude.md`](../claude.md)** — Full project context, architecture, every feature, environment variables, deployment workflow
 2. **[`DIRECTORY.md`](../DIRECTORY.md)** — What each directory does and which file to open for any task
 
-These are the source of truth. They're also what AI assistants (Claude Code) read to understand the project.
+These are the source of truth. They're also what AI assistants read to understand the project.
 
 Other useful docs:
 - `pipecat/docs/ARCHITECTURE.md` — Pipeline deep-dive with diagrams
@@ -204,8 +204,8 @@ Other useful docs:
 
 | Environment | Purpose | How to deploy | Phone # for testing |
 |-------------|---------|---------------|---------------------|
-| **dev** | Your experiments | `make deploy-dev` | +19789235477 |
-| **staging** | Pre-merge CI | Automatic on PR | +19789235477 |
+| **dev** | Your experiments | `make deploy-dev` | Shared dev Telnyx number; confirm current value in Railway/Telnyx before calling |
+| **staging** | Pre-merge CI | Automatic on PR | Do not assume the dev number; coordinate before staging voice tests |
 | **production** | Live customers | Automatic on merge to `main` | +18064508649 (DO NOT test here) |
 
 Each has its own database (Neon branch) and Railway services. Dev is your playground — you can't break production from dev.
@@ -225,7 +225,7 @@ make deploy-dev-pipecat      # Voice pipeline changes (~30s)
 make deploy-dev              # Both Pipecat + Node.js API (~60s)
 
 # 4. Test with a real call
-#    Call +19789235477 from your phone
+#    Call the current dev Telnyx number from an approved dummy/consenting test phone.
 
 # 5. Check logs
 make logs-dev                # Voice/call pipeline logs
@@ -281,7 +281,7 @@ railway logs --service donna-pipecat --environment dev
 
 **Donna currently uses one shared secret set across dev, staging, and production.** You don't need your own Anthropic, Deepgram, ElevenLabs, Cartesia, Groq, Google, OpenAI, or Telnyx keys for normal dev work when Railway injects the configured environment values. SMS is inactive for now. Production-like environments must have `DONNA_API_KEYS`, `FIELD_ENCRYPTION_KEY`, `JWT_SECRET`, `CLERK_SECRET_KEY`, `PIPECAT_PUBLIC_URL`, and Telnyx voice credentials set so Pipecat can fail closed. Treat dev/staging Railway variable or runtime-log exposure as production secret exposure until these secrets are split by environment.
 
-**Commit messages should be specific.** Not `feat: update memory system` but `feat: reduce memory context to 20 items (recent turns already cover last 3 calls)`. See the commit message guidelines in `CLAUDE.md`.
+**Commit messages should be specific.** Not `feat: update memory system` but `feat: reduce memory context to 20 items (recent turns already cover last 3 calls)`. See the commit message guidelines in `claude.md`.
 
 ---
 
@@ -290,9 +290,11 @@ railway logs --service donna-pipecat --environment dev
 Donna handles health-adjacent data for elderly users. Key rules:
 
 - **Never log PII** (names, phone numbers) in plaintext — use `maskName()` / `maskPhone()` helpers
-- **PHI fields are encrypted** at rest (AES-256-GCM) — see `lib/encryption.py` and `lib/encryption.js`
-- **Audit logging** is automatic — all PHI access is recorded
-- **Data retention** is automated — old data is purged on schedule
+- **PHI fields are encrypted** at rest where encrypted companion columns are deployed and backfilled — see `lib/encryption.py`, `lib/encryption.js`, and `docs/architecture/SECURITY.md`
+- **Audit logging is partial** — verify coverage before changing PHI read/write paths, and add events where missing
+- **Data retention is a policy target with implementation gaps** — see `docs/compliance/DATA_RETENTION_POLICY.md`
+- **Do not store PHI or credentials in browser/mobile local storage** unless an approved encrypted/minimized design explicitly allows it
+- **Do not point tests or local clients at production Railway APIs** unless the test is an approved production smoke test
 
 Read `docs/compliance/` for the full picture before working on anything that touches senior data.
 
@@ -300,8 +302,8 @@ Read `docs/compliance/` for the full picture before working on anything that tou
 
 ## 10. Getting Help
 
-- **Project questions:** Read `CLAUDE.md` — it has answers to almost everything
-- **Claude Code:** Use it. The `CLAUDE.md` file gives it full project context
+- **Project questions:** Read `claude.md` — it has answers to almost everything
+- **AI assistant context:** `claude.md` gives coding agents the project context
 - **Stuck on something:** Check `pipecat/docs/LEARNINGS.md` — common pitfalls are documented there
 - **David:** Ask anytime
 

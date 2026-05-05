@@ -1,6 +1,12 @@
-# Historical Plans
+# Plans
 
-These dated plans are retained for context and auditability. They may describe superseded Twilio voice/SMS paths, Sonnet defaults, Cerebras experiments, Cartesia rollout ideas, `search_memories` as a live Claude tool, Director-owned web-search gating, or old 8kHz media assumptions.
+## Current Plan
+
+- [`2026-05-05-engineering-remediation-plan.md`](2026-05-05-engineering-remediation-plan.md) - current engineering fix plan from the May 5 audit. BAA/vendor agreement gates are intentionally out of scope for this plan.
+
+## Historical Plans
+
+Other dated plans are retained for context and auditability. They may describe superseded Twilio voice/SMS paths, Sonnet defaults, Cerebras experiments, Cartesia rollout ideas, `search_memories` as a live Claude tool, Director-owned web-search gating, or old 8kHz media assumptions.
 
 For current implementation source of truth, use:
 

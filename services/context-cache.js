@@ -20,7 +20,9 @@ import { newsService } from './news.js';
 import { db } from '../db/client.js';
 import { seniors as seniorsTable } from '../db/schema.js';
 import { eq } from 'drizzle-orm';
-import { maskName } from '../lib/sanitize.js';
+import { createLogger } from '../lib/logger.js';
+
+const log = createLogger('ContextCache');
 
 // In-memory cache (could be Redis for multi-instance deployments)
 const cache = new Map();
@@ -194,13 +196,13 @@ async function prefetchAndCache(seniorId) {
     // Get senior profile
     const senior = await seniorService.getById(seniorId);
     if (!senior) {
-      console.log(`[ContextCache] Senior ${seniorId} not found, skipping`);
+      log.info('Senior not found, skipping', { seniorId });
       return null;
     }
 
     const newsPromise = senior.interests?.length
       ? newsService.getNewsForSenior(senior.interests, 8).catch((error) => {
-          console.error(`[ContextCache] News prefetch failed for ${seniorId.slice(0, 8)}:`, error.message);
+          log.warn('News prefetch failed', { seniorId, error: error.message });
           return null;
         })
       : Promise.resolve(null);
@@ -228,9 +230,9 @@ async function prefetchAndCache(seniorId) {
           updatedAt: new Date(),
         })
         .where(eq(seniorsTable.id, seniorId));
-      console.log(`[ContextCache] Persisted cached news for ${maskName(senior.name)}`);
+      log.info('Persisted cached news', { seniorId });
     } else if (senior.interests?.length) {
-      console.warn(`[ContextCache] No fresh news cached for ${maskName(senior.name)}`);
+      log.warn('No fresh news cached', { seniorId, interestsCount: senior.interests.length });
     }
 
     // Get last call summary for context-aware greetings
@@ -246,7 +248,12 @@ async function prefetchAndCache(seniorId) {
       seniorId: senior.id,
     });
 
-    console.log(`[ContextCache] Generated greeting for ${maskName(senior.name)}: period=${period}, template=${templateIndex}, interest=${selectedInterest || 'none'}`);
+    log.info('Generated greeting', {
+      seniorId,
+      period,
+      templateIndex,
+      selectedInterestPresent: Boolean(selectedInterest),
+    });
 
     // Build memory context string (Tier 1 + important)
     const memoryParts = [];
@@ -284,11 +291,11 @@ async function prefetchAndCache(seniorId) {
     cache.set(seniorId, cachedContext);
 
     const elapsed = Date.now() - startTime;
-    console.log(`[ContextCache] Pre-cached context for ${maskName(senior.name)} in ${elapsed}ms`);
+    log.info('Pre-cached context', { seniorId, durationMs: elapsed });
 
     return cachedContext;
   } catch (error) {
-    console.error(`[ContextCache] Error pre-caching ${seniorId}:`, error.message);
+    log.error('Error pre-caching context', { seniorId, error: error.message });
     return null;
   }
 }
@@ -307,11 +314,14 @@ function getCache(seniorId) {
   // Check expiration
   if (Date.now() > cached.expiresAt) {
     cache.delete(seniorId);
-    console.log(`[ContextCache] Cache expired for ${seniorId}`);
+    log.info('Cache expired', { seniorId });
     return null;
   }
 
-  console.log(`[ContextCache] Cache hit for ${seniorId} (age: ${Math.round((Date.now() - cached.cachedAt) / 60000)} min)`);
+  log.info('Cache hit', {
+    seniorId,
+    ageMinutes: Math.round((Date.now() - cached.cachedAt) / 60000),
+  });
   return cached;
 }
 
@@ -321,7 +331,7 @@ function getCache(seniorId) {
 function clearCache(seniorId) {
   if (cache.has(seniorId)) {
     cache.delete(seniorId);
-    console.log(`[ContextCache] Cleared cache for ${seniorId}`);
+    log.info('Cleared cache', { seniorId });
   }
 }
 
@@ -331,7 +341,7 @@ function clearCache(seniorId) {
 function clearAll() {
   const count = cache.size;
   cache.clear();
-  console.log(`[ContextCache] Cleared all ${count} cached contexts`);
+  log.info('Cleared all cached contexts', { count });
 }
 
 /**
@@ -339,7 +349,7 @@ function clearAll() {
  * Called hourly by scheduler
  */
 async function runDailyPrefetch() {
-  console.log('[ContextCache] Running daily pre-fetch check...');
+  log.info('Running daily pre-fetch check');
 
   try {
     // Get all seniors
@@ -357,10 +367,10 @@ async function runDailyPrefetch() {
     }
 
     if (prefetchedCount > 0) {
-      console.log(`[ContextCache] Pre-fetched context for ${prefetchedCount} seniors`);
+      log.info('Pre-fetched contexts', { count: prefetchedCount });
     }
   } catch (error) {
-    console.error('[ContextCache] Daily pre-fetch error:', error.message);
+    log.error('Daily pre-fetch error', { error: error.message });
   }
 }
 

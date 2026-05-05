@@ -262,6 +262,20 @@ The code and schema support encrypted-only new writes, but each deployed databas
 
 Operational lookup/display fields such as senior name, phone, timezone, city/state/ZIP, and interests remain plaintext for now. Treat them as minimized PII/operational data, not as a substitute for the encrypted PHI fields.
 
+### Current Security Gaps From May 5 Audit
+
+These are known gaps, not implemented safeguards:
+
+- Website onboarding stores credentials and PHI-bearing onboarding data in plaintext `localStorage` under `donna_onboarding`. This should be removed or replaced with minimized, encrypted, short-lived state.
+- Website and consumer E2E clients contain hardcoded production Railway API URLs in several places. Tests and local clients should default to mocks or non-production endpoints to avoid test/prod contamination.
+- PHI-bearing payloads or raw inputs are still logged in mobile schedule save and debug paths including caregiver, news, context-cache, website intake, and onboarding flows. Production logs must not include schedules, reminders, profile context, memory/search queries, or onboarding payloads.
+- Memory search audit metadata stores raw query text, and `q`/`limit` need validation and clamping. Audit logs are long-lived, so metadata must follow minimum-necessary rules.
+- Notification reads and schedule reads/writes lack audit events. Audit coverage remains partial until these paths are covered and tested.
+- Token revocation fails open on storage errors. High-risk auth/session checks should fail closed when revocation state cannot be checked.
+- WebSocket `ws_token` consumption is not atomic, so concurrent duplicate pipelines may be possible during races.
+- Gemini Live remains an evaluation path unless it gains equivalent Quick Observer, Director, ephemeral stripping, and programmatic goodbye safeguards.
+- Hard delete can leave encrypted idempotency replay rows for up to 24 hours. This is a deletion completeness gap even though replay payloads are encrypted.
+
 ---
 
 ## Security Audit Summary

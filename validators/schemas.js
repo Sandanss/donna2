@@ -122,6 +122,18 @@ export const createMemorySchema = z.object({
     .default(50),
 });
 
+export const memorySearchQuerySchema = z.object({
+  q: z.string()
+    .trim()
+    .min(1, 'Search query is required')
+    .max(500, 'Search query too long'),
+  limit: z.coerce.number()
+    .int()
+    .min(1)
+    .max(20)
+    .default(5),
+});
+
 // =============================================================================
 // Reminder Schemas
 // =============================================================================
@@ -397,6 +409,7 @@ export const schemas = {
 
   // Memories
   createMemory: createMemorySchema,
+  memorySearchQuery: memorySearchQuerySchema,
 
   // Reminders
   createReminder: createReminderSchema,

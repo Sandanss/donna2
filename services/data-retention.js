@@ -32,8 +32,12 @@ const RETENTION_DAYS = {
   call_analyses:         parseInt(process.env.RETENTION_CALL_ANALYSES_DAYS              || '365', 10),
   daily_call_context:    parseInt(process.env.RETENTION_DAILY_CONTEXT_DAYS              || '90',  10),
   call_metrics:          parseInt(process.env.RETENTION_CALL_METRICS_DAYS               || '180', 10),
+  inactive_reminders:    parseInt(process.env.RETENTION_INACTIVE_REMINDERS_DAYS         || '365', 10),
   reminder_deliveries:   parseInt(process.env.RETENTION_REMINDER_DELIVERIES_DAYS        || '90',  10),
   notifications:         parseInt(process.env.RETENTION_NOTIFICATIONS_DAYS              || '180', 10),
+  caregiver_notes:       parseInt(process.env.RETENTION_CAREGIVER_NOTES_DAYS            || '365', 10),
+  prospects:             parseInt(process.env.RETENTION_PROSPECTS_DAYS                  || '90',  10),
+  senior_profile_review: parseInt(process.env.RETENTION_INACTIVE_SENIOR_REVIEW_DAYS     || '365', 10),
   idempotency_keys:      parseInt(process.env.RETENTION_IDEMPOTENCY_KEYS_DAYS           || '1',   10),
   waitlist:              parseInt(process.env.RETENTION_WAITLIST_DAYS                   || '365', 10),
   audit_logs:            parseInt(process.env.RETENTION_AUDIT_LOGS_DAYS                 || '2190', 10),
@@ -51,11 +55,41 @@ const TABLE_DATE_COLUMNS = {
   call_metrics:         'created_at',
   reminder_deliveries:  'created_at',
   notifications:        'sent_at',
+  caregiver_notes:      'created_at',
+  prospects:            'updated_at',
   waitlist:             'created_at',
   audit_logs:           'created_at',
 };
 
 const ALLOWED_TABLES = new Set(Object.keys(TABLE_DATE_COLUMNS));
+
+const LEGAL_HOLD_RESOURCE_TYPES = {
+  conversations: 'conversation',
+  memories: 'memory',
+  call_analyses: 'call_analysis',
+  daily_call_context: 'daily_call_context',
+  call_metrics: 'call_metric',
+  reminder_deliveries: 'reminder_delivery',
+  notifications: 'notification',
+  caregiver_notes: 'caregiver_note',
+  prospects: 'prospect',
+  waitlist: 'waitlist',
+  audit_logs: 'audit_log',
+};
+
+function legalHoldExclusion(alias, table) {
+  const resourceType = LEGAL_HOLD_RESOURCE_TYPES[table];
+  if (!resourceType) return sql`TRUE`;
+  return sql`
+    NOT EXISTS (
+      SELECT 1
+      FROM legal_holds lh
+      WHERE lh.released_at IS NULL
+        AND lh.resource_type = ${resourceType}
+        AND lh.resource_id = ${sql.raw(`${alias}.id::text`)}
+    )
+  `;
+}
 
 // ---------------------------------------------------------------------------
 // Core purge logic
@@ -80,10 +114,11 @@ async function purgeTable(table, dateColumn, days) {
     // input), so embedding them in the query string is safe.
     const result = await db.execute(sql`
       WITH batch AS (
-        SELECT ctid
-        FROM ${sql.raw(table)}
-        WHERE ${sql.raw(dateColumn)} < NOW() - make_interval(days => ${days})
-        ORDER BY ${sql.raw(dateColumn)}
+        SELECT target.ctid
+        FROM ${sql.raw(table)} AS target
+        WHERE target.${sql.raw(dateColumn)} < NOW() - make_interval(days => ${days})
+          AND ${legalHoldExclusion('target', table)}
+        ORDER BY target.${sql.raw(dateColumn)}
         LIMIT ${BATCH_SIZE}
       ),
       deleted AS (
@@ -118,18 +153,19 @@ async function redactConversationPhi(days) {
   while (true) {
     const result = await db.execute(sql`
       WITH batch AS (
-        SELECT ctid
-        FROM conversations
-        WHERE started_at < NOW() - make_interval(days => ${days})
+        SELECT target.ctid
+        FROM conversations AS target
+        WHERE target.started_at < NOW() - make_interval(days => ${days})
           AND (
-            summary IS NOT NULL
-            OR summary_encrypted IS NOT NULL
-            OR transcript IS NOT NULL
-            OR transcript_encrypted IS NOT NULL
-            OR transcript_text_encrypted IS NOT NULL
-            OR concerns IS NOT NULL
+            target.summary IS NOT NULL
+            OR target.summary_encrypted IS NOT NULL
+            OR target.transcript IS NOT NULL
+            OR target.transcript_encrypted IS NOT NULL
+            OR target.transcript_text_encrypted IS NOT NULL
+            OR target.concerns IS NOT NULL
           )
-        ORDER BY started_at
+          AND ${legalHoldExclusion('target', 'conversations')}
+        ORDER BY target.started_at
         LIMIT ${BATCH_SIZE}
       ),
       redacted AS (
@@ -154,6 +190,87 @@ async function redactConversationPhi(days) {
   }
 
   return totalRedacted;
+}
+
+/**
+ * Purge inactive reminder definitions after their deactivation retention window.
+ */
+async function purgeInactiveReminders(days) {
+  let totalDeleted = 0;
+
+  while (true) {
+    const result = await db.execute(sql`
+      WITH batch AS (
+        SELECT r.id
+        FROM reminders r
+        WHERE r.is_active = false
+          AND COALESCE(r.deactivated_at, r.last_delivered_at, r.created_at) < NOW() - make_interval(days => ${days})
+          AND NOT EXISTS (
+            SELECT 1
+            FROM legal_holds lh
+            WHERE lh.released_at IS NULL
+              AND lh.resource_type = 'reminder'
+              AND lh.resource_id = r.id::text
+          )
+          AND NOT EXISTS (
+            SELECT 1
+            FROM reminder_deliveries rd
+            JOIN legal_holds lh
+              ON lh.released_at IS NULL
+             AND lh.resource_type = 'reminder_delivery'
+             AND lh.resource_id = rd.id::text
+            WHERE rd.reminder_id = r.id
+          )
+        ORDER BY COALESCE(r.deactivated_at, r.last_delivered_at, r.created_at)
+        LIMIT ${BATCH_SIZE}
+      ),
+      deleted_deliveries AS (
+        DELETE FROM reminder_deliveries rd
+        USING batch
+        WHERE rd.reminder_id = batch.id
+        RETURNING 1
+      ),
+      deleted_reminders AS (
+        DELETE FROM reminders r
+        USING batch
+        WHERE r.id = batch.id
+        RETURNING 1
+      )
+      SELECT count(*)::int AS count FROM deleted_reminders
+    `);
+
+    const batchCount = result.rows?.[0]?.count ?? 0;
+    totalDeleted += batchCount;
+    if (batchCount < BATCH_SIZE) break;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+
+  return totalDeleted;
+}
+
+/**
+ * Count inactive senior profiles ready for manual review. This intentionally
+ * does not delete profile rows because policy requires review before purge.
+ */
+async function countSeniorProfileReviewCandidates(days) {
+  const result = await db.execute(sql`
+    SELECT COUNT(*)::int AS count
+    FROM seniors s
+    WHERE s.is_active = false
+      AND COALESCE(
+        (SELECT MAX(c.started_at) FROM conversations c WHERE c.senior_id = s.id),
+        s.updated_at,
+        s.created_at
+      ) < NOW() - make_interval(days => ${days})
+      AND NOT EXISTS (
+        SELECT 1
+        FROM legal_holds lh
+        WHERE lh.released_at IS NULL
+          AND lh.resource_type = 'senior'
+          AND lh.resource_id = s.id::text
+      )
+  `);
+  return result.rows?.[0]?.count ?? 0;
 }
 
 /**
@@ -204,6 +321,16 @@ export async function purgeExpiredData() {
     try {
       if (table === 'conversation_phi') {
         results[table] = await redactConversationPhi(days);
+        continue;
+      }
+
+      if (table === 'inactive_reminders') {
+        results[table] = await purgeInactiveReminders(days);
+        continue;
+      }
+
+      if (table === 'senior_profile_review') {
+        results.senior_profile_review_candidates = await countSeniorProfileReviewCandidates(days);
         continue;
       }
 
@@ -266,4 +393,6 @@ export const dataRetentionService = {
   purgeExpiredData,
   runDailyPurgeIfNeeded,
   RETENTION_DAYS,
+  purgeInactiveReminders,
+  countSeniorProfileReviewCandidates,
 };

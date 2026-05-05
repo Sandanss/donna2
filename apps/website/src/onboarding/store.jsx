@@ -53,6 +53,14 @@ function reducer(state, action) {
 
 const OnboardingContext = createContext(null);
 
+function clearLegacyOnboardingStorage() {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // Ignore unavailable storage.
+  }
+}
+
 export function OnboardingProvider({ children }) {
   const [state, dispatch] = useReducer(reducer, initialState, () => {
     if (typeof window === 'undefined') return initialState;
@@ -60,37 +68,21 @@ export function OnboardingProvider({ children }) {
       // If the user explicitly exited, start fresh at step 0
       if (sessionStorage.getItem(EXIT_FLAG_KEY)) {
         sessionStorage.removeItem(EXIT_FLAG_KEY);
-        localStorage.removeItem(STORAGE_KEY);
+        clearLegacyOnboardingStorage();
         return initialState;
       }
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        // Step 8 (success) should never be restored — onboarding is done
-        if (parsed.step >= 8) {
-          localStorage.removeItem(STORAGE_KEY);
-          return initialState;
-        }
-        return { ...initialState, ...parsed };
-      }
+      clearLegacyOnboardingStorage();
     } catch {
-      // Ignore invalid or unavailable local storage and start fresh.
+      // Ignore unavailable session storage and start fresh.
     }
     return initialState;
   });
 
-  // Persist to localStorage on every state change (but not the success screen)
+  // Do not persist onboarding drafts. They can include credentials, phone
+  // numbers, reminders, and family context, so state stays in memory only.
   useEffect(() => {
-    try {
-      if (state.step >= 8) {
-        localStorage.removeItem(STORAGE_KEY);
-      } else {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-      }
-    } catch {
-      // Ignore persistence failures; onboarding state still works in memory.
-    }
-  }, [state]);
+    clearLegacyOnboardingStorage();
+  }, [state.step]);
 
   const update = useCallback((payload) => {
     dispatch({ type: 'UPDATE', payload });
@@ -103,7 +95,7 @@ export function OnboardingProvider({ children }) {
   const reset = useCallback(() => {
     dispatch({ type: 'RESET' });
     try {
-      localStorage.removeItem(STORAGE_KEY);
+      clearLegacyOnboardingStorage();
       sessionStorage.setItem(EXIT_FLAG_KEY, 'true');
     } catch {
       // Ignore unavailable storage during reset.

@@ -122,8 +122,7 @@ function OnboardingInner() {
       'Are you sure you want to leave? You\'ll lose all your progress in the signup flow.'
     );
     if (confirmed) {
-      // Clear localStorage directly before reset to prevent the persist useEffect
-      // from re-saving data before navigation happens
+      // Clear any legacy persisted onboarding payload before navigation.
       try {
         localStorage.removeItem('donna_onboarding');
         sessionStorage.setItem('donna_onboarding_exited', 'true');
@@ -155,7 +154,7 @@ function OnboardingInner() {
       await submitOnboarding(data, token);
       setStep(8);
       window.scrollTo(0, 0);
-      // Clear localStorage on success
+      // Clear any legacy persisted onboarding payload on success.
       try {
         localStorage.removeItem('donna_onboarding');
       } catch {

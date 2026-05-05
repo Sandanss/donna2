@@ -7,13 +7,14 @@ import { writeLimiter } from '../middleware/rate-limit.js';
 import { idempotencyMiddleware } from '../middleware/idempotency.js';
 import { validateBody } from '../middleware/validate.js';
 import { onboardingPhoneAvailabilitySchema, onboardingSchema } from '../validators/schemas.js';
-import { maskName } from '../lib/sanitize.js';
 import { cronExpressionFromTime, resolveTimezoneFromProfile, wallTimeTodayToUtcDate } from '../lib/timezone.js';
 import { sendError } from '../lib/http-response.js';
 import { decryptReminderPhi, decryptSeniorPhi, encryptReminderPhi, encryptSeniorPhi } from '../lib/phi.js';
 import { routeError } from './helpers.js';
+import { createLogger } from '../lib/logger.js';
 
 const router = Router();
+const log = createLogger('Onboarding');
 
 function normalizePhone(phone) {
   return String(phone || '').replace(/\D/g, '').slice(-10);
@@ -161,15 +162,17 @@ router.post('/api/onboarding', requireAuth, validateBody(onboardingSchema), idem
       return { senior: decryptSeniorPhi(senior), createdReminders };
     });
 
-    console.log(`[Onboarding] Completed: user=${clerkUserId}, senior=${maskName(senior.name)}, reminders=${createdReminders.length}`);
+    log.info('Completed onboarding', {
+      userId: clerkUserId,
+      seniorId: senior.id,
+      remindersCreated: createdReminders.length,
+    });
 
     res.json({
       senior,
       reminders: createdReminders,
     });
   } catch (error) {
-    console.error('Onboarding failed:', error);
-
     const pgCode = error.code || error.cause?.code;
     const pgConstraint = error.constraint || error.cause?.constraint;
     if (pgCode === '23505' && pgConstraint?.includes('phone')) {

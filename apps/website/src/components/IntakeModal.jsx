@@ -28,7 +28,6 @@ export default function IntakeModal({ isOpen, onClose }) {
   const handleSubmit = (e) => {
     e.preventDefault();
     // TODO: Wire up Stripe payment + form submission (EmailJS / API)
-    console.log('Intake form submitted:', form);
     setSubmitted(true);
   };
 

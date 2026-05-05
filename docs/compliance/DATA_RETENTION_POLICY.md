@@ -4,10 +4,10 @@
 
 | Field | Value |
 |-------|-------|
-| Last Updated | April 22, 2026 |
+| Last Updated | May 5, 2026 |
 | Owner | TBD (HIPAA Security Officer) |
 | Review Cadence | Annually |
-| Related Docs | [HIPAA Overview](HIPAA_OVERVIEW.md), [BAA Tracker](BAA_TRACKER.md), [Breach Notification](BREACH_NOTIFICATION.md) |
+| Related Docs | [HIPAA Overview](HIPAA_OVERVIEW.md), [BAA Tracker](BAA_TRACKER.md), [Breach Notification](BREACH_NOTIFICATION.md), [May 5 Audit](../audits/2026-05-05-codebase-audit.md) |
 
 ---
 
@@ -52,6 +52,19 @@ This policy applies to all data stored in:
 
 ## Retention Schedule
 
+### Current Implementation Status
+
+The schedule below is the policy target. The May 5, 2026 static audit found implementation gaps: active Node/Python retention services do not yet cover every policy-scoped PHI class, and legal-hold support is not implemented end to end. Do not claim automated retention compliance until runtime jobs and tests prove coverage for each table and cache listed here.
+
+Known gaps to close:
+
+- Inactive reminder definitions are policy-scoped but not covered by the observed retention implementation.
+- Senior profile purge is policy-scoped but not fully automated.
+- `caregiver_notes` and prospect/onboarding data are PHI-bearing and need retention coverage.
+- Legal holds are documented as a requirement, but the required legal-hold table/checks are not complete.
+- Hard delete can leave encrypted idempotency replay rows for up to 24 hours; this is a deletion completeness gap even when payloads are encrypted.
+- Local/shared PHI-bearing call metadata needs TTL cleanup guarantees if terminal Telnyx webhook or WebSocket cleanup is missed.
+
 ### Database Records
 
 | Data Type | Table(s) | Contains PHI? | Retention Period | Trigger | Destruction Method |
@@ -67,6 +80,8 @@ This policy applies to all data stored in:
 | **Senior medical notes** | `seniors.medical_notes_encrypted`; legacy `medical_notes` fallback | Yes (CRITICAL) | Same as senior profile | Same as senior profile | Cleared when senior is purged |
 | **Senior family/additional profile context** | `seniors.family_info_encrypted`, `additional_info_encrypted`; legacy `family_info` / `additional_info` fallback | Yes (HIGH) | Same as senior profile | Same as senior profile | Cleared when senior is purged |
 | **Caregiver relationships** | `caregivers` | Low | Retained while linked + 90 days after unlinking | Manual unlinking date | Manual review + DELETE row |
+| **Caregiver notes** | `caregiver_notes.content_encrypted`; legacy/plaintext fallback if present | Yes (MEDIUM/HIGH) | Retained while active + 1 year after note deactivation/deletion or senior inactivity | Note status/date or senior inactivity | Automated purge target; current implementation coverage gap |
+| **Prospect/onboarding records** | `prospects.details_encrypted`, onboarding/session state, waitlist payloads where applicable | Possible/Yes | 90 days after abandoned onboarding; 1 year for waitlist unless converted | Created/updated date and conversion status | Automated purge target; current implementation coverage gap for prospects |
 | **Caregiver notifications** | `notifications.content_encrypted`, `metadata_encrypted`; legacy content/metadata fallback | Yes (MEDIUM) | 180 days from send date | `notifications.sent_at` | Automated purge job: DELETE row |
 | **Notification preferences** | `notification_preferences` | No | Retained while caregiver exists | Cascade from caregiver deletion | CASCADE DELETE |
 | **Call context snapshot** | `seniors.call_context_snapshot_encrypted`; legacy `call_context_snapshot` fallback | Yes (HIGH) | Overwritten on each call; set to NULL when senior is purged | N/A (ephemeral by design) | Set to NULL on senior purge |
@@ -74,6 +89,7 @@ This policy applies to all data stored in:
 | **Admin users** | `admin_users` | No (email/password hash) | Retained while active | Manual deactivation | DELETE row |
 | **Waitlist signups** | `waitlist.payload_encrypted`; legacy contact columns fallback | Possible (name, email, phone) | 1 year from signup | `waitlist.created_at` | Automated purge job: DELETE row |
 | **Audit logs** | `audit_logs` | Yes (references PHI) | **6 years** (HIPAA minimum) | `audit_logs.created_at` | Automated purge job: DELETE row after retention period |
+| **Idempotency replay rows** | Idempotency/replay storage for hard-delete and account operations | Possible/Yes (encrypted response payloads) | 24 hours max, or immediate cleanup on hard delete where feasible | Row creation and related deletion request | Current deletion completeness gap: encrypted replay rows can remain after hard delete until TTL expiry |
 
 ### Non-Database Data
 
@@ -87,6 +103,7 @@ This policy applies to all data stored in:
 | **TTS requests** | ElevenLabs / Cartesia | Yes (text content) | Verify vendor policy | Request deletion or confirm no-retention via BAA |
 | **LLM request logs** | Anthropic, Google, Groq (Cerebras legacy/not active) | Yes (conversation content) | Verify vendor policy (Anthropic: 30 days default) | Opt out of training data retention; confirm via BAA |
 | **Search queries** | Tavily, OpenAI | Possible | Verify vendor policy | Confirm via BAA or remove vendor |
+| **Email delivery requests** | Resend | Possible/Yes | Verify vendor policy | Confirm BAA/compliant no-PHI path or remove PHI from email body/metadata |
 | **Dev/staging databases** | Neon (branches) | Yes (copies of production) | Refresh quarterly; purge unused branches | `neonctl branches delete` |
 
 ---
@@ -126,6 +143,12 @@ This policy applies to all data stored in:
 - Delivery tracking records (when a reminder was delivered, whether acknowledged) are operational.
 - 90 days is sufficient for debugging delivery failures and reviewing adherence patterns.
 
+### Reminder Definitions (active + 1 year after deactivation)
+
+- Reminder definitions can contain medication names, routines, schedules, and caregiver-provided context.
+- Policy target: retain active reminders while needed for care continuity, then purge inactive definitions and associated deliveries after the retention window.
+- Current gap: the May 5 audit found inactive reminder definitions are not covered by observed retention services.
+
 ### Audit Logs (6 years)
 
 - HIPAA requires that compliance documentation, including audit trails, be retained for 6 years from the date of creation or the date when the document was last in effect, whichever is later (45 CFR 164.530(j)).
@@ -136,6 +159,13 @@ This policy applies to all data stored in:
 - Senior profiles are retained as long as the senior is active (receiving calls).
 - After the last call, a 1-year grace period allows for service resumption without data loss.
 - After 1 year of inactivity, a manual review determines whether to purge or extend (e.g., if a caregiver requests continued retention).
+- Current gap: profile purge is policy-scoped, but runtime automation and legal-hold checks must be verified before claiming coverage.
+
+### Caregiver Notes And Prospects
+
+- Caregiver notes can include sensitive family, care, schedule, or medical context intended for Donna calls.
+- Prospect/onboarding records can include senior-linked contact details and care context before full account creation.
+- Current gap: these data classes need explicit retention-worker coverage and deletion tests in both Node and Python paths that read/write them.
 
 ---
 
@@ -196,6 +226,18 @@ WHERE sent_at < NOW() - INTERVAL '180 days';
 DELETE FROM waitlist
 WHERE created_at < NOW() - INTERVAL '1 year';
 
+-- Purge abandoned prospects/onboarding records after 90 days.
+-- Exact predicates should match runtime schema fields for conversion/status.
+DELETE FROM prospects
+WHERE created_at < NOW() - INTERVAL '90 days'
+  AND id NOT IN (SELECT resource_id FROM legal_holds WHERE resource_type = 'prospect');
+
+-- Purge inactive caregiver notes after the approved retention window.
+-- Exact predicates should match runtime schema fields for active/deleted status.
+DELETE FROM caregiver_notes
+WHERE updated_at < NOW() - INTERVAL '1 year'
+  AND id NOT IN (SELECT resource_id FROM legal_holds WHERE resource_type = 'caregiver_note');
+
 -- Purge audit logs older than 6 years
 DELETE FROM audit_logs
 WHERE created_at < NOW() - INTERVAL '6 years';
@@ -211,6 +253,9 @@ WHERE created_at < NOW() - INTERVAL '6 years';
 - [ ] Alert if purge job fails or does not run within expected window
 - [ ] Test purge job on dev/staging environments with production data copies
 - [ ] Add purge job to monitoring dashboard
+- [ ] Verify retention coverage for inactive reminders, senior profiles, caregiver notes, prospects, notifications, and idempotency replay rows
+- [ ] Ensure hard-delete flows remove or expire encrypted replay/cache rows within the deletion SLA
+- [ ] Ensure shared call metadata has TTL cleanup even if terminal webhook/WebSocket cleanup is missed
 
 ---
 
@@ -245,6 +290,8 @@ CREATE TABLE legal_holds (
 
 3. All automated purge jobs check for active legal holds before deleting.
 4. Manual deletion requests are also blocked for held records.
+
+**Current gap:** This section is a policy requirement. The May 5 audit found legal-hold support is not complete in runtime retention/deletion services. Until implemented, deletion and purge procedures require manual legal review before execution.
 
 ### Releasing a Legal Hold
 
@@ -322,8 +369,12 @@ When a caregiver or senior requests deletion of their data:
    - `conversations` (by senior_id)
    - `notification_preferences` (by caregiver_id, for linked caregivers)
    - `caregivers` (by senior_id)
+   - prospect/onboarding rows linked to the senior/caregiver where applicable
+   - idempotency/replay rows for the deletion/account operation where feasible
    - `seniors` (the profile itself)
 3. Log the deletion action to the audit log (record THAT a deletion occurred, not the deleted content).
+
+**Known deletion completeness gap:** hard-delete/account deletion may leave encrypted idempotency replay rows until their 24-hour TTL. This is safer than raw replay storage, but it is still not a complete immediate deletion.
 
 ### Step 4: Vendor Data Deletion
 
@@ -354,6 +405,7 @@ Donna sends PHI to multiple vendors. Each vendor's data retention policy must be
 | **Cerebras** | Legacy/not active; conversation turns only if re-enabled | Check vendor policy before any re-enable | Keep disabled/remove stale env references unless BAA is signed |
 | **OpenAI** | Memory text, search queries | API: not used for training (opt-out); check retention | Confirm via BAA |
 | **Tavily** | Search queries | Check vendor policy | Confirm via vendor inquiry |
+| **Resend** | Caregiver email notification and weekly report payloads | Check vendor policy | Confirm BAA/compliant terms or remove PHI from email content and metadata |
 | **Telnyx** | Voice audio/media streaming, phone numbers, call metadata, optional recordings if enabled | Configurable; default varies | Configure retention limits in Telnyx Mission Control; keep recording disabled; confirm BAA/conduit-exception posture |
 | **Twilio** | No active data flow while SMS remains disabled and Twilio voice stays archived | N/A while inactive | Reassess retention and BAA needs before reintroducing SMS or Twilio voice |
 | **Neon** | All database data | Customer-controlled (PITR 7 days on Pro) | Managed by this retention policy |

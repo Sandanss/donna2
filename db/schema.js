@@ -78,6 +78,7 @@ export const reminders = pgTable('reminders', {
   isRecurring: boolean('is_recurring').default(false),
   cronExpression: varchar('cron_expression', { length: 100 }),
   isActive: boolean('is_active').default(true),
+  deactivatedAt: timestamp('deactivated_at'),
   lastDeliveredAt: timestamp('last_delivered_at'),
   createdAt: timestamp('created_at').defaultNow(),
 });
@@ -199,6 +200,18 @@ export const dataDeletionLogs = pgTable('data_deletion_logs', {
   deletedBy: varchar('deleted_by', { length: 255 }),
   recordCounts: json('record_counts'),
   createdAt: timestamp('created_at').defaultNow(),
+});
+
+// Legal holds suspend automated retention and destructive deletion.
+export const legalHolds = pgTable('legal_holds', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  resourceType: varchar('resource_type', { length: 100 }).notNull(),
+  resourceId: text('resource_id').notNull(),
+  holdReason: text('hold_reason').notNull(),
+  placedBy: varchar('placed_by', { length: 255 }).notNull(),
+  placedAt: timestamp('placed_at').defaultNow(),
+  releasedAt: timestamp('released_at'),
+  releaseReason: text('release_reason'),
 });
 
 // Waitlist signups from calldonna.co

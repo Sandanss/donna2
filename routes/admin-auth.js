@@ -11,8 +11,10 @@ import { logAudit } from '../services/audit.js';
 import { DEFAULT_JWT_SECRET, isProductionEnv } from '../lib/security-config.js';
 import { routeError } from './helpers.js';
 import { sendError } from '../lib/http-response.js';
+import { createLogger } from '../lib/logger.js';
 
 const router = Router();
+const log = createLogger('AdminAuth');
 if (isProductionEnv() && (!process.env.JWT_SECRET || process.env.JWT_SECRET === DEFAULT_JWT_SECRET)) {
   throw new Error('JWT_SECRET environment variable is required in production (do not use the default)');
 }
@@ -127,8 +129,15 @@ router.get('/api/admin/me', async (req, res) => {
       if (adminRevoked) {
         return res.status(401).json({ error: 'All sessions revoked — please log in again' });
       }
-    } catch {
-      // Pre-migration: table doesn't exist yet, allow through
+    } catch (err) {
+      log.warn('Token revocation check failed', {
+        errorName: err?.name,
+        errorCode: err?.code,
+      });
+      if (isProductionEnv()) {
+        return sendError(res, 503, { error: 'Token revocation status is unavailable' });
+      }
+      // Local/dev pre-migration environments may not have the table yet.
     }
 
     const [admin] = await db.select({

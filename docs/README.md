@@ -1,3 +1,32 @@
+# Donna Documentation Index
+
+> Start with [`../DIRECTORY.md`](../DIRECTORY.md) before editing code. It is the active navigation map for current vs. legacy surfaces.
+
+## Current References
+
+| Area | Document |
+|---|---|
+| Codebase map | [`../DIRECTORY.md`](../DIRECTORY.md) |
+| Project/agent context | [`../claude.md`](../claude.md) |
+| Current audit findings | [`audits/2026-05-05-codebase-audit.md`](audits/2026-05-05-codebase-audit.md) |
+| Current remediation plan | [`plans/2026-05-05-engineering-remediation-plan.md`](plans/2026-05-05-engineering-remediation-plan.md) |
+| Architecture overview | [`architecture/OVERVIEW.md`](architecture/OVERVIEW.md), [`architecture/ARCHITECTURE.md`](architecture/ARCHITECTURE.md) |
+| Security architecture | [`architecture/SECURITY.md`](architecture/SECURITY.md) |
+| Testing architecture | [`architecture/TESTING.md`](architecture/TESTING.md) |
+| HIPAA/compliance | [`compliance/HIPAA_OVERVIEW.md`](compliance/HIPAA_OVERVIEW.md), [`compliance/BAA_TRACKER.md`](compliance/BAA_TRACKER.md), [`compliance/DATA_RETENTION_POLICY.md`](compliance/DATA_RETENTION_POLICY.md) |
+| Frontend E2E | [`guides/FRONTEND_TESTING.md`](guides/FRONTEND_TESTING.md) |
+| Historical plans | [`plans/README.md`](plans/README.md) |
+| Developer onboarding | [`ONBOARDING.md`](ONBOARDING.md) |
+
+## Important Status Notes
+
+- Active voice is Telnyx + Pipecat; Twilio voice/SMS references in dated plans are historical unless explicitly marked active.
+- The May 5 audit documents known launch blockers and code gaps. The current remediation plan intentionally excludes BAA/vendor agreement gates while keeping code-level privacy, security, retention, and reliability fixes in scope.
+- Do not claim audit, retention, logging, or deletion gaps are fixed until runtime code and validation prove it.
+- Dated files under `docs/plans/` are retained for context and may describe superseded architecture.
+
+---
+
 # New Engineer Prototype TODOs
 
 > Active architecture and compliance references live in `docs/architecture/`, `docs/compliance/`, `DIRECTORY.md`, and `pipecat/docs/`. Dated files under `docs/plans/` are historical unless their own status says otherwise.
