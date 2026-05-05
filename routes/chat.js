@@ -11,8 +11,8 @@ import Anthropic from '@anthropic-ai/sdk';
 import { requireAuth } from '../middleware/auth.js';
 import { canAccessSenior, routeError } from './helpers.js';
 import { db } from '../db/client.js';
-import { seniors, caregivers } from '../db/schema.js';
-import { eq, and } from 'drizzle-orm';
+import { seniors } from '../db/schema.js';
+import { eq } from 'drizzle-orm';
 import { toolDefinitions, executeTool } from '../services/chat-tools.js';
 import { logAudit } from '../services/audit.js';
 
@@ -63,12 +63,7 @@ router.post('/api/chat', requireAuth, async (req, res) => {
       return res.status(404).json({ error: 'Senior not found' });
     }
 
-    // Get caregiver name
-    const [caregiver] = await db.select({ name: caregivers.name })
-      .from(caregivers)
-      .where(and(eq(caregivers.clerkUserId, req.auth.userId), eq(caregivers.seniorId, seniorId)))
-      .limit(1);
-    const caregiverName = caregiver?.name || 'Caregiver';
+    const caregiverName = 'Caregiver';
 
     // Audit log
     logAudit({
