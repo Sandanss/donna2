@@ -23,6 +23,7 @@ const EXEMPT_PATHS = [
   '/stats',
   '/call-analyses',
   '/daily-context',
+  '/chat',
 ];
 
 export function requireApiKey(req, res, next) {
