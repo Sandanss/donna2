@@ -603,6 +603,21 @@
   color: var(--fg-3);
 }
 
+/* Settings rows grouped inside a card */
+.db-card .db-srow {
+  border-radius: 0;
+  box-shadow: none;
+  margin-bottom: 0;
+  border-bottom: 1px solid var(--color-hairline);
+}
+.db-card .db-srow:last-child {
+  border-bottom: none;
+}
+.db-card .db-srow:hover {
+  box-shadow: none;
+  background: var(--bg-hover, rgba(0,0,0,0.02));
+}
+
 /* ===== Back Button ===== */
 .db-back {
   display: inline-flex;

@@ -38,7 +38,9 @@ export default function SettingsHub() {
         <h1 className="db-page__title">Settings</h1>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+      {/* Profiles */}
+      <div className="db-section__title" style={{ marginBottom: 4 }}>Profiles</div>
+      <div className="db-card" style={{ padding: 0, marginBottom: 20, overflow: 'hidden' }}>
         <SettingsRow
           to="/dashboard/settings/loved-one"
           label={`${seniorName}'s Profile`}
@@ -60,9 +62,14 @@ export default function SettingsHub() {
             </svg>
           }
         />
+      </div>
+
+      {/* Preferences */}
+      <div className="db-section__title" style={{ marginBottom: 4 }}>Preferences</div>
+      <div className="db-card" style={{ padding: 0, marginBottom: 20, overflow: 'hidden' }}>
         <SettingsRow
           to="/dashboard/settings/notifications"
-          label="Notifications"
+          label="Notification Preferences"
           iconBg="var(--color-sage-dark)"
           icon={
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -86,12 +93,29 @@ export default function SettingsHub() {
         />
       </div>
 
-      <div style={{ marginTop: 32, display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <button className="db-btn db-btn--danger-text" onClick={handleSignOut}>
-          Sign Out
+      {/* Account */}
+      <div className="db-section__title" style={{ marginBottom: 4 }}>Account</div>
+      <div className="db-card" style={{ padding: 0, marginBottom: 20, overflow: 'hidden' }}>
+        <button className="db-srow" onClick={handleSignOut} style={{ width: '100%', border: 'none', background: 'none', cursor: 'pointer' }}>
+          <div className="db-srow__icon" style={{ background: 'var(--color-danger-light, #FEE2E2)' }}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--color-danger)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
+              <polyline points="16 17 21 12 16 7" />
+              <line x1="21" y1="12" x2="9" y2="12" />
+            </svg>
+          </div>
+          <span className="db-srow__label" style={{ color: 'var(--color-danger)' }}>Sign Out</span>
         </button>
-        <button className="db-btn db-btn--danger-text" onClick={() => setShowDeleteModal(true)}>
-          Delete Account
+        <button className="db-srow" onClick={() => setShowDeleteModal(true)} style={{ width: '100%', border: 'none', background: 'none', cursor: 'pointer' }}>
+          <div className="db-srow__icon" style={{ background: 'var(--color-danger-light, #FEE2E2)' }}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--color-danger)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="3 6 5 6 21 6" />
+              <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+              <line x1="10" y1="11" x2="10" y2="17" />
+              <line x1="14" y1="11" x2="14" y2="17" />
+            </svg>
+          </div>
+          <span className="db-srow__label" style={{ color: 'var(--color-danger)' }}>Delete Account</span>
         </button>
       </div>
 
