@@ -6,13 +6,16 @@
 
 ## Overview
 
-| Category | Count | Coverage |
-|----------|-------|----------|
-| Unit tests | 543+ | Processors, services, utilities, flows |
-| Skipped (require APIs) | 14 | Integration, LLM, simulation tests |
-| Test files | 61 | Across 3 testing levels |
-| Load test files | 5 | DB, WebSocket, scheduler throughput |
-| Mobile tests | App-local | Runtime config, API helpers, onboarding session marker, Maestro flows |
+| Category | Coverage |
+|----------|----------|
+| Python unit/regression tests | Processors, services, utilities, flows, scenario regressions |
+| Python gated tests | Integration, LLM, and simulation tests selected by pytest markers |
+| Node tests | Repo-root API/services with Vitest |
+| Frontend E2E | Playwright projects for admin, website/consumer, and observability |
+| Mobile tests | App-local Vitest checks, auth-guard scan, asset verification, Maestro flows |
+| Load tests | DB, WebSocket, and scheduler throughput harnesses |
+
+Avoid hardcoding test counts in docs. The test inventory changes frequently; use the commands below or pytest collect-only when exact counts are needed.
 
 ### Quick Start
 
@@ -25,6 +28,9 @@ cd pipecat && uv run python -m pytest tests/ -m "not integration and not llm" --
 
 # Run specific test markers
 cd pipecat && uv run python -m pytest tests/ -m regression -q
+
+# Collect tests without running them
+cd pipecat && uv run python -m pytest tests/ --collect-only -q
 
 # Run mobile release/auth checks
 cd apps/mobile && npm run test:unit
@@ -82,6 +88,17 @@ Full call lifecycle from WebSocket connect to post-call processing:
 | `llm` | Requires ANTHROPIC_API_KEY | LLM response validation |
 | `llm_simulation` | LLM-vs-LLM simulation (slow) | Manual validation |
 | `regression` | Full pipeline scenario tests | Before deployment |
+
+Useful filters:
+
+```bash
+cd pipecat
+uv run python -m pytest tests/ -m "not integration and not llm and not llm_simulation" -q
+uv run python -m pytest tests/ -m "regression" -q
+uv run python -m pytest tests/ -m "integration" -q
+```
+
+The May 5, 2026 audit used static analysis and one pytest collect-only hygiene check. No full unit, integration, E2E, Maestro, deploy, or live-call validation was run for that audit; see [the audit summary](../audits/2026-05-05-codebase-audit.md).
 
 ---
 
@@ -187,7 +204,7 @@ Built on Locust (Python-native, supports WebSocket via custom client):
 | `locustfile_ws.py` | Legacy WebSocket pipeline load test (mock Twilio protocol) | 30s-10min per call |
 | `locustfile_scheduler.py` | Scheduler throughput (reminder initiation) | Single run |
 | `twilio_mock.py` | Legacy mock Twilio Media Stream WebSocket protocol | Utility |
-| `conftest.py` | Shared load test configuration | — |
+| `conftest.py` | Shared load test configuration | N/A |
 
 ### Runner Scripts
 

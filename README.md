@@ -90,7 +90,8 @@ Voice and API features are developed directly against Railway — not localhost.
 make deploy-dev-pipecat      # Just Pipecat (~30s)
 make deploy-dev              # Both services (~60s)
 
-# Test with a real call to dev number (+19789235477)
+# Test with a real call to the current dev Telnyx number.
+# Confirm the number in Railway/Telnyx and use only an approved dummy/consenting test phone.
 # Check logs
 make logs-dev
 ```
@@ -108,7 +109,7 @@ make test-python             # Pipecat only
 make test-regression         # Scenario-based regression tests
 ```
 
-**Frontend E2E tests** (Playwright, 31 tests across all 3 apps):
+**Frontend E2E tests** (Playwright across admin, website/consumer, and observability):
 ```bash
 npx playwright install chromium  # First time only
 npm run test:e2e                 # Run all (~15s)
@@ -119,7 +120,7 @@ npx playwright test --ui         # Interactive debug mode
 
 See [`docs/guides/FRONTEND_TESTING.md`](docs/guides/FRONTEND_TESTING.md) for full guide.
 
-**Frontend apps** (run locally against the Railway API):
+**Frontend apps** (run locally against a configured dev/mock API; do not default tests or local clients to production Railway APIs):
 - Admin dashboard: `cd apps/admin-v2 && npm run dev` → http://localhost:5175
 - Public website and caregiver web app: `cd apps/website && npm run dev` → http://localhost:5174
 - Observability: `cd apps/observability && npm run dev` → http://localhost:3002
@@ -373,7 +374,7 @@ make deploy-staging          # Both services to staging
 make deploy-prod             # Both services to production
 ```
 
-> **Do NOT test voice/call features locally.** Deploy to Railway dev/facudev and test with real Telnyx calls.
+> **Do NOT test voice/call features locally.** Deploy to the Railway dev environment and test with real Telnyx calls against the current dev Telnyx number.
 
 Before promoting to production, verify production-like env readiness in Railway:
 
@@ -396,7 +397,7 @@ Live Telnyx smoke test checklist:
 - Manual call initiation uses `seniorId`; the server resolves the phone number after authorization.
 - Railway logs from the smoke call do not include prompt context, transcripts, medical notes, caregiver notes, raw WebSocket parameters, or `ws_token` values.
 
-Security follow-up: the staged PHI encryption/export migration remains a separate action item. It should add encrypted companion columns for the highest-risk remaining plaintext fields, backfill in batches, switch reads to encrypted-first, update exports to decrypt only at the authorized boundary, and only then stop writing/null plaintext after verification.
+Security follow-up: see [`docs/audits/2026-05-05-codebase-audit.md`](docs/audits/2026-05-05-codebase-audit.md) for current launch-blocking security, BAA, retention, logging, and test/prod separation gaps. Do not treat those findings as fixed until code changes and validation prove remediation.
 
 **CI/CD:** PRs to main → tests → staging deploy → smoke tests. Push to main → production deploy.
 
@@ -418,9 +419,10 @@ cd apps/website && npx vercel --prod --yes       # Public website and caregiver 
 
 - [pipecat/docs/ARCHITECTURE.md](./pipecat/docs/ARCHITECTURE.md) — Pipecat pipeline architecture (authoritative)
 - [docs/architecture/](./docs/architecture/) — Architecture suite (overview, features, security, cost, testing, performance)
+- [docs/audits/2026-05-05-codebase-audit.md](./docs/audits/2026-05-05-codebase-audit.md) — Current static audit summary and known gaps
 - [docs/guides/FRONTEND_TESTING.md](./docs/guides/FRONTEND_TESTING.md) — Frontend E2E testing guide (Playwright)
 - [docs/decisions/DONNA_ON_PIPECAT.md](./docs/decisions/DONNA_ON_PIPECAT.md) — Pipecat migration architecture
-- [CLAUDE.md](./CLAUDE.md) — AI assistant context
+- [claude.md](./claude.md) — AI assistant context
 
 ## License
 

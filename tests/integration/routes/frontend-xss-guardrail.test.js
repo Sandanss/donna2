@@ -4,6 +4,7 @@ import path from 'path';
 
 const ACTIVE_FRONTEND_DIRS = [
   path.join(process.cwd(), 'apps', 'admin-v2', 'src'),
+  path.join(process.cwd(), 'apps', 'website', 'src'),
   path.join(process.cwd(), 'apps', 'observability', 'src'),
 ];
 

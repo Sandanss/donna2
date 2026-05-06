@@ -60,7 +60,8 @@ function verifyJwtDualKey(token) {
 
 /**
  * Check if a token or its admin has been revoked.
- * Returns { revoked, message } — gracefully skips if table doesn't exist yet.
+ * In production, revocation storage failures fail closed instead of allowing
+ * potentially revoked admin sessions through.
  */
 async function checkTokenRevocation(token, adminId) {
   try {
@@ -77,6 +78,12 @@ async function checkTokenRevocation(token, adminId) {
       errorName: err?.name,
       errorCode: err?.code,
     });
+    if (isProductionEnv()) {
+      return {
+        revoked: true,
+        message: 'Token revocation status is unavailable',
+      };
+    }
     return { revoked: false };
   }
 }

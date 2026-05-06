@@ -1,4 +1,7 @@
 import OpenAI from 'openai';
+import { createLogger } from '../lib/logger.js';
+
+const log = createLogger('News');
 
 // Initialize OpenAI client (lazy to avoid startup crash if key missing)
 let openai = null;
@@ -29,7 +32,7 @@ export const newsService = {
 
     const client = getOpenAI();
     if (!client) {
-      console.log('[News] OpenAI not configured, skipping news fetch');
+      log.info('OpenAI not configured, skipping news fetch');
       return null;
     }
 
@@ -37,12 +40,12 @@ export const newsService = {
     const cacheKey = getCacheKey(interests);
     const cached = newsCache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-      console.log('[News] Using cached news');
+      log.info('Using cached news', { interestsCount: interests.length });
       return cached.news;
     }
 
     try {
-      console.log(`[News] Fetching news for interests: ${interests.join(', ')}`);
+      log.info('Fetching news for interests', { interestsCount: interests.length });
 
       const interestList = interests.slice(0, 5).join(', ');
       const storyCount = Math.max(2, Math.min(limit, 10));
@@ -63,7 +66,7 @@ export const newsService = {
       const newsContent = response.output_text?.trim();
 
       if (!newsContent) {
-        console.log('[News] No news content returned');
+        log.info('No news content returned');
         return null;
       }
 
@@ -76,11 +79,11 @@ export const newsService = {
         timestamp: Date.now()
       });
 
-      console.log('[News] Fetched and cached news successfully');
+      log.info('Fetched and cached news successfully', { interestsCount: interests.length });
       return formattedNews;
 
     } catch (error) {
-      console.error('[News] Error fetching news:', error.message);
+      log.error('Error fetching news', { error: error.message });
       return null;
     }
   },
@@ -99,6 +102,6 @@ export const newsService = {
    */
   clearCache() {
     newsCache.clear();
-    console.log('[News] Cache cleared');
+    log.info('Cache cleared');
   }
 };

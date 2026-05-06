@@ -40,7 +40,7 @@ describe('requireApiKey', () => {
   it('lets Clerk/JWT-owned collection routes through without comparing them to DONNA_API_KEY', () => {
     process.env.DONNA_API_KEY = 'service-api-key';
 
-    for (const path of ['/reminders', '/seniors', '/stats']) {
+    for (const path of ['/reminders', '/seniors', '/stats', '/chat']) {
       const { res, next } = runRequireApiKey(path);
 
       expect(next).toHaveBeenCalledOnce();
@@ -58,6 +58,7 @@ describe('requireApiKey', () => {
       '/call-analyses',
       '/daily-context',
       '/calls/call-123/end',
+      '/chat/stream',
     ]) {
       const { res, next } = runRequireApiKey(path);
 
@@ -69,7 +70,7 @@ describe('requireApiKey', () => {
   it('does not exempt unrelated routes that merely share a prefix', () => {
     process.env.DONNA_API_KEY = 'service-api-key';
 
-    for (const path of ['/reminders-extra', '/call-analyses-admin']) {
+    for (const path of ['/reminders-extra', '/call-analyses-admin', '/chatty']) {
       const { res, next } = runRequireApiKey(path);
 
       expect(next).not.toHaveBeenCalled();

@@ -4,10 +4,11 @@ import { requireAuth } from '../middleware/auth.js';
 import { writeLimiter } from '../middleware/rate-limit.js';
 import { idempotencyMiddleware } from '../middleware/idempotency.js';
 import { validateBody, validateParams } from '../middleware/validate.js';
-import { createMemorySchema, seniorIdParamSchema } from '../validators/schemas.js';
+import { createMemorySchema, memorySearchQuerySchema, seniorIdParamSchema } from '../validators/schemas.js';
 import { canAccessSenior, routeError } from './helpers.js';
 import { logAudit, authToRole } from '../services/audit.js';
 import { sendError } from '../lib/http-response.js';
+import { createHash } from 'crypto';
 
 const router = Router();
 
@@ -42,11 +43,20 @@ router.post('/api/seniors/:id/memories', requireAuth, validateParams(seniorIdPar
 
 // Search memories for a senior
 router.get('/api/seniors/:id/memories/search', requireAuth, validateParams(seniorIdParamSchema), async (req, res) => {
-  const { q, limit } = req.query;
   try {
+    const parsed = memorySearchQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      return sendError(res, 400, {
+        error: 'Validation error',
+        details: parsed.error.flatten().fieldErrors,
+      });
+    }
+    const { q, limit } = parsed.data;
+
     if (!await canAccessSenior(req.auth, req.params.id)) {
       return sendError(res, 403, { error: 'Access denied to this senior' });
     }
+    const queryHash = createHash('sha256').update(q).digest('hex');
     logAudit({
       userId: req.auth.userId,
       userRole: authToRole(req.auth),
@@ -54,12 +64,17 @@ router.get('/api/seniors/:id/memories/search', requireAuth, validateParams(senio
       resourceType: 'memory',
       ipAddress: req.ip,
       userAgent: req.get('user-agent'),
-      metadata: { seniorId: req.params.id, query: q },
+      metadata: {
+        seniorId: req.params.id,
+        queryHash,
+        queryLength: q.length,
+        limit,
+      },
     });
     const memories = await memoryService.search(
       req.params.id,
       q,
-      parseInt(limit) || 5
+      limit
     );
     res.json(memories);
   } catch (error) {

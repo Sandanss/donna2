@@ -30,12 +30,13 @@ export default function CreateAccount({ data, update, onNext, devMode }) {
       if (result.status === 'complete') {
         // Account created without needing verification (unlikely but handle it)
         await setActive({ session: result.createdSessionId });
-        update({ email: data.email });
+        update({ email: data.email, password: '' });
         onNext();
         return;
       }
 
       await signUp.prepareEmailAddressVerification({ strategy: 'email_code' });
+      update({ password: '' });
       setVerifying(true);
     } catch (err) {
       const clerkError = err.errors?.[0];
@@ -62,7 +63,7 @@ export default function CreateAccount({ data, update, onNext, devMode }) {
       const result = await signUp.attemptEmailAddressVerification({ code });
       if (result.status === 'complete') {
         await setActive({ session: result.createdSessionId });
-        update({ email: result.emailAddress || data.email });
+        update({ email: result.emailAddress || data.email, password: '' });
         onNext();
       } else {
         setError('Verification incomplete. Please try again.');
@@ -90,6 +91,7 @@ export default function CreateAccount({ data, update, onNext, devMode }) {
       });
       if (result.status === 'complete') {
         await setActive({ session: result.createdSessionId });
+        update({ password: '' });
         // Existing user — go straight to dashboard
         window.location.href = '/dashboard';
       } else {

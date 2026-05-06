@@ -37,6 +37,13 @@ class InMemoryState:
         if ttl:
             self._expiry[key] = time.time() + ttl
 
+    async def set_if_absent(self, key: str, value: Any, ttl: int | None = None) -> bool:
+        self._cleanup_expired()
+        if key in self._data:
+            return False
+        await self.set(key, value, ttl=ttl)
+        return True
+
     async def get(self, key: str) -> Any | None:
         if key in self._expiry and time.time() > self._expiry[key]:
             self._data.pop(key, None)
@@ -122,6 +129,11 @@ class RedisState:
             await r.setex(key, ttl, serialized)
         else:
             await r.set(key, serialized)
+
+    async def set_if_absent(self, key: str, value: Any, ttl: int | None = None) -> bool:
+        r = await self._get_client()
+        serialized = json.dumps(value, default=str)
+        return bool(await r.set(key, serialized, ex=ttl, nx=True))
 
     async def get(self, key: str) -> Any | None:
         r = await self._get_client()
@@ -227,6 +239,14 @@ class UpstashRestState:
             await self._command("SET", key, serialized, "EX", ttl)
         else:
             await self._command("SET", key, serialized)
+
+    async def set_if_absent(self, key: str, value: Any, ttl: int | None = None) -> bool:
+        serialized = json.dumps(value, default=str)
+        if ttl:
+            result = await self._command("SET", key, serialized, "EX", ttl, "NX")
+        else:
+            result = await self._command("SET", key, serialized, "NX")
+        return bool(result)
 
     async def get(self, key: str) -> Any | None:
         val = await self._command("GET", key)

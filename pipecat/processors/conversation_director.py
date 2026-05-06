@@ -230,6 +230,7 @@ class ConversationDirectorProcessor(FrameProcessor):
 
         # --- End of call: log speculative + prefetch + web search metrics ---
         if isinstance(frame, EndFrame):
+            self._cancel_background_tasks()
             if self._speculative_attempts > 0:
                 logger.info(
                     "[Director] Call summary: {turns} turns, "
@@ -420,6 +421,24 @@ class ConversationDirectorProcessor(FrameProcessor):
         if self._silence_timer_task is not None and not self._silence_timer_task.done():
             self._silence_timer_task.cancel()
         self._silence_timer_task = None
+
+    def _cancel_task(self, task: asyncio.Task | None) -> None:
+        if task is not None and not task.done():
+            task.cancel()
+
+    def _cancel_background_tasks(self) -> None:
+        """Cancel call-scoped Director work when the pipeline ends."""
+        self._cancel_silence_timer()
+        self._cancel_task(self._fallback_analysis_task)
+        self._fallback_analysis_task = None
+        self._cancel_task(self._delayed_end_task)
+        self._delayed_end_task = None
+        for _, task in self._speculative_tasks:
+            self._cancel_task(task)
+        self._speculative_tasks = []
+        for task in self._prefetch_tasks:
+            self._cancel_task(task)
+        self._prefetch_tasks = []
 
     async def _silence_timer(self, interim_text: str):
         """Wait for silence threshold, then start speculative analysis."""

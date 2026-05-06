@@ -7,19 +7,29 @@
 
 import { logAudit } from './audit.js';
 
-const TAVILY_API_KEY = process.env.TAVILY_API_KEY;
 const TAVILY_URL = 'https://api.tavily.com/search';
+const DEFAULT_TIMEOUT_MS = 4000;
 
 /**
  * Strip potential PHI from a search query.
  * Removes phone numbers, names that look like proper nouns followed by possessives, etc.
  */
-function sanitizeQuery(query) {
+export function sanitizeQuery(query) {
   // Remove phone numbers
-  let sanitized = query.replace(/(\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/g, '');
+  let sanitized = String(query || '').replace(/(\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/g, '');
   // Remove email addresses
   sanitized = sanitized.replace(/[\w.-]+@[\w.-]+\.\w+/g, '');
   return sanitized.trim();
+}
+
+function fetchSignal(timeoutMs) {
+  const timeout = Math.max(1, Number(timeoutMs) || DEFAULT_TIMEOUT_MS);
+  if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+    return { signal: AbortSignal.timeout(timeout), cleanup: () => {} };
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  return { signal: controller.signal, cleanup: () => clearTimeout(timer) };
 }
 
 /**
@@ -30,8 +40,9 @@ function sanitizeQuery(query) {
  * @param {string} [options.userId] - For audit logging
  * @returns {Promise<{ results: Array<{ title: string, url: string, content: string }> }>}
  */
-export async function search(query, { userId } = {}) {
-  if (!TAVILY_API_KEY) {
+export async function search(query, { userId, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+  const apiKey = process.env.TAVILY_API_KEY;
+  if (!apiKey) {
     console.warn('[WebSearch] TAVILY_API_KEY not configured, skipping search');
     return { results: [] };
   }
@@ -52,12 +63,16 @@ export async function search(query, { userId } = {}) {
     });
   }
 
+  let cleanup = () => {};
   try {
+    const timeout = fetchSignal(timeoutMs);
+    cleanup = timeout.cleanup;
     const res = await fetch(TAVILY_URL, {
       method: 'POST',
+      signal: timeout.signal,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        api_key: TAVILY_API_KEY,
+        api_key: apiKey,
         query: sanitizedQuery,
         max_results: 8,
         include_raw_content: false,
@@ -78,7 +93,13 @@ export async function search(query, { userId } = {}) {
 
     return { results };
   } catch (error) {
-    console.error('[WebSearch] Tavily search failed:', error.message);
+    if (error?.name === 'AbortError' || error?.name === 'TimeoutError') {
+      console.warn('[WebSearch] Tavily search timed out');
+    } else {
+      console.error('[WebSearch] Tavily search failed');
+    }
     return { results: [] };
+  } finally {
+    cleanup();
   }
 }

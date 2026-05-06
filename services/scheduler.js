@@ -489,19 +489,20 @@ export const schedulerService = {
   },
 
   /**
-   * Merge due scheduled calls and welfare-eligible seniors into a deduplicated call plan.
-   * Scheduled calls take priority — if a senior has a scheduled call and needs welfare,
-   * only the scheduled call fires (it counts as contact).
-   * Returns an array of CallSpec objects: { type, senior, scheduleItem?, pendingReminders?, dedupKey? }
+   * Merge due scheduled calls, due reminders, and welfare-eligible seniors into
+   * a deduplicated call plan. Scheduled calls take priority because they can
+   * carry multiple pending reminders as context; standalone reminder calls come
+   * next; welfare calls are last.
+   * Returns an array of CallSpec objects.
    */
-  buildCallPlan(dueScheduledCalls, welfareSeniors) {
+  buildCallPlan(dueScheduledCalls, welfareSeniors, dueReminders = []) {
     const specs = [];
-    const seniorIdsWithSchedule = new Set();
+    const seniorIdsWithPlannedCall = new Set();
 
     // Scheduled call specs first (higher priority)
     for (const { senior, scheduleItem, dedupKey, pendingReminders } of dueScheduledCalls) {
       // Only one call per senior per cycle even if multiple schedule items match
-      if (seniorIdsWithSchedule.has(senior.id)) continue;
+      if (seniorIdsWithPlannedCall.has(senior.id)) continue;
 
       specs.push({
         type: 'schedule',
@@ -510,12 +511,29 @@ export const schedulerService = {
         dedupKey,
         pendingReminders,
       });
-      seniorIdsWithSchedule.add(senior.id);
+      seniorIdsWithPlannedCall.add(senior.id);
+    }
+
+    // Standalone reminder specs. If a scheduled call is already planned for the
+    // senior, it will carry reminders as context and counts as the contact.
+    for (const { senior, reminder, scheduledFor, existingDelivery } of dueReminders) {
+      if (seniorIdsWithPlannedCall.has(senior.id)) continue;
+      const lastCall = seniorLastCallTime.get(senior.id);
+      if (lastCall && Date.now() - lastCall < 10 * 60 * 1000) continue;
+
+      specs.push({
+        type: 'reminder',
+        senior,
+        reminder,
+        scheduledFor,
+        existingDelivery,
+      });
+      seniorIdsWithPlannedCall.add(senior.id);
     }
 
     // Welfare specs — skip seniors already getting a scheduled call or already called today
     for (const senior of welfareSeniors) {
-      if (seniorIdsWithSchedule.has(senior.id)) continue;
+      if (seniorIdsWithPlannedCall.has(senior.id)) continue;
       if (welfareCalledToday.has(senior.id)) continue;
 
       specs.push({
@@ -528,7 +546,7 @@ export const schedulerService = {
   },
 
   /**
-   * Unified outbound call trigger for both reminder and welfare calls.
+   * Unified outbound call trigger for scheduled, reminder, and welfare calls.
    * Gates ALL calls through isInCallWindow(). Handles context prefetch,
    * Telnyx call creation, and type-specific bookkeeping.
    */
@@ -536,11 +554,12 @@ export const schedulerService = {
     const { type, senior } = spec;
 
     // Scheduled calls bypass the call window — the caregiver explicitly chose that time.
+    // Reminder calls can use the early 5–9 AM window if the caregiver scheduled them there.
     // Welfare calls are gated through the default 9 AM – 7 PM window.
     if (type !== 'schedule') {
       const timezone = getSeniorTimezone(senior);
-      if (!isInCallWindow(timezone)) {
-        log.info('Outside call window, skipping', { type, name: senior.name, timezone });
+      if (!isInCallWindow(timezone, { earlyAllowed: type === 'reminder' })) {
+        log.info('Outside call window, skipping', { type, seniorId: senior.id, timezone });
         return null;
       }
     }
@@ -548,11 +567,13 @@ export const schedulerService = {
     try {
       if (type === 'schedule') {
         return await this._triggerSchedulePath(spec, baseUrl);
+      } else if (type === 'reminder') {
+        return await this._triggerReminderPath(spec, baseUrl);
       } else {
         return await this._triggerWelfarePath(spec, baseUrl);
       }
     } catch (error) {
-      log.error('Failed to initiate call', { type, name: senior.name, error: error.message });
+      log.error('Failed to initiate call', { type, seniorId: senior.id, error: error.message });
       return null;
     }
   },
@@ -580,6 +601,41 @@ export const schedulerService = {
     });
 
     log.info('Scheduled call initiated', { callSid: call.callSid, seniorId: senior.id });
+    return { sid: call.callSid, callSid: call.callSid, callControlId: call.callControlId };
+  },
+
+  /**
+   * Reminder call path: create a Telnyx call through Pipecat.
+   * Pipecat creates or updates the reminder delivery row when the call is
+   * seeded, so the voice tool can mark the delivery acknowledged later.
+   */
+  async _triggerReminderPath(spec, baseUrl) {
+    const { senior, reminder, scheduledFor, existingDelivery } = spec;
+    const scheduledAt = coerceDate(scheduledFor);
+    const prewarmedContext = this.getReminderPrewarm(spec);
+
+    log.info('Triggering Telnyx reminder call', {
+      seniorId: senior.id,
+      reminderId: reminder.id,
+      retry: Boolean(existingDelivery?.id),
+      prewarmed: Boolean(prewarmedContext),
+    });
+
+    const call = await retryTelnyxCall({
+      seniorId: senior.id,
+      callType: 'reminder',
+      reminderId: reminder.id,
+      scheduledFor: scheduledAt ? scheduledAt.toISOString() : undefined,
+      existingDeliveryId: existingDelivery?.id,
+      prewarmedContext,
+      baseUrl,
+    });
+
+    log.info('Reminder call initiated', {
+      callSid: call.callSid,
+      seniorId: senior.id,
+      reminderId: reminder.id,
+    });
     return { sid: call.callSid, callSid: call.callSid, callControlId: call.callControlId };
   },
 
@@ -919,9 +975,10 @@ export function startScheduler(baseUrl, intervalMs = 60000) {
         log.info('Schedule tracking cleared for new day', { date: today });
       }
 
-      // Fetch both sources in parallel
-      let [dueScheduledCalls, welfareSeniors] = await Promise.all([
+      // Fetch call sources in parallel
+      let [dueScheduledCalls, dueReminders, welfareSeniors] = await Promise.all([
         schedulerService.getDueScheduledCalls(),
+        schedulerService.getDueReminders(),
         schedulerService.getSeniorsNeedingWelfareCheck(),
       ]);
 
@@ -936,17 +993,24 @@ export function startScheduler(baseUrl, intervalMs = 60000) {
 
       if (pausedSeniorIds.size > 0) {
         dueScheduledCalls = dueScheduledCalls.filter(s => !pausedSeniorIds.has(s.senior.id));
+        dueReminders = dueReminders.filter(s => !pausedSeniorIds.has(s.senior.id));
         welfareSeniors = welfareSeniors.filter(s => !pausedSeniorIds.has(s.id));
         log.info('Filtered paused seniors', { count: pausedSeniorIds.size });
       }
 
       // Merge and deduplicate into a single call plan
-      const callPlan = schedulerService.buildCallPlan(dueScheduledCalls, welfareSeniors);
+      const callPlan = schedulerService.buildCallPlan(dueScheduledCalls, welfareSeniors, dueReminders);
 
       if (callPlan.length > 0) {
         const scheduleCount = callPlan.filter(s => s.type === 'schedule').length;
+        const reminderCount = callPlan.filter(s => s.type === 'reminder').length;
         const welfareCount = callPlan.filter(s => s.type === 'welfare').length;
-        log.info('Unified call plan', { total: callPlan.length, scheduled: scheduleCount, welfare: welfareCount });
+        log.info('Unified call plan', {
+          total: callPlan.length,
+          scheduled: scheduleCount,
+          reminders: reminderCount,
+          welfare: welfareCount,
+        });
       }
 
       // Resolve flags once per scheduler cycle
@@ -969,8 +1033,10 @@ export function startScheduler(baseUrl, intervalMs = 60000) {
         if (spec.type === 'schedule') {
           scheduleCalledToday.add(spec.dedupKey);
           seniorLastCallTime.set(spec.senior.id, Date.now());
-        } else {
+        } else if (spec.type === 'welfare') {
           welfareCalledToday.add(spec.senior.id);
+          seniorLastCallTime.set(spec.senior.id, Date.now());
+        } else {
           seniorLastCallTime.set(spec.senior.id, Date.now());
         }
 
@@ -982,7 +1048,7 @@ export function startScheduler(baseUrl, intervalMs = 60000) {
             // Trigger returned null — revert dedup so it can be retried next cycle
             if (spec.type === 'schedule') {
               scheduleCalledToday.delete(spec.dedupKey);
-            } else {
+            } else if (spec.type === 'welfare') {
               welfareCalledToday.delete(spec.senior.id);
             }
             seniorLastCallTime.delete(spec.senior.id);
@@ -993,7 +1059,7 @@ export function startScheduler(baseUrl, intervalMs = 60000) {
           // Revert dedup on failure so it can be retried next cycle
           if (spec.type === 'schedule') {
             scheduleCalledToday.delete(spec.dedupKey);
-          } else {
+          } else if (spec.type === 'welfare') {
             welfareCalledToday.delete(spec.senior.id);
           }
           seniorLastCallTime.delete(spec.senior.id);

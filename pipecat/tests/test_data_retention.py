@@ -93,14 +93,18 @@ async def test_purge_expired_data_calls_all_tables():
     from services.data_retention import purge_expired_data
 
     with patch("services.data_retention._redact_conversation_phi", new_callable=AsyncMock, return_value=0) as mock_redact, \
+         patch("services.data_retention._purge_inactive_reminders", new_callable=AsyncMock, return_value=0) as mock_reminders, \
+         patch("services.data_retention._count_senior_profile_review_candidates", new_callable=AsyncMock, return_value=0) as mock_review, \
          patch("services.data_retention._purge_table", new_callable=AsyncMock) as mock_purge:
         mock_purge.return_value = 0
 
         results = await purge_expired_data()
 
     assert mock_redact.await_count == 1
+    assert mock_reminders.await_count == 1
+    assert mock_review.await_count == 1
     # Should have attempted all delete tables after conversation PHI redaction.
-    assert mock_purge.call_count == 9
+    assert mock_purge.call_count == 11
     tables_purged = {call.args[0] for call in mock_purge.call_args_list}
     assert "conversations" in tables_purged
     assert "memories" in tables_purged
@@ -109,6 +113,8 @@ async def test_purge_expired_data_calls_all_tables():
     assert "call_metrics" in tables_purged
     assert "reminder_deliveries" in tables_purged
     assert "notifications" in tables_purged
+    assert "caregiver_notes" in tables_purged
+    assert "prospects" in tables_purged
     assert "waitlist" in tables_purged
     assert "audit_logs" in tables_purged
 
@@ -128,8 +134,12 @@ async def test_purge_expired_data_skips_zero_retention():
         mock_settings.retention_call_analyses_days = 0
         mock_settings.retention_daily_context_days = 0
         mock_settings.retention_call_metrics_days = 0
+        mock_settings.retention_inactive_reminders_days = 0
         mock_settings.retention_reminder_deliveries_days = 0
         mock_settings.retention_notifications_days = 0
+        mock_settings.retention_caregiver_notes_days = 0
+        mock_settings.retention_prospects_days = 0
+        mock_settings.retention_inactive_senior_review_days = 0
         mock_settings.retention_waitlist_days = 0
         mock_settings.retention_audit_logs_days = 0
 
@@ -157,13 +167,15 @@ async def test_purge_expired_data_handles_table_error():
         return 10
 
     with patch("services.data_retention._redact_conversation_phi", new_callable=AsyncMock, return_value=0), \
+         patch("services.data_retention._purge_inactive_reminders", new_callable=AsyncMock, return_value=0), \
+         patch("services.data_retention._count_senior_profile_review_candidates", new_callable=AsyncMock, return_value=0), \
          patch("services.data_retention._purge_table", new_callable=AsyncMock) as mock_purge:
         mock_purge.side_effect = _side_effect
 
         results = await purge_expired_data()
 
     # All delete tables should be attempted even though memories failed.
-    assert call_count == 9
+    assert call_count == 11
     assert results["memories"] == -1
     assert results["conversations"] == 10
 
@@ -177,6 +189,8 @@ async def test_purge_expired_data_returns_deleted_counts():
         return {"conversations": 5, "memories": 0, "call_analyses": 3}.get(table, 0)
 
     with patch("services.data_retention._redact_conversation_phi", new_callable=AsyncMock, return_value=0), \
+         patch("services.data_retention._purge_inactive_reminders", new_callable=AsyncMock, return_value=0), \
+         patch("services.data_retention._count_senior_profile_review_candidates", new_callable=AsyncMock, return_value=0), \
          patch("services.data_retention._purge_table", new_callable=AsyncMock) as mock_purge:
         mock_purge.side_effect = _side_effect
 

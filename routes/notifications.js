@@ -9,6 +9,7 @@ import { eq, and, desc } from 'drizzle-orm';
 import { routeError } from './helpers.js';
 import { isProductionEnv, matchServiceApiKey, parseServiceApiKeys } from '../lib/security-config.js';
 import { sendError } from '../lib/http-response.js';
+import { logAudit, authToRole } from '../services/audit.js';
 
 const router = Router();
 
@@ -112,7 +113,18 @@ router.get('/api/notifications', requireAuth, async (req, res) => {
       .limit(limit)
       .offset(offset);
 
-    res.json(results.map(decryptNotificationRow));
+    const decrypted = results.map(decryptNotificationRow);
+    logAudit({
+      userId: req.auth.userId,
+      userRole: authToRole(req.auth),
+      action: 'read',
+      resourceType: 'notification',
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+      metadata: { page, limit, count: decrypted.length },
+    });
+
+    res.json(decrypted);
   } catch (error) {
     routeError(res, error, 'GET /api/notifications');
   }
@@ -139,6 +151,17 @@ router.patch('/api/notifications/:id/read', requireAuth, idempotencyMiddleware, 
     if (!updated) {
       return sendError(res, 404, { error: 'Notification not found' });
     }
+
+    logAudit({
+      userId: req.auth.userId,
+      userRole: authToRole(req.auth),
+      action: 'update',
+      resourceType: 'notification',
+      resourceId: req.params.id,
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+      metadata: { field: 'readAt' },
+    });
 
     res.json(decryptNotificationRow(updated));
   } catch (error) {

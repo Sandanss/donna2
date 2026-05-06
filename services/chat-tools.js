@@ -9,6 +9,7 @@ import { db } from '../db/client.js';
 import { seniors, reminders } from '../db/schema.js';
 import { eq, and } from 'drizzle-orm';
 import { search as webSearch } from './web-search.js';
+import { decryptReminderPhi, decryptSeniorPhi } from '../lib/phi.js';
 
 /**
  * Tool definitions for Claude (Anthropic tool_use format)
@@ -194,16 +195,20 @@ export async function executeTool(toolName, input, context) {
 }
 
 async function handleGetCurrentSchedule({ seniorId }) {
-  const [senior] = await db.select({
+  const [seniorRow] = await db.select({
     preferredCallTimes: seniors.preferredCallTimes,
+    preferredCallTimesEncrypted: seniors.preferredCallTimesEncrypted,
   }).from(seniors).where(eq(seniors.id, seniorId)).limit(1);
+  const senior = decryptSeniorPhi(seniorRow);
 
   const schedule = senior?.preferredCallTimes?.schedule || [];
 
   const activeReminders = await db.select({
     id: reminders.id,
     title: reminders.title,
+    titleEncrypted: reminders.titleEncrypted,
     description: reminders.description,
+    descriptionEncrypted: reminders.descriptionEncrypted,
     scheduledTime: reminders.scheduledTime,
     isRecurring: reminders.isRecurring,
     recurringDays: reminders.recurringDays,
@@ -213,7 +218,7 @@ async function handleGetCurrentSchedule({ seniorId }) {
 
   return {
     schedule,
-    reminders: activeReminders,
+    reminders: activeReminders.map(decryptReminderPhi),
     summary: `${schedule.length} scheduled calls, ${activeReminders.length} active reminders`,
   };
 }

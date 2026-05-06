@@ -57,7 +57,12 @@ async def delete_senior_data(
         by=str(deleted_by)[:8],
     )
 
-    counts = await hard_delete_senior(sid, deleted_by, reason)
+    try:
+        counts = await hard_delete_senior(sid, deleted_by, reason)
+    except RuntimeError as exc:
+        if "legal hold" in str(exc).lower():
+            raise HTTPException(status_code=423, detail=str(exc)) from exc
+        raise
     return {"success": True, "deleted_counts": counts}
 
 
@@ -78,5 +83,10 @@ async def delete_prospect_data(
         by=str(deleted_by)[:8],
     )
 
-    counts = await hard_delete_prospect(pid, deleted_by, "admin_request")
+    try:
+        counts = await hard_delete_prospect(pid, deleted_by, "admin_request")
+    except RuntimeError as exc:
+        if "legal hold" in str(exc).lower():
+            raise HTTPException(status_code=423, detail=str(exc)) from exc
+        raise
     return {"success": True, "deleted_counts": counts}

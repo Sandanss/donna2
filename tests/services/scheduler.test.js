@@ -79,6 +79,22 @@ function buildWelfareSpec() {
   };
 }
 
+function buildReminderSpec() {
+  return {
+    type: 'reminder',
+    senior: {
+      id: 'senior-3',
+      timezone: 'America/New_York',
+    },
+    reminder: {
+      id: 'rem-3',
+      title: 'Take medication',
+      type: 'medication',
+    },
+    scheduledFor: new Date('2035-03-11T13:30:00.000Z'),
+  };
+}
+
 describe('schedulerService schedule-driven calls', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -124,6 +140,24 @@ describe('schedulerService schedule-driven calls', () => {
     );
   });
 
+  it('triggers a reminder call with reminder delivery context', async () => {
+    const spec = buildReminderSpec();
+    spec.existingDelivery = { id: 'delivery-1' };
+
+    await schedulerService.triggerOutboundCall(spec, 'https://pipecat.example.test');
+
+    expect(mocks.initiateTelnyxOutboundCall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        seniorId: 'senior-3',
+        callType: 'reminder',
+        reminderId: 'rem-3',
+        scheduledFor: '2035-03-11T13:30:00.000Z',
+        existingDeliveryId: 'delivery-1',
+        baseUrl: 'https://pipecat.example.test',
+      }),
+    );
+  });
+
   it('buildCallPlan deduplicates — scheduled calls prevent welfare for same senior', () => {
     const schedCalls = [{
       senior: { id: 'senior-1' },
@@ -140,6 +174,25 @@ describe('schedulerService schedule-driven calls', () => {
     expect(plan[0].senior.id).toBe('senior-1');
     expect(plan[1].type).toBe('welfare');
     expect(plan[1].senior.id).toBe('senior-2');
+  });
+
+  it('buildCallPlan adds due reminder calls between scheduled and welfare work', () => {
+    const schedCalls = [{
+      senior: { id: 'senior-1' },
+      scheduleItem: { id: 's1', time: '9:00 AM', frequency: 'daily' },
+      dedupKey: 'senior-1:s1',
+      pendingReminders: [],
+    }];
+    const dueReminders = [
+      { senior: { id: 'senior-1' }, reminder: { id: 'rem-skipped' }, scheduledFor: new Date() },
+      { senior: { id: 'senior-3' }, reminder: { id: 'rem-3' }, scheduledFor: new Date() },
+    ];
+    const welfareSeniors = [{ id: 'senior-2' }, { id: 'senior-3' }];
+
+    const plan = schedulerService.buildCallPlan(schedCalls, welfareSeniors, dueReminders);
+
+    expect(plan.map(spec => spec.type)).toEqual(['schedule', 'reminder', 'welfare']);
+    expect(plan.map(spec => spec.senior.id)).toEqual(['senior-1', 'senior-3', 'senior-2']);
   });
 });
 

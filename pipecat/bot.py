@@ -36,7 +36,7 @@ from pipecat.transports.websocket.fastapi import (
 )
 from pipecat_flows import FlowManager
 
-from config import get_settings, settings
+from config import get_settings, is_production_environment, settings
 from flows.nodes import build_initial_node
 from flows.tools import make_flows_tools
 from lib.telnyx_audio import TelnyxAudioProfileError, resolve_telnyx_audio_profile
@@ -128,14 +128,20 @@ async def authenticate_websocket_call(
     if not call_sid:
         raise WebSocketAuthError("missing call_sid")
 
-    from api.routes.call_context import mark_ws_token_consumed
-
     metadata = await _wait_for_call_metadata(call_sid)
     if not metadata:
         raise WebSocketAuthError("unknown call_sid")
 
-    expected_token = metadata.get("ws_token")
     provided_token = _provider_ws_token(call_data)
+    if consume_token:
+        from api.routes.call_context import WsTokenConsumeError, consume_ws_token
+
+        try:
+            return await consume_ws_token(call_sid, provided_token)
+        except WsTokenConsumeError as exc:
+            raise WebSocketAuthError(str(exc)) from exc
+
+    expected_token = metadata.get("ws_token")
     if not expected_token:
         raise WebSocketAuthError("missing expected token")
     if metadata.get("ws_token_consumed"):
@@ -145,8 +151,6 @@ async def authenticate_websocket_call(
     if not provided_token or not hmac.compare_digest(str(expected_token), str(provided_token)):
         raise WebSocketAuthError("invalid token")
 
-    if consume_token:
-        await mark_ws_token_consumed(call_sid, metadata)
     return metadata
 
 
@@ -295,6 +299,29 @@ def create_tts_service(session_state: dict):
         sample_rate=output_sample_rate,
         params=ElevenLabsTTSService.InputParams(speed=0.9),
     )
+
+
+def resolve_voice_backend(cfg, session_state: dict) -> str:
+    """Resolve voice backend while keeping Gemini Live out of production."""
+    voice_backend = (
+        cfg.voice_backend
+        or (session_state.get("_flags") or {}).get("voice_backend", "claude")
+    )
+    voice_backend = str(voice_backend or "claude").strip().lower()
+    if voice_backend == "gemini_live" and is_production_environment():
+        logger.error("Blocked voice_backend=gemini_live in production; using Claude pipeline")
+        return "claude"
+    return voice_backend
+
+
+def resolve_vad_params(transport_type: str, call_type: str | None) -> dict[str, float]:
+    """Return VAD settings tuned for senior speech unless caller is onboarding."""
+    is_onboarding = call_type == "onboarding"
+    return {
+        "stop_secs": 0.8 if is_onboarding else 1.2,
+        "confidence": 0.6,
+        "min_volume": 0.5,
+    }
 
 
 def _create_telephony_serializer(
@@ -560,18 +587,11 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
     # Transport (Telnyx ↔ FastAPI WebSocket)
     # -------------------------------------------------------------------------
     # Onboarding callers are adult caregivers (typical speech pace) — shorter pause.
-    # Senior fallback telephony calls keep longer pause tolerance for elderly speech patterns.
-    # Telnyx validation uses a more responsive VAD profile while we tune
-    # barge-in and turn latency on the new provider.
-    is_onboarding = session_state.get("call_type") == "onboarding"
-    if transport_type == "telnyx":
-        vad_stop_secs = 0.8
-        vad_confidence = 0.5
-        vad_min_volume = 0.35
-    else:
-        vad_stop_secs = 0.8 if is_onboarding else 1.2
-        vad_confidence = 0.6
-        vad_min_volume = 0.5
+    # Senior calls keep longer pause tolerance for elderly speech patterns.
+    vad_profile = resolve_vad_params(transport_type, session_state.get("call_type"))
+    vad_stop_secs = vad_profile["stop_secs"]
+    vad_confidence = vad_profile["confidence"]
+    vad_min_volume = vad_profile["min_volume"]
     logger.info(
         "[{cs}] VAD profile provider={provider} confidence={confidence} stop_secs={stop_secs} min_volume={min_volume}",
         cs=call_sid,
@@ -615,10 +635,7 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
     # Route to Gemini Live pipeline if flag is set
     # Env var VOICE_BACKEND=gemini_live overrides GrowthBook flag
     # -------------------------------------------------------------------------
-    voice_backend = (
-        cfg.voice_backend
-        or (session_state.get("_flags") or {}).get("voice_backend", "claude")
-    )
+    voice_backend = resolve_voice_backend(cfg, session_state)
     if voice_backend == "gemini_live":
         logger.info("[{cs}] voice_backend=gemini_live — delegating to Gemini pipeline", cs=call_sid)
         from bot_gemini import run_gemini_pipeline

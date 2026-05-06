@@ -5,6 +5,7 @@ import { Resend } from 'resend';
 import { clerkClient } from '@clerk/express';
 import { createLogger } from '../lib/logger.js';
 import { decryptNotificationPhi, encryptNotificationPhi } from '../lib/phi.js';
+import { sanitizeUntrustedMessageText } from '../lib/sanitize.js';
 
 const log = createLogger('Notifications');
 
@@ -18,9 +19,34 @@ const getResendClient = () => {
 };
 
 const FROM_EMAIL = process.env.NOTIFICATION_FROM_EMAIL || 'Donna <notifications@donna.care>';
+const MAX_NOTIFICATION_CONTENT_CHARS = 1200;
 
 export function decryptNotificationRow(row) {
   return decryptNotificationPhi(row);
+}
+
+export function sanitizeNotificationContent(content, options = {}) {
+  return sanitizeUntrustedMessageText(content, {
+    maxLen: MAX_NOTIFICATION_CONTENT_CHARS,
+    replacement: 'Donna has a new update available.',
+    ...options,
+  });
+}
+
+function sanitizeNotificationMetadata(value, depth = 0) {
+  if (value == null || depth > 4) return value;
+  if (typeof value === 'string') {
+    return sanitizeUntrustedMessageText(value, { maxLen: 1000, replacement: '' });
+  }
+  if (Array.isArray(value)) {
+    return value.map(item => sanitizeNotificationMetadata(item, depth + 1));
+  }
+  if (typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, nested]) => [key, sanitizeNotificationMetadata(nested, depth + 1)])
+    );
+  }
+  return value;
 }
 
 // ---------------------------------------------------------------------------
@@ -164,8 +190,10 @@ export const notificationService = {
 
     // Prefer the AI-generated caregiver message. The payload key is still
     // caregiver_sms for legacy schema compatibility, even though SMS is inactive.
-    const content = data.caregiver_sms
-      || `Donna just finished a call with ${seniorName}. ${data.summary || 'Call completed successfully.'}`;
+    const content = sanitizeNotificationContent(
+      data.caregiver_sms
+      || `Donna just finished a call with ${seniorName}. ${data.summary || 'Call completed successfully.'}`
+    );
 
     for (const cg of caregiverList) {
       await this._sendIfAllowed(cg.id, cg.clerkUserId, seniorId, 'call_completed', content, data);
@@ -177,8 +205,13 @@ export const notificationService = {
     const senior = await this._getSenior(seniorId);
     const seniorName = senior?.name || 'your loved one';
 
-    const concern = data.concern || 'A concern was detected during the call.';
-    const content = `Alert: During a call with ${seniorName}, Donna noticed something that may need attention. ${concern}`;
+    const concern = sanitizeNotificationContent(
+      data.concern || 'A concern was detected during the call.',
+      { maxLen: 600, replacement: 'A concern was detected during the call.' }
+    );
+    const content = sanitizeNotificationContent(
+      `Alert: During a call with ${seniorName}, Donna noticed something that may need attention. ${concern}`
+    );
 
     for (const cg of caregiverList) {
       // Concern notifications bypass quiet hours
@@ -191,8 +224,13 @@ export const notificationService = {
     const senior = await this._getSenior(seniorId);
     const seniorName = senior?.name || 'your loved one';
 
-    const reminder = data.reminderTitle || 'a reminder';
-    const content = `${seniorName} was not reached for ${reminder}. Donna tried but could not complete the reminder call.`;
+    const reminder = sanitizeNotificationContent(
+      data.reminderTitle || 'a reminder',
+      { maxLen: 160, replacement: 'a reminder' }
+    );
+    const content = sanitizeNotificationContent(
+      `${seniorName} was not reached for ${reminder}. Donna tried but could not complete the reminder call.`
+    );
 
     for (const cg of caregiverList) {
       await this._sendIfAllowed(cg.id, cg.clerkUserId, seniorId, 'reminder_missed', content, data);
@@ -244,6 +282,9 @@ export const notificationService = {
   },
 
   async _sendEmail(caregiverId, seniorId, eventType, content, metadata, email) {
+    const safeContent = sanitizeNotificationContent(content);
+    const safeMetadata = sanitizeNotificationMetadata(metadata);
+
     // Always record the notification
     await db.insert(notifications).values({
       ...encryptNotificationPhi({
@@ -251,8 +292,8 @@ export const notificationService = {
         seniorId,
         eventType,
         channel: 'email',
-        content,
-        metadata,
+        content: safeContent,
+        metadata: safeMetadata,
       }),
     });
 
@@ -280,7 +321,7 @@ export const notificationService = {
         from: FROM_EMAIL,
         to: email,
         subject: subjects[eventType] || 'Notification from Donna',
-        text: content,
+        text: safeContent,
       });
 
       if (error) {

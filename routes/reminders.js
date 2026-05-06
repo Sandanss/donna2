@@ -92,7 +92,7 @@ router.get('/api/reminders', requireAuth, async (req, res) => {
 // Create a reminder
 router.post('/api/reminders', requireAuth, validateBody(createReminderSchema), idempotencyMiddleware, writeLimiter, async (req, res) => {
   try {
-    const { seniorId, type, title, description, scheduledTime, isRecurring, cronExpression } = req.body;
+    const { seniorId, type, title, description, scheduledTime, isRecurring, isActive, cronExpression } = req.body;
     // Check access to the senior
     if (!await canAccessSenior(req.auth, seniorId)) {
       return sendError(res, 403, { error: 'Access denied to this senior' });
@@ -105,6 +105,8 @@ router.post('/api/reminders', requireAuth, validateBody(createReminderSchema), i
       ...encryptReminderPhi({ seniorId, type, title, description }),
       scheduledTime: reminderScheduledTime,
       isRecurring,
+      isActive,
+      deactivatedAt: isActive === false ? new Date() : null,
       cronExpression: reminderCronExpression,
     }).returning();
     logAudit({
@@ -166,7 +168,10 @@ router.patch('/api/reminders/:id', requireAuth, validateParams(reminderIdParamSc
         if (nextCronExpression) updateData.cronExpression = nextCronExpression;
       }
     }
-    if (isActive !== undefined) updateData.isActive = isActive;
+    if (isActive !== undefined) {
+      updateData.isActive = isActive;
+      updateData.deactivatedAt = isActive ? null : new Date();
+    }
 
     logAudit({
       userId: req.auth.userId,

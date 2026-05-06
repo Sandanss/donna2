@@ -135,8 +135,12 @@ class Settings:
     retention_call_analyses_days: int = 365
     retention_daily_context_days: int = 90
     retention_call_metrics_days: int = 180
+    retention_inactive_reminders_days: int = 365
     retention_reminder_deliveries_days: int = 90
     retention_notifications_days: int = 180
+    retention_caregiver_notes_days: int = 365
+    retention_prospects_days: int = 90
+    retention_inactive_senior_review_days: int = 365
     retention_waitlist_days: int = 365
     retention_audit_logs_days: int = 2190
 
@@ -235,8 +239,30 @@ def validate_production_config() -> list[str]:
         errors.append("TELNYX_CONNECTION_ID is required")
     if not public_url or not public_url.startswith("https://"):
         errors.append("PIPECAT_PUBLIC_URL must be an https:// URL")
+    if not os.getenv("ANTHROPIC_API_KEY", ""):
+        errors.append("ANTHROPIC_API_KEY is required")
+    if not os.getenv("DEEPGRAM_API_KEY", ""):
+        errors.append("DEEPGRAM_API_KEY is required")
+
+    tts_provider = os.getenv("TTS_PROVIDER", "elevenlabs").strip().lower() or "elevenlabs"
+    if tts_provider == "cartesia":
+        if not os.getenv("CARTESIA_API_KEY", ""):
+            errors.append("CARTESIA_API_KEY is required when TTS_PROVIDER=cartesia")
+    elif tts_provider == "elevenlabs":
+        if not os.getenv("ELEVENLABS_API_KEY", ""):
+            errors.append("ELEVENLABS_API_KEY is required")
+    else:
+        errors.append("TTS_PROVIDER must be elevenlabs or cartesia when set")
+
+    if (
+        "gemini" in os.getenv("FAST_OBSERVER_MODEL", "gemini-3-flash-preview").lower()
+        or "gemini" in os.getenv("CALL_ANALYSIS_MODEL", "gemini-3-flash-preview").lower()
+    ) and not os.getenv("GOOGLE_API_KEY", ""):
+        errors.append("GOOGLE_API_KEY is required for Gemini observer or analysis models")
     if _truthy(os.getenv("PIPECAT_REQUIRE_REDIS")) and not os.getenv("REDIS_URL", ""):
         errors.append("REDIS_URL is required when PIPECAT_REQUIRE_REDIS=true")
+    if os.getenv("VOICE_BACKEND", "").strip().lower() == "gemini_live":
+        errors.append("VOICE_BACKEND=gemini_live is not allowed in production")
 
     return errors
 
@@ -378,8 +404,12 @@ def _load_settings() -> Settings:
         retention_call_analyses_days=int(_env("RETENTION_CALL_ANALYSES_DAYS", "365")),
         retention_daily_context_days=int(_env("RETENTION_DAILY_CONTEXT_DAYS", "90")),
         retention_call_metrics_days=int(_env("RETENTION_CALL_METRICS_DAYS", "180")),
+        retention_inactive_reminders_days=int(_env("RETENTION_INACTIVE_REMINDERS_DAYS", "365")),
         retention_reminder_deliveries_days=int(_env("RETENTION_REMINDER_DELIVERIES_DAYS", "90")),
         retention_notifications_days=int(_env("RETENTION_NOTIFICATIONS_DAYS", "180")),
+        retention_caregiver_notes_days=int(_env("RETENTION_CAREGIVER_NOTES_DAYS", "365")),
+        retention_prospects_days=int(_env("RETENTION_PROSPECTS_DAYS", "90")),
+        retention_inactive_senior_review_days=int(_env("RETENTION_INACTIVE_SENIOR_REVIEW_DAYS", "365")),
         retention_waitlist_days=int(_env("RETENTION_WAITLIST_DAYS", "365")),
         retention_audit_logs_days=int(_env("RETENTION_AUDIT_LOGS_DAYS", "2190")),
     )

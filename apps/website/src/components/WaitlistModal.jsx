@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { apiUrl } from '../lib/config.js';
 import './IntakeModal.css';
-
-const API_URL = 'https://donna-api-production-2450.up.railway.app';
 
 const WHO_FOR_OPTIONS = [
   'Mother',
@@ -47,7 +46,7 @@ export default function WaitlistModal({ isOpen, onClose }) {
     const payload = JSON.stringify({ name, email, phone, whoFor, thoughts });
 
     try {
-      const response = await fetch(`${API_URL}/waitlist`, {
+      const response = await fetch(apiUrl('/waitlist'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: payload,
