@@ -138,8 +138,8 @@ class TestQuickObserverGoodbyeEndFrame:
         assert session_state.get("_goodbye_in_progress") is True
 
     @pytest.mark.asyncio
-    async def test_early_goodbye_does_not_force_end(self, session_state, frame_capture):
-        """Avoid random early-call hangups from false goodbye transcription."""
+    async def test_early_strong_goodbye_forces_end(self, session_state, frame_capture):
+        """A clear goodbye should not be blocked by an arbitrary minimum call age."""
         import time
 
         session_state["_call_start_time"] = time.time()
@@ -160,7 +160,8 @@ class TestQuickObserverGoodbyeEndFrame:
         asyncio.create_task(inject())
         await asyncio.wait_for(runner.run(task), timeout=5.0)
 
-        assert session_state.get("_goodbye_in_progress") is not True
+        assert session_state.get("_goodbye_in_progress") is True
+        assert capture.has_end_frame
 
     @pytest.mark.asyncio
     async def test_goodbye_continuation_does_not_force_end(self, session_state, frame_capture):

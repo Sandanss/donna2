@@ -404,6 +404,35 @@ class TestDirectorSpeculativeAnalysis:
             pass
 
     @pytest.mark.asyncio
+    async def test_end_frame_cancels_background_tasks(self, session_state):
+        processor = ConversationDirectorProcessor(session_state=session_state)
+        speculative_task = asyncio.create_task(asyncio.sleep(10))
+        prefetch_task = asyncio.create_task(asyncio.sleep(10))
+        fallback_task = asyncio.create_task(asyncio.sleep(10))
+        delayed_end_task = asyncio.create_task(asyncio.sleep(10))
+        silence_task = asyncio.create_task(asyncio.sleep(10))
+
+        processor._speculative_tasks.append(("hello there", speculative_task))
+        processor._prefetch_tasks.append(prefetch_task)
+        processor._fallback_analysis_task = fallback_task
+        processor._delayed_end_task = delayed_end_task
+        processor._silence_timer_task = silence_task
+
+        processor._cancel_background_tasks()
+        await asyncio.sleep(0)
+
+        assert speculative_task.cancelled()
+        assert prefetch_task.cancelled()
+        assert fallback_task.cancelled()
+        assert delayed_end_task.cancelled()
+        assert silence_task.cancelled()
+        assert processor._speculative_tasks == []
+        assert processor._prefetch_tasks == []
+        assert processor._fallback_analysis_task is None
+        assert processor._delayed_end_task is None
+        assert processor._silence_timer_task is None
+
+    @pytest.mark.asyncio
     async def test_harvest_speculative_returns_best_match(self, session_state):
         """harvest_speculative returns best matching result from completed tasks."""
         processor = ConversationDirectorProcessor(session_state=session_state)

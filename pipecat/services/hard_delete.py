@@ -13,6 +13,97 @@ from loguru import logger
 from db.client import get_pool
 
 
+async def _assert_no_active_senior_legal_hold(conn, senior_id: str) -> None:
+    count = await conn.fetchval(
+        """
+        SELECT COUNT(*)::int
+        FROM legal_holds lh
+        WHERE lh.released_at IS NULL
+          AND (
+            (lh.resource_type = 'senior' AND lh.resource_id = $1)
+            OR EXISTS (
+              SELECT 1 FROM conversations c
+              WHERE c.senior_id = $1
+                AND lh.resource_type = 'conversation'
+                AND lh.resource_id = c.id::text
+            )
+            OR EXISTS (
+              SELECT 1 FROM memories m
+              WHERE m.senior_id = $1
+                AND lh.resource_type = 'memory'
+                AND lh.resource_id = m.id::text
+            )
+            OR EXISTS (
+              SELECT 1 FROM reminders r
+              WHERE r.senior_id = $1
+                AND lh.resource_type = 'reminder'
+                AND lh.resource_id = r.id::text
+            )
+            OR EXISTS (
+              SELECT 1 FROM reminder_deliveries rd
+              JOIN reminders r ON r.id = rd.reminder_id
+              WHERE r.senior_id = $1
+                AND lh.resource_type = 'reminder_delivery'
+                AND lh.resource_id = rd.id::text
+            )
+            OR EXISTS (
+              SELECT 1 FROM call_analyses ca
+              WHERE ca.senior_id = $1
+                AND lh.resource_type = 'call_analysis'
+                AND lh.resource_id = ca.id::text
+            )
+            OR EXISTS (
+              SELECT 1 FROM daily_call_context dcc
+              WHERE dcc.senior_id = $1
+                AND lh.resource_type = 'daily_call_context'
+                AND lh.resource_id = dcc.id::text
+            )
+            OR EXISTS (
+              SELECT 1 FROM notifications n
+              WHERE n.senior_id = $1
+                AND lh.resource_type = 'notification'
+                AND lh.resource_id = n.id::text
+            )
+            OR EXISTS (
+              SELECT 1 FROM caregiver_notes cn
+              WHERE cn.senior_id = $1
+                AND lh.resource_type = 'caregiver_note'
+                AND lh.resource_id = cn.id::text
+            )
+          )
+        """,
+        senior_id,
+    )
+    if count and count > 0:
+        raise RuntimeError("Data deletion is blocked by an active legal hold")
+
+
+async def _assert_no_active_prospect_legal_hold(conn, prospect_id: str) -> None:
+    count = await conn.fetchval(
+        """SELECT COUNT(*)::int
+           FROM legal_holds lh
+           WHERE lh.released_at IS NULL
+             AND (
+               (lh.resource_type = 'prospect' AND lh.resource_id = $1)
+               OR EXISTS (
+                 SELECT 1 FROM memories m
+                 WHERE m.prospect_id = $1
+                   AND lh.resource_type = 'memory'
+                   AND lh.resource_id = m.id::text
+               )
+               OR EXISTS (
+                 SELECT 1 FROM conversations c
+                 WHERE c.prospect_id = $1
+                   AND lh.resource_type = 'conversation'
+                   AND lh.resource_id = c.id::text
+               )
+             )""",
+        prospect_id,
+    )
+    if count and count > 0:
+        raise RuntimeError("Data deletion is blocked by an active legal hold")
+
+
 async def hard_delete_senior(
     senior_id: str,
     deleted_by: str,
@@ -26,6 +117,8 @@ async def hard_delete_senior(
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
+            await _assert_no_active_senior_legal_hold(conn, senior_id)
+
             # 1. Count records per table for audit log
             counts = {}
             count_queries = [
@@ -55,6 +148,14 @@ async def hard_delete_senior(
             for table, sql in count_queries:
                 row = await conn.fetchval(sql, senior_id)
                 counts[table] = row or 0
+
+            row = await conn.fetchval(
+                """SELECT COUNT(*) FROM idempotency_keys
+                   WHERE user_id = $1
+                     AND created_at >= NOW() - INTERVAL '1 day'""",
+                deleted_by,
+            )
+            counts["idempotency_keys"] = row or 0
 
             # 2. DELETE in dependency order (deepest children first)
             # notification_preferences → caregivers(id)
@@ -110,11 +211,19 @@ async def hard_delete_senior(
                 senior_id,
             )
 
-            # 4. Delete the senior row itself (all FKs cleared above)
+            # 4. Remove short-lived encrypted replay rows for the deleting user.
+            await conn.execute(
+                """DELETE FROM idempotency_keys
+                   WHERE user_id = $1
+                     AND created_at >= NOW() - INTERVAL '1 day'""",
+                deleted_by,
+            )
+
+            # 5. Delete the senior row itself (all FKs cleared above)
             result = await conn.execute("DELETE FROM seniors WHERE id = $1", senior_id)
             counts["seniors"] = _parse_count(result)
 
-            # 5. Insert audit log
+            # 6. Insert audit log
             await conn.execute(
                 """INSERT INTO data_deletion_logs
                    (entity_type, entity_id, deletion_type, reason, deleted_by, record_counts)
@@ -146,6 +255,8 @@ async def hard_delete_prospect(
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
+            await _assert_no_active_prospect_legal_hold(conn, prospect_id)
+
             counts = {}
 
             row = await conn.fetchval(
@@ -158,6 +269,14 @@ async def hard_delete_prospect(
             )
             counts["conversations"] = row or 0
 
+            row = await conn.fetchval(
+                """SELECT COUNT(*) FROM idempotency_keys
+                   WHERE user_id = $1
+                     AND created_at >= NOW() - INTERVAL '1 day'""",
+                deleted_by,
+            )
+            counts["idempotency_keys"] = row or 0
+
             await conn.execute(
                 "DELETE FROM memories WHERE prospect_id = $1", prospect_id
             )
@@ -169,6 +288,13 @@ async def hard_delete_prospect(
                 "DELETE FROM prospects WHERE id = $1", prospect_id
             )
             counts["prospects"] = _parse_count(result)
+
+            await conn.execute(
+                """DELETE FROM idempotency_keys
+                   WHERE user_id = $1
+                     AND created_at >= NOW() - INTERVAL '1 day'""",
+                deleted_by,
+            )
 
             await conn.execute(
                 """INSERT INTO data_deletion_logs

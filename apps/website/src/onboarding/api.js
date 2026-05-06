@@ -1,4 +1,4 @@
-const API_URL = 'https://donna-api-production-2450.up.railway.app';
+import { apiUrl } from '../lib/config.js';
 
 // Map full day names / indices to short day names expected by backend
 const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -83,7 +83,7 @@ export async function submitOnboarding(data, clerkToken) {
     headers['Authorization'] = `Bearer ${clerkToken}`;
   }
 
-  const res = await fetch(`${API_URL}/api/onboarding`, {
+  const res = await fetch(apiUrl('/api/onboarding'), {
     method: 'POST',
     headers,
     body: JSON.stringify(payload),

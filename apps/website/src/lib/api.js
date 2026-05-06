@@ -1,6 +1,5 @@
 import { useAuth } from '@clerk/clerk-react';
-
-const API_URL = 'https://donna-api-production-2450.up.railway.app';
+import { apiUrl } from './config.js';
 
 async function fetchWithAuth(path, options = {}, token) {
   const headers = {
@@ -12,7 +11,7 @@ async function fetchWithAuth(path, options = {}, token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const res = await fetch(`${API_URL}${path}`, { ...options, headers });
+  const res = await fetch(apiUrl(path), { ...options, headers });
 
   if (!res.ok) {
     const error = await res.text();
@@ -84,7 +83,7 @@ export function useApi() {
     // Chat (returns raw Response for SSE streaming)
     streamChat: async (seniorId, messages) => {
       const token = await getToken();
-      return fetch(`${API_URL}/api/chat`, {
+      return fetch(apiUrl('/api/chat'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

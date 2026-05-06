@@ -139,9 +139,12 @@ async def _check_token_revocation(token: str, admin_id: str) -> None:
     except HTTPException:
         raise
     except Exception as e:
-        # If the revoked_tokens table doesn't exist yet (pre-migration),
-        # log and allow the request through rather than breaking auth.
         logger.debug("Token revocation check skipped: {err}", err=str(e))
+        if is_production_environment():
+            raise HTTPException(
+                status_code=503,
+                detail="Token revocation status is unavailable",
+            )
 
 
 async def require_auth(request: Request) -> AuthContext:

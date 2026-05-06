@@ -308,13 +308,11 @@ export default function ScheduleScreen() {
     }
 
     try {
-      console.log('[Schedule] Saving schedule', JSON.stringify(updated));
       await updateSchedule.mutateAsync({ schedule: updated });
-      console.log('[Schedule] Save succeeded');
       setModalVisible(false);
       setRecentlySavedTitle(newItem.title);
-    } catch (err) {
-      console.error('[Schedule] Save failed', err);
+    } catch {
+      console.error('[Schedule] Save failed');
     }
   }, [
     formTitle,

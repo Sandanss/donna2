@@ -4,10 +4,10 @@
 
 | Field | Value |
 |-------|-------|
-| Last Updated | April 22, 2026 |
+| Last Updated | May 5, 2026 |
 | Owner | TBD |
 | Review Cadence | Quarterly |
-| Related Docs | [BAA Tracker](BAA_TRACKER.md), [Breach Notification](BREACH_NOTIFICATION.md), [Data Retention](DATA_RETENTION_POLICY.md), [Vendor Security](VENDOR_SECURITY_EVALUATION.md) |
+| Related Docs | [BAA Tracker](BAA_TRACKER.md), [Breach Notification](BREACH_NOTIFICATION.md), [Data Retention](DATA_RETENTION_POLICY.md), [Vendor Security](VENDOR_SECURITY_EVALUATION.md), [May 5 Audit](../audits/2026-05-05-codebase-audit.md) |
 
 ---
 
@@ -108,8 +108,8 @@ PHI is any individually identifiable health information. In Donna's system, the 
 | Encryption in transit | Implemented | TLS everywhere: Railway (HTTPS), Neon (SSL), Telnyx webhook/media paths, Resend email API, and all AI/vendor API calls over HTTPS/WSS where applicable |
 | Encryption at rest | Partial | Neon PostgreSQL encrypts at rest (AES-256); application-level encryption is implemented for new PHI writes across conversations, memories, analyses, senior profile PHI, reminders, daily context, notifications, waitlist/prospect context, and caregiver notes. Legacy plaintext backfill/nulling must still be run per environment. |
 | Audit logging | Partial | Structured `audit_logs` table plus Node/Pipecat audit services exist for PHI access paths. Coverage should still be verified before production PHI launch. |
-| PII sanitization in logs | Implemented | `sanitize.py` masks phone numbers and names in application logs |
-| Input validation | Implemented | Pydantic schemas on all Pipecat API inputs; Zod schemas on Node.js API inputs |
+| PII/PHI sanitization in logs | Partial | Sanitizers exist, but the May 5 audit found raw PHI-bearing logs in mobile schedule save and several server/client debug paths. Production PHI launch requires log cleanup and review. |
+| Input validation | Partial | Pydantic/Zod schemas exist for many API inputs, but the May 5 audit found gaps including raw memory search query validation/clamping and public waitlist validation/rate limiting. |
 | Rate limiting | Implemented | 5-tier rate limiting on all API endpoints |
 | Security headers | Implemented | HSTS, X-Frame-Options, CSP-adjacent headers |
 | Telnyx webhook validation | Implemented | Ed25519 Telnyx signature verification on `/telnyx/events`, plus single-use `ws_token` validation for Telnyx media WebSocket startup |
@@ -122,9 +122,13 @@ PHI is any individually identifiable health information. In Donna's system, the 
 | Safeguard | Status | Priority | Effort |
 |-----------|--------|----------|--------|
 | Business Associate Agreements (BAAs) | **Not signed with any vendor** | CRITICAL | Medium (sales outreach) |
+| Resend BAA/minimized email path | Not verified | CRITICAL | Low/Medium (vendor/legal decision plus email minimization if needed) |
 | Complete application-level encryption of PHI | Partial | HIGH | Low/Medium (new writes are covered; run SQL migration plus encrypted backfill/nulling in every deployed database, then test exports and calls) |
 | HIPAA audit trail coverage verification | Partial | HIGH | Low/Medium (confirm every PHI read/write path writes `audit_logs`) |
-| Data retention operational verification | Partial | HIGH | Low/Medium (Node owns daily purge; verify per environment and document run history) |
+| Data retention operational verification | Partial | HIGH | Low/Medium (Node owns daily purge; verify per environment and add coverage for inactive reminders, senior profiles, caregiver notes, prospects, legal holds, and idempotency replay rows) |
+| Client-side plaintext onboarding storage | Not remediated | HIGH | Medium (remove credentials/PHI from website `localStorage` or replace with encrypted/minimized short-lived storage) |
+| Test/prod API separation | Not verified | HIGH | Low/Medium (remove hardcoded production Railway URLs from website/consumer E2E clients) |
+| Token revocation fail-closed behavior | Gap found | HIGH | Low/Medium (revocation should not fail open on storage errors) |
 | Formal risk assessment | Not performed | HIGH | Medium (documented risk analysis per 45 CFR 164.308(a)(1)) |
 | Workforce training | Not performed | MEDIUM | Low (document policies, train team) |
 | Breach notification tabletop/testing | Documented, not tested | HIGH | Low (see [Breach Notification](BREACH_NOTIFICATION.md)) |
@@ -165,6 +169,8 @@ PHI is any individually identifiable health information. In Donna's system, the 
 
 **Remaining gap:** Audit logging is not yet proven complete or tamper-evident. Before real PHI launch, verify:
 - Every PHI read/write path emits an audit event
+- Notification reads and schedule reads/writes emit audit events
+- Memory search audit metadata is minimized and does not store raw query text unnecessarily
 - High-risk exports fail closed if audit persistence fails
 - Audit logs are retained for 6 years
 - Audit logs are append-only or protected from normal application updates/deletes
@@ -209,7 +215,7 @@ PHI is any individually identifiable health information. In Donna's system, the 
 | (a)(6) Security incident procedures | Not documented | See [Breach Notification Runbook](BREACH_NOTIFICATION.md) |
 | (a)(7) Contingency plan | Not documented | Disaster recovery, emergency mode, data backup procedures |
 | (a)(8) Evaluation | Not performed | Annual security evaluation |
-| (b)(1) Business associate contracts | **Not signed** | See [BAA Tracker](BAA_TRACKER.md) -- 16+ vendors need evaluation |
+| (b)(1) Business associate contracts | **Not signed** | See [BAA Tracker](BAA_TRACKER.md) -- all PHI vendors need evaluation, including newly tracked Resend |
 
 ---
 
@@ -247,9 +253,13 @@ A formal risk assessment per 45 CFR 164.308(a)(1)(ii)(A) has not yet been conduc
 | Risk Area | Likelihood | Impact | Risk Level | Mitigation |
 |-----------|-----------|--------|------------|------------|
 | Third-party vendor breach (no BAAs) | High | High | **CRITICAL** | Sign BAAs with all vendors processing PHI |
+| PHI-bearing email without tracked BAA/minimization | High | High | **CRITICAL** | Add Resend to vendor controls, sign BAA or remove PHI from email payloads |
 | Database credential compromise | Medium | High | **HIGH** | App-level field encryption, key rotation, least-privilege DB users |
 | Audit trail coverage not fully verified | High | Medium | **HIGH** | Verify audit logging coverage and harden append-only controls |
 | Conversation data in 12+ vendor systems | High | High | **CRITICAL** | Minimize data sent to vendors, sign BAAs, evaluate vendor alternatives |
+| Website onboarding PHI/credentials in plaintext localStorage | High | High | **HIGH** | Remove credentials/PHI from client storage; use minimized server-side or encrypted short-lived state |
+| Test/prod contamination from hardcoded production API URLs | Medium | High | **HIGH** | Remove production Railway URL defaults from tests and local clients |
+| Raw PHI in debug logs | Medium | High | **HIGH** | Sanitize/remove schedule, onboarding, caregiver, news, cache, and memory query logs |
 | Developer access to production data | Medium | Medium | **MEDIUM** | Synthetic data for dev, restrict production access |
 | Data retention purge not yet operationally verified in every environment | High | Medium | **HIGH** | Verify the Node-owned daily purge and document purge history (see [Data Retention](DATA_RETENTION_POLICY.md)) |
 | Breach notification procedures not drilled | Medium | High | **HIGH** | Run tabletop exercises and update [Breach Notification](BREACH_NOTIFICATION.md) from findings |
@@ -262,34 +272,35 @@ A formal risk assessment per 45 CFR 164.308(a)(1)(ii)(A) has not yet been conduc
 
 ### Phase 1: Foundation (Weeks 1-4) -- CRITICAL
 
-1. **Sign BAAs with tier-1 vendors** (Telnyx, Anthropic, Neon, Deepgram, Google, OpenAI, Sentry) -- these all offer or advertise BAA paths on enterprise/business plans. Keep Twilio out of active PHI flows while SMS remains disabled.
+1. **Sign BAAs with tier-1 vendors** (Telnyx, Anthropic, Neon, Deepgram, Google, OpenAI, Sentry, and Resend if email carries PHI) -- these all offer, advertise, or require verification of BAA paths on business/enterprise plans. Keep Twilio out of active PHI flows while SMS remains disabled.
 2. **Designate a HIPAA Security Officer** (can be a co-founder initially).
 3. **Document breach notification procedures** -- see [Breach Notification](BREACH_NOTIFICATION.md).
 4. **Verify HIPAA audit logging coverage** across Node and Pipecat routes (`audit_logs` table exists; confirm every PHI access path writes an audit event).
 5. **Verify Clerk JWKS env configuration** in every deployment. `pipecat/api/middleware/auth.py` now verifies Clerk JWT signatures, but it rejects Clerk tokens if JWKS cannot be derived from env.
+6. **Remove high-risk client/log exposures** from website onboarding storage, mobile schedule logging, and server/client debug logs before PHI launch.
 
 ### Phase 2: Data Protection (Weeks 5-8) -- HIGH
 
-6. **Complete field-level encryption rollout** for PHI columns by running the migration/backfill/nulling sequence in every environment and verifying encrypted export/read behavior.
-7. **Implement data retention policies** with automated purge jobs -- see [Data Retention](DATA_RETENTION_POLICY.md).
-8. **Evaluate and replace non-compliant vendors** (Groq, Cartesia, Tavily; Cerebras is legacy/not active in current Director code) -- see [Vendor Security](VENDOR_SECURITY_EVALUATION.md).
-9. **Restrict developer access to production data** -- synthetic data for dev/staging environments.
+7. **Complete field-level encryption rollout** for PHI columns by running the migration/backfill/nulling sequence in every environment and verifying encrypted export/read behavior.
+8. **Implement data retention policies** with automated purge jobs -- see [Data Retention](DATA_RETENTION_POLICY.md).
+9. **Evaluate and replace non-compliant vendors** (Groq, Cartesia, Tavily; Cerebras is legacy/not active in current Director code) -- see [Vendor Security](VENDOR_SECURITY_EVALUATION.md).
+10. **Restrict developer access to production data** -- synthetic data for dev/staging environments.
 
 ### Phase 3: Organizational (Weeks 9-12) -- MEDIUM
 
-10. **Conduct formal risk assessment** per 45 CFR 164.308(a)(1)(ii)(A).
-11. **Develop and deliver workforce HIPAA training**.
-12. **Document contingency/disaster recovery plan**.
-13. **Implement minimum necessary standard** -- limit PHI in API responses.
-14. **Annual evaluation schedule** -- establish quarterly review cadence.
+11. **Conduct formal risk assessment** per 45 CFR 164.308(a)(1)(ii)(A).
+12. **Develop and deliver workforce HIPAA training**.
+13. **Document contingency/disaster recovery plan**.
+14. **Implement minimum necessary standard** -- limit PHI in API responses.
+15. **Annual evaluation schedule** -- establish quarterly review cadence.
 
 ### Phase 4: Ongoing -- CONTINUOUS
 
-15. **Annual risk assessment** and policy review.
-16. **Quarterly access reviews** -- who has access to what.
-17. **Annual workforce re-training**.
-18. **Vendor re-evaluation** -- annually review all vendor BAA and security status.
-19. **Penetration testing** -- annual third-party security assessment.
+16. **Annual risk assessment** and policy review.
+17. **Quarterly access reviews** -- who has access to what.
+18. **Annual workforce re-training**.
+19. **Vendor re-evaluation** -- annually review all vendor BAA and security status.
+20. **Penetration testing** -- annual third-party security assessment.
 
 ---
 

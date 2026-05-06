@@ -14,6 +14,7 @@ from loguru import logger
 from db import query_one
 from lib.circuit_breaker import CircuitBreaker
 from lib.encryption import encrypt, decrypt, encrypt_json, decrypt_json
+from lib.sanitize import sanitize_untrusted_text
 from services.time_context import format_call_time_label, format_local_datetime
 
 _breaker = CircuitBreaker("gemini_analysis", failure_threshold=3, recovery_timeout=60.0, call_timeout=15.0)
@@ -114,6 +115,38 @@ def _as_list(value) -> list:
     return []
 
 
+def _sanitize_analysis_text(value, *, max_len: int = 1000) -> str:
+    return sanitize_untrusted_text(value, max_len=max_len, replacement="")
+
+
+def _sanitize_analysis_list(values, *, max_len: int = 300) -> list[str]:
+    sanitized = []
+    for value in _as_list(values):
+        text = _sanitize_analysis_text(value, max_len=max_len)
+        if text:
+            sanitized.append(text)
+    return sanitized
+
+
+def _sanitize_concerns(values) -> list[dict]:
+    concerns = []
+    for concern in _as_list(values):
+        if not isinstance(concern, dict):
+            continue
+        sanitized = dict(concern)
+        for key, max_len in (
+            ("type", 40),
+            ("severity", 40),
+            ("description", 500),
+            ("evidence", 500),
+            ("recommended_action", 500),
+        ):
+            if key in sanitized:
+                sanitized[key] = _sanitize_analysis_text(sanitized[key], max_len=max_len)
+        concerns.append(sanitized)
+    return concerns
+
+
 def _normalize_sentiment(raw, analysis: dict) -> str:
     """Return a stable caregiver-facing sentiment label."""
     if isinstance(raw, str):
@@ -166,17 +199,24 @@ def _normalize_analysis(analysis: dict | None) -> dict:
     default = _get_default_analysis()
     merged = {**default, **analysis}
 
-    merged["topics_discussed"] = _as_list(merged.get("topics_discussed") or merged.get("topics"))
-    merged["reminders_delivered"] = _as_list(merged.get("reminders_delivered"))
-    merged["concerns"] = _as_list(merged.get("concerns"))
-    merged["positive_observations"] = _as_list(merged.get("positive_observations"))
-    merged["follow_up_suggestions"] = _as_list(
+    merged["summary"] = _sanitize_analysis_text(merged.get("summary"), max_len=1200)
+    merged["mood"] = _sanitize_analysis_text(merged.get("mood"), max_len=80)
+    merged["caregiver_sms"] = _sanitize_analysis_text(merged.get("caregiver_sms"), max_len=280)
+    merged["topics_discussed"] = _sanitize_analysis_list(
+        merged.get("topics_discussed") or merged.get("topics"),
+        max_len=160,
+    )
+    merged["reminders_delivered"] = _sanitize_analysis_list(merged.get("reminders_delivered"), max_len=160)
+    merged["concerns"] = _sanitize_concerns(merged.get("concerns"))
+    merged["positive_observations"] = _sanitize_analysis_list(merged.get("positive_observations"))
+    merged["follow_up_suggestions"] = _sanitize_analysis_list(
         merged.get("follow_up_suggestions") or merged.get("follow_ups")
     )
-    merged["caregiver_takeaways"] = _as_list(merged.get("caregiver_takeaways"))
-    merged["recommended_caregiver_action"] = str(
-        merged.get("recommended_caregiver_action") or ""
-    ).strip()
+    merged["caregiver_takeaways"] = _sanitize_analysis_list(merged.get("caregiver_takeaways"))
+    merged["recommended_caregiver_action"] = _sanitize_analysis_text(
+        merged.get("recommended_caregiver_action") or "",
+        max_len=500,
+    )
     merged["sentiment"] = _normalize_sentiment(raw_sentiment, merged)
 
     try:

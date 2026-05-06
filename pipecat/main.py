@@ -98,7 +98,7 @@ from api.routes.data import router as data_router
 from api.routes.export import router as export_router
 from api.routes.metrics import router as metrics_router
 from api.routes.telnyx import router as telnyx_router
-from api.routes.call_context import call_metadata
+from api.routes.call_context import _cleanup_metadata, call_metadata
 from bot import (
     WebSocketAuthError,
     authenticate_websocket_call,
@@ -124,6 +124,23 @@ def register_call_task(task: asyncio.Task) -> None:
     """Track an active call task for graceful shutdown draining."""
     _active_tasks.add(task)
     task.add_done_callback(_active_tasks.discard)
+
+
+async def _reject_prepared_call_at_capacity(prepared_call: dict, session_state: dict) -> None:
+    """End a validated Telnyx call that cannot be admitted to the AI pipeline."""
+    call_sid = session_state.get("call_sid")
+    metadata = prepared_call.get("metadata") or {}
+    try:
+        if call_sid and metadata.get("telephony_provider") == "telnyx":
+            from api.routes.telnyx import _hangup_telnyx_call
+
+            await _hangup_telnyx_call(call_sid)
+            logger.info("[{cs}] Hung up Telnyx call rejected at capacity", cs=call_sid)
+    except Exception as exc:
+        logger.error("[{cs}] Failed to hang up capacity-rejected Telnyx call: {err}", cs=call_sid or "unknown", err=str(exc))
+    finally:
+        if call_sid:
+            await _cleanup_metadata(call_sid)
 
 # ---------------------------------------------------------------------------
 # Scalability: Concurrency control & metrics
@@ -289,6 +306,7 @@ async def websocket_endpoint(websocket: WebSocket):
         await asyncio.wait_for(_call_semaphore.acquire(), timeout=0.01)
     except asyncio.TimeoutError:
         logger.warning("Rejected authenticated call: at capacity ({max})", max=MAX_CALLS)
+        await _reject_prepared_call_at_capacity(prepared_call, session_state)
         await websocket.close(code=1013)  # Try Again Later
         return
 
@@ -337,7 +355,7 @@ async def websocket_endpoint(websocket: WebSocket):
         # Clean up call_metadata to prevent memory leaks on crashes
         cs = session_state.get("call_sid")
         if cs:
-            call_metadata.pop(cs, None)
+            await _cleanup_metadata(cs)
         if websocket.client_state.name != "DISCONNECTED":
             try:
                 await websocket.close()

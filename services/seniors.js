@@ -8,6 +8,73 @@ import { decryptSeniorPhi, encryptSeniorPhi } from '../lib/phi.js';
 
 const log = createLogger('Senior');
 
+async function assertNoActiveSeniorLegalHold(tx, seniorId) {
+  const result = await tx.execute(sql`
+    SELECT COUNT(*)::int AS count
+    FROM legal_holds lh
+    WHERE lh.released_at IS NULL
+      AND (
+        (lh.resource_type = 'senior' AND lh.resource_id = ${seniorId})
+        OR EXISTS (
+          SELECT 1 FROM conversations c
+          WHERE c.senior_id = ${seniorId}
+            AND lh.resource_type = 'conversation'
+            AND lh.resource_id = c.id::text
+        )
+        OR EXISTS (
+          SELECT 1 FROM memories m
+          WHERE m.senior_id = ${seniorId}
+            AND lh.resource_type = 'memory'
+            AND lh.resource_id = m.id::text
+        )
+        OR EXISTS (
+          SELECT 1 FROM reminders r
+          WHERE r.senior_id = ${seniorId}
+            AND lh.resource_type = 'reminder'
+            AND lh.resource_id = r.id::text
+        )
+        OR EXISTS (
+          SELECT 1 FROM reminder_deliveries rd
+          JOIN reminders r ON r.id = rd.reminder_id
+          WHERE r.senior_id = ${seniorId}
+            AND lh.resource_type = 'reminder_delivery'
+            AND lh.resource_id = rd.id::text
+        )
+        OR EXISTS (
+          SELECT 1 FROM call_analyses ca
+          WHERE ca.senior_id = ${seniorId}
+            AND lh.resource_type = 'call_analysis'
+            AND lh.resource_id = ca.id::text
+        )
+        OR EXISTS (
+          SELECT 1 FROM daily_call_context dcc
+          WHERE dcc.senior_id = ${seniorId}
+            AND lh.resource_type = 'daily_call_context'
+            AND lh.resource_id = dcc.id::text
+        )
+        OR EXISTS (
+          SELECT 1 FROM notifications n
+          WHERE n.senior_id = ${seniorId}
+            AND lh.resource_type = 'notification'
+            AND lh.resource_id = n.id::text
+        )
+        OR EXISTS (
+          SELECT 1 FROM caregiver_notes cn
+          WHERE cn.senior_id = ${seniorId}
+            AND lh.resource_type = 'caregiver_note'
+            AND lh.resource_id = cn.id::text
+        )
+      )
+  `);
+
+  const count = result.rows?.[0]?.count || 0;
+  if (count > 0) {
+    const err = new Error('Data deletion is blocked by an active legal hold');
+    err.status = 423;
+    throw err;
+  }
+}
+
 export const seniorService = {
   // Find senior by phone number
   async findByPhone(phone) {
@@ -114,6 +181,8 @@ export const seniorService = {
 
     // Use a transaction for atomicity
     await db.transaction(async (tx) => {
+      await assertNoActiveSeniorLegalHold(tx, id);
+
       // 1. Count records per table for audit log
       const [npCount] = await tx.select({ count: sql`COUNT(*)::int` })
         .from(notificationPreferences)
@@ -168,6 +237,14 @@ export const seniorService = {
       const [cnCount] = (await tx.execute(sql`SELECT COUNT(*)::int AS count FROM caregiver_notes WHERE senior_id = ${id}`)).rows;
       counts.caregiver_notes = cnCount?.count || 0;
 
+      const [idemCount] = (await tx.execute(sql`
+        SELECT COUNT(*)::int AS count
+        FROM idempotency_keys
+        WHERE user_id = ${deletedBy}
+          AND created_at >= NOW() - INTERVAL '1 day'
+      `)).rows;
+      counts.idempotency_keys = idemCount?.count || 0;
+
       // 2. DELETE in dependency order (deepest children first)
       await tx.delete(notificationPreferences)
         .where(inArray(notificationPreferences.caregiverId,
@@ -195,11 +272,19 @@ export const seniorService = {
       // 3. Unlink prospects
       await tx.execute(sql`UPDATE prospects SET converted_senior_id = NULL WHERE converted_senior_id = ${id}`);
 
-      // 4. Delete senior
+      // 4. Remove short-lived encrypted replay rows for the deleting user so
+      // hard-delete responses cannot be replayed after the data is gone.
+      await tx.execute(sql`
+        DELETE FROM idempotency_keys
+        WHERE user_id = ${deletedBy}
+          AND created_at >= NOW() - INTERVAL '1 day'
+      `);
+
+      // 5. Delete senior
       const delResult = await tx.execute(sql`DELETE FROM seniors WHERE id = ${id}`);
       counts.seniors = delResult.rowCount || 0;
 
-      // 5. Audit log
+      // 6. Audit log
       await tx.insert(dataDeletionLogs).values({
         entityType: 'senior',
         entityId: id,

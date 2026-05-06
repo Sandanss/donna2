@@ -23,6 +23,7 @@ from zoneinfo import ZoneInfo
 
 from loguru import logger
 from pipecat_flows import FlowsFunctionSchema
+from lib.sanitize import sanitize_untrusted_text
 from services.context_trace import record_context_event, record_latency_event
 
 
@@ -147,6 +148,7 @@ _ADDRESS_RE = re.compile(
     re.I,
 )
 _SPACE_RE = re.compile(r"\s+")
+_MAX_WEB_SEARCH_QUERY_CHARS = 240
 
 
 def _known_private_terms(session_state: dict | None) -> set[str]:
@@ -194,7 +196,12 @@ def _known_location_terms(session_state: dict | None) -> set[str]:
 
 def sanitize_web_search_query(query: str, session_state: dict | None = None) -> str:
     """Remove direct identifiers before sending a live web-search query."""
-    sanitized = query or ""
+    sanitized = sanitize_untrusted_text(
+        query or "",
+        max_len=_MAX_WEB_SEARCH_QUERY_CHARS,
+        replacement="",
+        redact_contact_info=False,
+    )
     sanitized = _EMAIL_RE.sub("", sanitized)
     sanitized = _PHONE_RE.sub("", sanitized)
     sanitized = _SSN_RE.sub("", sanitized)

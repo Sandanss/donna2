@@ -160,6 +160,20 @@ router.get('/api/seniors/:id/schedule', requireAuth, validateParams(seniorIdPara
 
     const schedule = senior.preferredCallTimes?.schedule || null;
 
+    logAudit({
+      userId: req.auth.userId,
+      userRole: authToRole(req.auth),
+      action: 'read',
+      resourceType: 'senior_schedule',
+      resourceId: req.params.id,
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+      metadata: {
+        scheduleItems: Array.isArray(schedule) ? schedule.length : 0,
+        topicsToAvoidCount: senior.preferredCallTimes?.topicsToAvoid?.length || 0,
+      },
+    });
+
     res.json({
       schedule,
       topicsToAvoid: senior.preferredCallTimes?.topicsToAvoid || [],
@@ -190,6 +204,21 @@ router.patch('/api/seniors/:id/schedule', requireAuth, validateParams(seniorIdPa
 
     const updated = await seniorService.update(req.params.id, {
       preferredCallTimes: updatedPreferredCallTimes,
+    });
+
+    logAudit({
+      userId: req.auth.userId,
+      userRole: authToRole(req.auth),
+      action: 'update',
+      resourceType: 'senior_schedule',
+      resourceId: req.params.id,
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+      metadata: {
+        fields: Object.keys(req.body),
+        scheduleItems: Array.isArray(schedule) ? schedule.length : undefined,
+        topicsToAvoidCount: Array.isArray(topicsToAvoid) ? topicsToAvoid.length : undefined,
+      },
     });
 
     res.json({

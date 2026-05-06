@@ -240,6 +240,23 @@ class TestTelnyxAndCallContext:
         finally:
             call_context.call_metadata.clear()
 
+    def test_call_metadata_cleanup_removes_expired_local_entries(self):
+        from api.routes import call_context
+
+        now = time.time()
+        call_context.call_metadata.clear()
+        try:
+            call_context.call_metadata["expired"] = {"call_metadata_expires_at": now - 1}
+            call_context.call_metadata["active"] = {"call_metadata_expires_at": now + 60}
+
+            cleaned = call_context.cleanup_expired_call_metadata(now)
+
+            assert cleaned == 1
+            assert "expired" not in call_context.call_metadata
+            assert "active" in call_context.call_metadata
+        finally:
+            call_context.call_metadata.clear()
+
     @pytest.mark.asyncio
     async def test_bot_metadata_missing_without_shared_state(self):
         """Missing metadata should stay missing when Redis is not configured."""

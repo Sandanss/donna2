@@ -199,6 +199,16 @@ function expired(existing) {
   return existing.expiresAt && new Date(existing.expiresAt).getTime() <= Date.now();
 }
 
+function shouldSkipResponseCache(req, res) {
+  if (res.locals?.skipIdempotencyCache) return true;
+  const path = req.originalUrl?.split('?')[0] || `${req.baseUrl || ''}${req.path || ''}`;
+  return req.method === 'DELETE' && (
+    /^\/api\/seniors\/[^/]+\/data$/.test(path) ||
+    /^\/api\/prospects\/[^/]+\/data$/.test(path) ||
+    path === '/api/caregivers/me/account'
+  );
+}
+
 export async function idempotencyMiddleware(req, res, next) {
   if (!IDEMPOTENT_METHODS.has(req.method)) {
     return next();
@@ -284,6 +294,12 @@ export async function idempotencyMiddleware(req, res, next) {
 
   const originalJson = res.json.bind(res);
   res.json = (body) => {
+    if (shouldSkipResponseCache(req, res)) {
+      clearRecord(key, getRequestId(req))
+        .finally(() => originalJson(body));
+      return res;
+    }
+
     if (res.statusCode >= 200 && res.statusCode < 300) {
       completeRecord(key, res.statusCode, body, getRequestId(req))
         .catch((error) => {

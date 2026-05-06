@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -14,17 +15,63 @@ from loguru import logger
 # When REDIS_URL is set, metadata is also persisted to Redis for multi-instance.
 call_metadata: dict[str, dict] = {}
 _metadata_lock = asyncio.Lock()
+CALL_METADATA_TTL_SECONDS = 1800
+
+
+class WsTokenConsumeError(ValueError):
+    """Raised when a media WebSocket token cannot be consumed."""
+
+
+def _metadata_key(call_id: str) -> str:
+    return f"call_metadata:{call_id}"
+
+
+def _ws_token_consumed_key(call_id: str) -> str:
+    return f"ws_token_consumed:{call_id}"
+
+
+def _with_metadata_expiry(data: dict, *, now: float | None = None) -> dict:
+    snapshot = dict(data)
+    snapshot["call_metadata_expires_at"] = (now or time.time()) + CALL_METADATA_TTL_SECONDS
+    return snapshot
+
+
+def _metadata_is_expired(metadata: dict, *, now: float | None = None) -> bool:
+    expires_at = metadata.get("call_metadata_expires_at")
+    if expires_at is None:
+        return False
+    try:
+        return (now or time.time()) > float(expires_at)
+    except (TypeError, ValueError):
+        return True
+
+
+def _validate_ws_token(metadata: dict, provided_token: str, *, now: float | None = None) -> None:
+    expected_token = metadata.get("ws_token")
+    if not expected_token:
+        raise WsTokenConsumeError("missing expected token")
+    if metadata.get("ws_token_consumed"):
+        raise WsTokenConsumeError("token already consumed")
+    if (now or time.time()) > float(metadata.get("ws_token_expires_at") or 0):
+        raise WsTokenConsumeError("token expired")
+    if not provided_token or not hmac.compare_digest(str(expected_token), str(provided_token)):
+        raise WsTokenConsumeError("invalid token")
 
 
 async def _persist_metadata(call_id: str, data: dict) -> None:
     """Write encrypted metadata to Redis if configured for multi-instance routing."""
+    data["call_metadata_expires_at"] = time.time() + CALL_METADATA_TTL_SECONDS
     try:
         from lib.redis_client import get_shared_state
         from lib.shared_state_phi import encode_phi_payload
 
         state = get_shared_state()
         if getattr(state, "is_shared", False):
-            await state.set(f"call_metadata:{call_id}", encode_phi_payload(data), ttl=1800)
+            await state.set(
+                _metadata_key(call_id),
+                encode_phi_payload(data),
+                ttl=CALL_METADATA_TTL_SECONDS,
+            )
     except Exception as exc:
         logger.warning("[{cs}] Redis metadata write failed: {err}", cs=call_id, err=str(exc))
 
@@ -33,6 +80,9 @@ async def get_call_metadata(call_id: str) -> dict | None:
     """Load call metadata from local memory, then Redis fallback."""
     metadata = call_metadata.get(call_id)
     if metadata is not None:
+        if _metadata_is_expired(metadata):
+            await _cleanup_metadata(call_id)
+            return None
         return metadata
     try:
         from lib.redis_client import get_shared_state
@@ -40,9 +90,12 @@ async def get_call_metadata(call_id: str) -> dict | None:
 
         state = get_shared_state()
         if getattr(state, "is_shared", False):
-            raw_metadata = await state.get(f"call_metadata:{call_id}")
+            raw_metadata = await state.get(_metadata_key(call_id))
             metadata = decode_phi_payload(raw_metadata, label="call metadata")
             if metadata is not None:
+                if _metadata_is_expired(metadata):
+                    await state.delete(_metadata_key(call_id))
+                    return None
                 call_metadata[call_id] = metadata
             return metadata
     except Exception as exc:
@@ -52,10 +105,63 @@ async def get_call_metadata(call_id: str) -> dict | None:
 
 async def mark_ws_token_consumed(call_id: str, metadata: dict) -> None:
     """Mark the WebSocket admission token as consumed without expiring the call."""
-    metadata["ws_token_consumed"] = True
-    metadata["ws_token_consumed_at"] = time.time()
-    call_metadata[call_id] = metadata
-    await _persist_metadata(call_id, metadata)
+    now = time.time()
+    snapshot = _with_metadata_expiry(
+        {
+            **metadata,
+            "ws_token_consumed": True,
+            "ws_token_consumed_at": now,
+        },
+        now=now,
+    )
+    call_metadata[call_id] = snapshot
+    await _persist_metadata(call_id, snapshot)
+
+
+async def consume_ws_token(call_id: str, provided_token: str) -> dict:
+    """Validate and atomically consume a one-time media WebSocket token."""
+    now = time.time()
+    metadata = await get_call_metadata(call_id)
+    if not metadata:
+        raise WsTokenConsumeError("unknown call_sid")
+    _validate_ws_token(metadata, provided_token, now=now)
+
+    shared_claimed = False
+    try:
+        from lib.redis_client import get_shared_state
+
+        state = get_shared_state()
+        if getattr(state, "is_shared", False):
+            ttl = max(1, min(CALL_METADATA_TTL_SECONDS, int(float(metadata.get("ws_token_expires_at")) - now)))
+            shared_claimed = bool(
+                await state.set_if_absent(
+                    _ws_token_consumed_key(call_id),
+                    {"consumed_at": now},
+                    ttl=ttl,
+                )
+            )
+            if not shared_claimed:
+                raise WsTokenConsumeError("token already consumed")
+    except WsTokenConsumeError:
+        raise
+    except Exception as exc:
+        logger.warning("[{cs}] Shared token consume claim failed: {err}", cs=call_id, err=str(exc))
+
+    async with _metadata_lock:
+        current = call_metadata.get(call_id) or metadata
+        _validate_ws_token(current, provided_token, now=now)
+        current = _with_metadata_expiry(
+            {
+                **current,
+                "ws_token_consumed": True,
+                "ws_token_consumed_at": now,
+            },
+            now=now,
+        )
+        call_metadata[call_id] = current
+
+    await _persist_metadata(call_id, current)
+    return current
 
 
 async def _cleanup_metadata(call_id: str) -> dict | None:
@@ -70,13 +176,27 @@ async def _cleanup_metadata(call_id: str) -> dict | None:
                 from lib.shared_state_phi import decode_phi_payload
 
                 metadata = decode_phi_payload(
-                    await state.get(f"call_metadata:{call_id}"),
+                    await state.get(_metadata_key(call_id)),
                     label="call metadata",
                 )
-            await state.delete(f"call_metadata:{call_id}")
+            await state.delete(_metadata_key(call_id))
+            await state.delete(_ws_token_consumed_key(call_id))
     except Exception:
         pass
     return metadata
+
+
+def cleanup_expired_call_metadata(now: float | None = None) -> int:
+    """Remove local PHI-bearing call metadata whose TTL has elapsed."""
+    current_time = now or time.time()
+    expired = [
+        call_id
+        for call_id, metadata in call_metadata.items()
+        if _metadata_is_expired(metadata, now=current_time)
+    ]
+    for call_id in expired:
+        call_metadata.pop(call_id, None)
+    return len(expired)
 
 
 def _json_dict(value) -> dict:
