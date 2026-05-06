@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useDashboard } from './DashboardContext';
 import BackButton from './components/BackButton';
+import { FlagImg } from '../onboarding/PhoneInput';
+import { CheckIcon } from '../onboarding/icons';
 
 /* ===== Constants ===== */
 
@@ -473,7 +475,7 @@ export default function LovedOneSettings() {
 
         {/* Unselected interests */}
         {unselectedInterests.length > 0 && (
-          <div className="ob-interest-grid">
+          <div className={`ob-interest-grid${selectedInterests.length > 0 ? ' ob-interest-grid--gap' : ''}`}>
             {unselectedInterests.map((interest) => (
               <button
                 key={interest.id}
@@ -519,40 +521,38 @@ export default function LovedOneSettings() {
         <p style={{ fontSize: 13, color: 'var(--fg-2)', marginBottom: 16, marginTop: -8 }}>
           Choose the language Donna speaks during calls.
         </p>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div className="ob-radio-cards">
           <button
             type="button"
-            className={`db-srow ${donnaLanguage === 'en' ? '' : ''}`}
+            className={`ob-radio-card${donnaLanguage === 'en' ? ' ob-radio-card--selected' : ''}`}
             onClick={() => setDonnaLanguage('en')}
-            style={{
-              border: donnaLanguage === 'en' ? '2px solid var(--color-sage)' : '2px solid transparent',
-              background: donnaLanguage === 'en' ? 'rgba(95,116,100,0.04)' : 'var(--bg-card)',
-            }}
           >
-            <span style={{ fontSize: 24 }}>&#127482;&#127480;</span>
-            <span className="db-srow__label">English</span>
-            {donnaLanguage === 'en' && (
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--color-sage)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
-            )}
+            <div className="ob-radio-card__icon" style={{ background: '#EEF2FF' }}>
+              <FlagImg iso="us" size={40} circle />
+            </div>
+            <div className="ob-radio-card__text">
+              <div className="ob-radio-card__title">English</div>
+              <div className="ob-radio-card__desc">US English</div>
+            </div>
+            <div className="ob-radio-card__check">
+              {donnaLanguage === 'en' && <CheckIcon size={14} />}
+            </div>
           </button>
           <button
             type="button"
-            className="db-srow"
+            className={`ob-radio-card${donnaLanguage === 'es' ? ' ob-radio-card--selected' : ''}`}
             onClick={() => setDonnaLanguage('es')}
-            style={{
-              border: donnaLanguage === 'es' ? '2px solid var(--color-sage)' : '2px solid transparent',
-              background: donnaLanguage === 'es' ? 'rgba(95,116,100,0.04)' : 'var(--bg-card)',
-            }}
           >
-            <span style={{ fontSize: 24 }}>&#127474;&#127485;</span>
-            <span className="db-srow__label">Espa&ntilde;ol</span>
-            {donnaLanguage === 'es' && (
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--color-sage)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
-            )}
+            <div className="ob-radio-card__icon" style={{ background: '#FEF3E2' }}>
+              <FlagImg iso="mx" size={40} circle />
+            </div>
+            <div className="ob-radio-card__text">
+              <div className="ob-radio-card__title">Spanish</div>
+              <div className="ob-radio-card__desc">Espa&ntilde;ol</div>
+            </div>
+            <div className="ob-radio-card__check">
+              {donnaLanguage === 'es' && <CheckIcon size={14} />}
+            </div>
           </button>
         </div>
       </div>

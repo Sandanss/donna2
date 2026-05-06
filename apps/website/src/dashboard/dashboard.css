@@ -1569,3 +1569,248 @@
     padding: var(--space-4) var(--space-3) 120px;
   }
 }
+
+/* ===== Interest Tiles (shared with onboarding) ===== */
+.ob-interest-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 0;
+}
+
+.ob-interest-grid--gap {
+  margin-top: 12px;
+}
+
+.ob-interest-tile {
+  position: relative;
+  padding: 20px 10px 14px;
+  border: none;
+  border-radius: 16px;
+  text-align: center;
+  cursor: pointer;
+  background: #edebe6;
+  transition: all 0.2s ease;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-body);
+}
+
+.ob-interest-tile:hover {
+  background: #e2dfda;
+}
+
+.ob-interest-tile--selected {
+  background: var(--color-sage-dark);
+  cursor: default;
+}
+
+.ob-interest-tile--selected:hover {
+  background: var(--color-sage-dark);
+}
+
+.ob-interest-tile__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+}
+
+.ob-interest-tile__name {
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--color-charcoal);
+}
+
+.ob-interest-tile--selected .ob-interest-tile__name {
+  color: white;
+}
+
+.ob-interest-tile__remove {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0, 0, 0, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.2s ease;
+}
+
+.ob-interest-tile__remove:hover {
+  background: rgba(0, 0, 0, 0.4);
+}
+
+/* ===== Interest Expanded Card ===== */
+.ob-interest-expanded {
+  background: var(--color-sage-dark);
+  border-radius: 16px;
+  padding: 20px;
+  margin-bottom: 16px;
+}
+
+.ob-interest-expanded__header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.ob-interest-expanded__title {
+  font-family: var(--font-heading);
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: white;
+  flex: 1;
+}
+
+.ob-interest-expanded__close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  opacity: 0.7;
+  transition: opacity 0.2s ease;
+}
+
+.ob-interest-expanded__close:hover {
+  opacity: 1;
+}
+
+.ob-interest-expanded__question {
+  font-size: 0.9rem;
+  color: rgba(255, 255, 255, 0.85);
+  margin-bottom: 12px;
+  line-height: 1.4;
+}
+
+.ob-interest-expanded__input {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1.5px solid rgba(255, 255, 255, 0.2);
+  border-radius: 10px;
+  font-size: 0.9rem;
+  font-family: var(--font-body);
+  background: rgba(255, 255, 255, 0.12);
+  color: white;
+  outline: none;
+  margin-bottom: 12px;
+  transition: border-color 0.2s ease;
+  box-sizing: border-box;
+}
+
+.ob-interest-expanded__input:focus {
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+.ob-interest-expanded__input::placeholder {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.ob-interest-expanded__done {
+  width: 100%;
+  padding: 12px;
+  border-radius: 10px;
+  border: none;
+  background: white;
+  color: var(--color-charcoal);
+  font-size: 0.95rem;
+  font-weight: 600;
+  font-family: var(--font-body);
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.ob-interest-expanded__done:hover {
+  background: #f5f5f5;
+}
+
+/* ===== Radio Cards (language selector) ===== */
+.ob-radio-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ob-radio-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 20px;
+  border: 1.5px solid #d4d4d4;
+  border-radius: 12px;
+  cursor: pointer;
+  background: white;
+  transition: border-color 0.2s ease, background 0.2s ease;
+  font-family: var(--font-body);
+}
+
+.ob-radio-card:hover {
+  border-color: var(--color-sage-light);
+}
+
+.ob-radio-card--selected {
+  border-color: var(--color-sage);
+  background: rgba(95, 116, 100, 0.04);
+}
+
+.ob-radio-card__icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  flex-shrink: 0;
+}
+
+.ob-radio-card__text {
+  flex: 1;
+}
+
+.ob-radio-card__title {
+  font-weight: 600;
+  font-size: 1rem;
+  color: var(--color-charcoal);
+}
+
+.ob-radio-card__desc {
+  font-size: 0.82rem;
+  color: #888;
+  margin-top: 2px;
+}
+
+.ob-radio-card__check {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid #d4d4d4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+}
+
+.ob-radio-card--selected .ob-radio-card__check {
+  border-color: var(--color-sage);
+  background: var(--color-sage);
+  color: white;
+}
+
+@media (max-width: 480px) {
+  .ob-interest-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
