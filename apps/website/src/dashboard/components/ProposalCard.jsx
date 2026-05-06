@@ -46,6 +46,15 @@ function ReminderItemRow({ reminder }) {
   );
 }
 
+function normalizeScheduleItem(item) {
+  const DAY_MAP = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  return {
+    ...item,
+    frequency: item.frequency === 'weekly' ? 'recurring' : item.frequency,
+    recurringDays: item.recurringDays?.map(d => typeof d === 'string' ? DAY_MAP[d] ?? d : d),
+  };
+}
+
 export default function ProposalCard({ proposal, onConfirmed }) {
   const { senior, api } = useDashboard();
   const [status, setStatus] = useState('pending'); // pending | confirming | confirmed | error
@@ -63,8 +72,8 @@ export default function ProposalCard({ proposal, onConfirmed }) {
       if (proposal.type === 'schedule_proposal') {
         // Get current schedule first, then append
         const current = await api.getSchedule(senior.id);
-        const existingSchedule = current.preferredCallTimes?.schedule || [];
-        const newItems = proposal.items.map(item => ({
+        const existingSchedule = current.schedule || [];
+        const newItems = proposal.items.map(item => normalizeScheduleItem({
           title: item.title,
           frequency: item.frequency,
           time: item.time,
@@ -89,8 +98,8 @@ export default function ProposalCard({ proposal, onConfirmed }) {
       } else if (proposal.type === 'blended_proposal') {
         // Create schedule items
         const current = await api.getSchedule(senior.id);
-        const existingSchedule = current.preferredCallTimes?.schedule || [];
-        const newItems = proposal.scheduleItems.map(item => ({
+        const existingSchedule = current.schedule || [];
+        const newItems = proposal.scheduleItems.map(item => normalizeScheduleItem({
           title: item.title,
           frequency: item.frequency,
           time: item.time,

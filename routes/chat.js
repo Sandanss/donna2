@@ -40,7 +40,7 @@ Rules:
 - If the user's request is ambiguous, ask a clarifying question rather than guessing.
 - When proposing schedule items, use 24-hour time format (HH:MM).
 - For one-time calls, always include the date in YYYY-MM-DD format.
-- For recurring calls, include recurringDays array with short day names (Mon, Tue, Wed, Thu, Fri, Sat, Sun).
+- For recurring calls, include recurringDays as integer array (0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat).
 - Use get_current_schedule if you need to check for conflicts with existing items.`;
 }
 
@@ -196,7 +196,7 @@ router.post('/api/chat', requireAuth, async (req, res) => {
     // If headers already sent, try to send error event
     if (res.headersSent) {
       try {
-        res.write(`event: error\ndata: ${JSON.stringify({ error: 'An error occurred' })}\n\n`);
+        res.write(`event: error\ndata: ${JSON.stringify({ error: error.message || 'An error occurred' })}\n\n`);
         res.end();
       } catch {
         // Connection already closed

@@ -222,7 +222,7 @@ export default function ScheduleCallModal({ call, reminders = [], onSave, onClos
     if (frequency === 'recurring') {
       callData.recurringDays = recurringDays;
     }
-    if (frequency === 'one_time') {
+    if (frequency === 'one-time') {
       callData.date = date;
     }
     if (selectedReminderIds.length > 0) {
@@ -235,7 +235,7 @@ export default function ScheduleCallModal({ call, reminders = [], onSave, onClos
   const isSubmitDisabled =
     saving ||
     (frequency === 'recurring' && recurringDays.length === 0) ||
-    (frequency === 'one_time' && !date);
+    (frequency === 'one-time' && !date);
 
   return (
     <div className="db-modal-overlay" onClick={onClose}>
@@ -272,8 +272,8 @@ export default function ScheduleCallModal({ call, reminders = [], onSave, onClos
               </button>
               <button
                 type="button"
-                className={`db-pill ${frequency === 'one_time' ? 'db-pill--active' : ''}`}
-                onClick={() => setFrequency('one_time')}
+                className={`db-pill ${frequency === 'one-time' ? 'db-pill--active' : ''}`}
+                onClick={() => setFrequency('one-time')}
               >
                 One Time
               </button>
@@ -298,7 +298,7 @@ export default function ScheduleCallModal({ call, reminders = [], onSave, onClos
             </div>
           )}
 
-          {frequency === 'one_time' && (
+          {frequency === 'one-time' && (
             <div className="db-field">
               <label className="db-label">Date</label>
               <input

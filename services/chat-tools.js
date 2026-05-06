@@ -51,7 +51,7 @@ export const toolDefinitions = [
             type: 'object',
             properties: {
               title: { type: 'string', description: 'Brief label for this call (e.g., "Pre-game call")' },
-              frequency: { type: 'string', enum: ['one-time', 'daily', 'weekly'], description: 'How often this call recurs' },
+              frequency: { type: 'string', enum: ['one-time', 'daily', 'recurring'], description: 'How often this call recurs' },
               time: { type: 'string', description: 'Time in HH:MM format (24h)' },
               date: { type: 'string', description: 'ISO date string for one-time calls (YYYY-MM-DD)' },
               recurringDays: {
@@ -118,7 +118,7 @@ export const toolDefinitions = [
             type: 'object',
             properties: {
               title: { type: 'string' },
-              frequency: { type: 'string', enum: ['one-time', 'daily', 'weekly'] },
+              frequency: { type: 'string', enum: ['one-time', 'daily', 'recurring'] },
               time: { type: 'string', description: 'HH:MM format' },
               date: { type: 'string', description: 'YYYY-MM-DD for one-time' },
               recurringDays: {

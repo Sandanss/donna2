@@ -103,7 +103,7 @@ export default function SchedulePage() {
         DAYS_FULL.forEach((d) => days.add(d));
       } else if (call.frequency === 'recurring' && call.recurringDays) {
         call.recurringDays.forEach((idx) => days.add(DAYS_FULL[idx]));
-      } else if (call.frequency === 'one_time' && call.date) {
+      } else if (call.frequency === 'one-time' && call.date) {
         dates.add(call.date);
       }
     }
@@ -124,7 +124,7 @@ export default function SchedulePage() {
     .filter((c) => {
       if (c.frequency === 'daily') return true;
       if (c.frequency === 'recurring' && c.recurringDays?.includes(selectedDayIdx)) return true;
-      if (c.frequency === 'one_time') {
+      if (c.frequency === 'one-time') {
         const dateStr = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
         return c.date === dateStr;
       }

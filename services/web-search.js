@@ -74,7 +74,9 @@ export async function search(query, { userId, timeoutMs = DEFAULT_TIMEOUT_MS } =
       body: JSON.stringify({
         api_key: apiKey,
         query: sanitizedQuery,
+        search_depth: 'advanced',
         max_results: 8,
+        include_answer: true,
         include_raw_content: false,
       }),
     });
