@@ -131,9 +131,10 @@ class TestFlowsTools:
     def test_make_flows_tools_returns_active_schemas(self):
         session_state = {"senior_id": "test-123"}
         tools = make_flows_tools(session_state)
-        assert len(tools) == 2
+        assert len(tools) == 3
         assert "web_search" in tools
         assert "mark_reminder_acknowledged" in tools
+        assert "create_reminder" in tools
 
     def test_flows_tools_have_handlers(self):
         session_state = {"senior_id": "test-123"}

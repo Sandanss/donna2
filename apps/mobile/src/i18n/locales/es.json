@@ -47,6 +47,7 @@
     "emailRequired": "El correo es obligatorio",
     "passwordRequired": "La contraseña es obligatoria",
     "invalidEmail": "Ingresa un correo valido",
+    "emailInUse": "Ya existe una cuenta con este correo",
     "chooseSecondFactor": "Elige un Método de Verificación",
     "secondFactorCode": "Ingresa el Código",
     "factorLabels": {
@@ -278,7 +279,8 @@
     "notScheduled": "Sin programar",
     "dailyAt": "Diario \u00b7 {{time}}",
     "localTime": "Hora local de {{name}}",
-    "seniorLocalTime": "Hora local del adulto mayor"
+    "seniorLocalTime": "Hora local del adulto mayor",
+    "createdViaCall": "Desde una llamada con Donna"
   },
   "settings": {
     "title": "Configuración",

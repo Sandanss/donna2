@@ -47,6 +47,7 @@
     "emailRequired": "Email is required",
     "passwordRequired": "Password is required",
     "invalidEmail": "Enter a valid email",
+    "emailInUse": "An account with this email already exists",
     "chooseSecondFactor": "Choose Verification Method",
     "secondFactorCode": "Enter Code",
     "factorLabels": {
@@ -278,7 +279,8 @@
     "notScheduled": "Not scheduled",
     "dailyAt": "Daily \u00b7 {{time}}",
     "localTime": "{{name}}'s local time",
-    "seniorLocalTime": "Senior's local time"
+    "seniorLocalTime": "Senior's local time",
+    "createdViaCall": "From a call with Donna"
   },
   "settings": {
     "title": "Settings",

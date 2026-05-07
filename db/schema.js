@@ -81,6 +81,7 @@ export const reminders = pgTable('reminders', {
   deactivatedAt: timestamp('deactivated_at'),
   lastDeliveredAt: timestamp('last_delivered_at'),
   createdAt: timestamp('created_at').defaultNow(),
+  createdVia: varchar('created_via', { length: 20 }).notNull().default('manual'),
 });
 
 // Reminder Deliveries - tracks each delivery attempt for acknowledgment

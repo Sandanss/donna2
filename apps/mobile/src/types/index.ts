@@ -29,6 +29,7 @@ export interface Reminder {
   isActive: boolean;
   lastDeliveredAt?: string;
   createdAt: string;
+  createdVia?: "manual" | "voice";
 }
 
 export interface Conversation {

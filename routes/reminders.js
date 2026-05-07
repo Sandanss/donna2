@@ -71,6 +71,7 @@ router.get('/api/reminders', requireAuth, async (req, res) => {
       isActive: reminders.isActive,
       lastDeliveredAt: reminders.lastDeliveredAt,
       createdAt: reminders.createdAt,
+      createdVia: reminders.createdVia,
     })
     .from(reminders)
     .leftJoin(seniors, eq(reminders.seniorId, seniors.id))

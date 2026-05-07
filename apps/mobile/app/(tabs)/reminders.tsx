@@ -9,7 +9,7 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Edit2, Trash2, Plus, Bell } from "lucide-react-native";
+import { Edit2, Trash2, Plus, Bell, Phone } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
 import { COLORS } from "@/src/constants/theme";
 import { getErrorMessage } from "@/src/lib/api";
@@ -504,12 +504,23 @@ function ReminderCard({
           >
             {reminder.title}
           </Text>
-          <View className="flex-row mt-2">
+          <View className="flex-row flex-wrap mt-2 gap-1.5">
             <View className="bg-beige rounded-full px-3 py-1">
               <Text className="text-muted text-[12px] font-medium">
                 {scheduleLabel}
               </Text>
             </View>
+            {reminder.createdVia === "voice" && (
+              <View
+                className="rounded-full px-3 py-1 flex-row items-center"
+                style={{ backgroundColor: COLORS.sage }}
+              >
+                <Phone size={11} color={COLORS.white} />
+                <Text className="text-white text-[12px] font-medium ml-1">
+                  {t("reminders.createdViaCall")}
+                </Text>
+              </View>
+            )}
           </View>
         </View>
 

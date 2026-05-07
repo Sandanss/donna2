@@ -42,4 +42,4 @@ class TestToolHandlerIntegration:
     def test_handler_factory_keeps_active_and_retired_handlers(self, session_state):
         """Handler factory keeps active tool handlers plus retired future-use handlers."""
         handlers = make_tool_handlers(session_state)
-        assert set(handlers.keys()) == {"web_search", "mark_reminder_acknowledged", "search_memories", "save_important_detail", "check_caregiver_notes"}
+        assert set(handlers.keys()) == {"web_search", "mark_reminder_acknowledged", "create_reminder", "search_memories", "save_important_detail", "check_caregiver_notes"}

@@ -89,6 +89,64 @@ def get_web_search_schema(session_state: dict | None = None, today_date: date | 
 
 WEB_SEARCH_SCHEMA = get_web_search_schema()
 
+CREATE_REMINDER_SCHEMA = {
+    "name": "create_reminder",
+    "description": (
+        "Save a new reminder for the senior when they explicitly ask you to remind "
+        "them about something. Triggers: 'recordame...', 'remind me to...', "
+        "'next Tuesday I have a doctor appointment, remind me'. "
+        "BEFORE calling: confirm the title and exact date/time aloud with the senior "
+        "in one short turn (e.g., 'So Tuesday May 12th at 10 in the morning, doctor "
+        "appointment — does that sound right?'). Only call after they confirm. "
+        "Compute scheduled_time in the senior's local timezone (provided in the "
+        "system prompt as 'Current time') and emit ISO 8601 WITH offset. "
+        "AFTER tool returns success, briefly confirm aloud (e.g., 'Got it, I saved that'). "
+        "Do NOT use this for medication reminders the family already manages — only when "
+        "the senior themselves asks to be reminded."
+    ),
+    "properties": {
+        "title": {
+            "type": "string",
+            "description": (
+                "Short human-readable title (max 200 chars), in the same language the "
+                "senior is speaking. Examples: 'Doctor appointment', 'Cita con el médico', "
+                "'Take blood pressure pill', 'Llamar a María'. Do NOT include the date/time "
+                "in the title — that goes in scheduled_time."
+            ),
+        },
+        "scheduled_time": {
+            "type": "string",
+            "description": (
+                "ISO 8601 timestamp WITH timezone offset, in the senior's local timezone. "
+                "Example for May 12, 2026 at 10:00 AM Eastern: '2026-05-12T10:00:00-04:00'. "
+                "Use the 'Current time' from the system prompt to resolve relative phrases "
+                "like 'next Tuesday' or 'tomorrow at 3'."
+            ),
+        },
+        "type": {
+            "type": "string",
+            "enum": ["medication", "appointment", "custom", "wellness", "social"],
+            "description": (
+                "Category. Use 'medication' for pills/meds, 'appointment' for doctor/dentist/"
+                "salon visits, 'social' for calls/visits to family/friends, 'wellness' for "
+                "exercise/water/walks, 'custom' otherwise."
+            ),
+        },
+        "description": {
+            "type": "string",
+            "description": "Optional extra context, e.g., 'Bring insurance card' or 'With breakfast'.",
+        },
+        "is_recurring": {
+            "type": "boolean",
+            "description": (
+                "TRUE only if the senior explicitly said it repeats daily ('every day', "
+                "'todos los días'). Default FALSE for one-off events."
+            ),
+        },
+    },
+    "required": ["title", "scheduled_time", "type"],
+}
+
 MARK_REMINDER_SCHEMA = {
     "name": "mark_reminder_acknowledged",
     "description": "Mark a reminder as acknowledged after you have delivered it and the senior has responded. Call this after delivering a reminder and getting their response.",
@@ -408,6 +466,70 @@ def make_tool_handlers(session_state: dict) -> dict:
         asyncio.create_task(_background_save())
         return {"status": "success", "result": f"I'll remember that: {detail[:50]}"}
 
+    async def handle_create_reminder(args: dict) -> dict:
+        senior_id = session_state.get("senior_id")
+        if not senior_id:
+            return {
+                "status": "error",
+                "result": "I can't save reminders for this caller. Continue naturally.",
+            }
+
+        title = (args.get("title") or "").strip()[:255]
+        scheduled_time_str = (args.get("scheduled_time") or "").strip()
+        reminder_type = (args.get("type") or "custom").strip().lower()
+        description = args.get("description")
+        is_recurring = bool(args.get("is_recurring", False))
+
+        if not title:
+            return {
+                "status": "error",
+                "result": "I need a title. Ask them what to remind them about.",
+            }
+
+        if reminder_type not in {"medication", "appointment", "custom", "wellness", "social"}:
+            reminder_type = "custom"
+
+        try:
+            from datetime import datetime
+            scheduled_time = datetime.fromisoformat(scheduled_time_str)
+        except (ValueError, TypeError):
+            logger.warning(
+                "Tool: create_reminder bad scheduled_time={t}", t=scheduled_time_str[:80]
+            )
+            return {
+                "status": "error",
+                "result": "I couldn't parse that time. Ask them for the date and time again.",
+            }
+
+        senior = session_state.get("senior") or {}
+        timezone_name = senior.get("timezone") or "America/New_York"
+
+        try:
+            from services.reminder_management import create_reminder
+            reminder = await create_reminder(
+                senior_id=senior_id,
+                reminder_type=reminder_type,
+                title=title,
+                description=description,
+                scheduled_time=scheduled_time,
+                is_recurring=is_recurring,
+                timezone_name=timezone_name,
+            )
+        except Exception as e:
+            logger.error("Tool: create_reminder DB insert failed: {err}", err=str(e))
+            return {
+                "status": "error",
+                "result": "I had trouble saving that reminder. Try again in a moment.",
+            }
+
+        logger.info(
+            "Tool: create_reminder saved rid={rid} senior={sid} title_chars={n}",
+            rid=str(reminder.get("id"))[:8],
+            sid=str(senior_id)[:8],
+            n=len(title),
+        )
+        return {"status": "success", "result": f"Reminder saved: {title}"}
+
     async def handle_check_caregiver_notes(args: dict) -> dict:
         logger.info("Tool: check_caregiver_notes")
 
@@ -440,6 +562,7 @@ def make_tool_handlers(session_state: dict) -> dict:
         "search_memories": handle_search_memories,
         "web_search": handle_web_search,
         "mark_reminder_acknowledged": handle_mark_reminder,
+        "create_reminder": handle_create_reminder,
         "save_important_detail": handle_save_detail,
         "check_caregiver_notes": handle_check_caregiver_notes,
     }
@@ -522,6 +645,7 @@ def make_flows_tools(session_state: dict) -> dict[str, FlowsFunctionSchema]:
     all_schemas = [
         get_web_search_schema(session_state),
         MARK_REMINDER_SCHEMA,
+        CREATE_REMINDER_SCHEMA,
     ]
 
     schemas = {}
