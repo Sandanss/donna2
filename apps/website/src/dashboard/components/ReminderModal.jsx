@@ -143,6 +143,12 @@ function formatCallSchedule(call) {
     const days = call.recurringDays.map((i) => DAYS_FULL[i]?.slice(0, 3)).join(', ');
     return `${days} at ${time}`;
   }
+  if (call.date) {
+    const [y, m, d] = call.date.split('-').map(Number);
+    const dt = new Date(y, m - 1, d);
+    const formatted = dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    return `One-time on ${formatted} at ${time}`;
+  }
   return `One-time at ${time}`;
 }
 
