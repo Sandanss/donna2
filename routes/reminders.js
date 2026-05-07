@@ -8,6 +8,7 @@ import { idempotencyMiddleware } from '../middleware/idempotency.js';
 import { validateBody, validateParams } from '../middleware/validate.js';
 import {
   createReminderSchema,
+  createReminderBatchSchema,
   updateReminderSchema,
   reminderIdParamSchema,
 } from '../validators/schemas.js';
@@ -94,7 +95,7 @@ router.get('/api/reminders', requireAuth, async (req, res) => {
 // Create a reminder
 router.post('/api/reminders', requireAuth, validateBody(createReminderSchema), idempotencyMiddleware, writeLimiter, async (req, res) => {
   try {
-    const { seniorId, type, title, description, scheduledTime, isRecurring, isActive, cronExpression } = req.body;
+    const { seniorId, type, title, description, scheduledTime, isRecurring, isActive, cronExpression, recurringDays } = req.body;
     // Check access to the senior
     if (!await canAccessSenior(req.auth, seniorId)) {
       return sendError(res, 403, { error: 'Access denied to this senior' });
@@ -110,6 +111,7 @@ router.post('/api/reminders', requireAuth, validateBody(createReminderSchema), i
       isActive,
       deactivatedAt: isActive === false ? new Date() : null,
       cronExpression: reminderCronExpression,
+      ...(recurringDays && { recurringDays }),
     }).returning();
     logAudit({
       userId: req.auth.userId,
@@ -124,6 +126,48 @@ router.post('/api/reminders', requireAuth, validateBody(createReminderSchema), i
     res.json(decryptReminderPhi(reminder));
   } catch (error) {
     routeError(res, error, 'POST /api/reminders');
+  }
+});
+
+// Create reminders in batch (for chatbot proposals with many items)
+router.post('/api/reminders/batch', requireAuth, validateBody(createReminderBatchSchema), writeLimiter, async (req, res) => {
+  try {
+    const { seniorId, reminders: reminderItems } = req.body;
+    if (!await canAccessSenior(req.auth, seniorId)) {
+      return sendError(res, 403, { error: 'Access denied to this senior' });
+    }
+    const seniorProfile = await getSeniorTimezoneProfile(seniorId);
+
+    const values = reminderItems.map(item => {
+      const cronExpression = item.isRecurring
+        ? dailyCronFromScheduledTime(item.scheduledTime, seniorProfile)
+        : undefined;
+      return {
+        ...encryptReminderPhi({ seniorId, type: item.type || 'custom', title: item.title, description: item.description }),
+        scheduledTime: dateFromScheduledTime(item.scheduledTime),
+        isRecurring: item.isRecurring || false,
+        isActive: true,
+        deactivatedAt: null,
+        cronExpression,
+        ...(item.recurringDays && { recurringDays: item.recurringDays }),
+      };
+    });
+
+    const created = await db.insert(reminders).values(values).returning();
+
+    logAudit({
+      userId: req.auth.userId,
+      userRole: authToRole(req.auth),
+      action: 'create',
+      resourceType: 'reminder',
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+      metadata: { seniorId, count: created.length, batch: true },
+    });
+
+    res.json({ reminders: created.map(decryptReminderPhi) });
+  } catch (error) {
+    routeError(res, error, 'POST /api/reminders/batch');
   }
 });
 

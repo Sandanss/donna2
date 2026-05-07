@@ -56,8 +56,8 @@ export const toolDefinitions = [
               date: { type: 'string', description: 'ISO date string for one-time calls (YYYY-MM-DD)' },
               recurringDays: {
                 type: 'array',
-                items: { type: 'string', enum: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] },
-                description: 'Days of the week for recurring calls',
+                items: { type: 'integer', minimum: 0, maximum: 6 },
+                description: 'Days of the week as integers (0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat)',
               },
               contextNotes: { type: 'string', description: 'Notes for Donna about what to discuss on this call' },
             },
@@ -90,8 +90,8 @@ export const toolDefinitions = [
               isRecurring: { type: 'boolean', description: 'Whether this reminder repeats' },
               recurringDays: {
                 type: 'array',
-                items: { type: 'string', enum: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] },
-                description: 'Days for recurring reminders',
+                items: { type: 'integer', minimum: 0, maximum: 6 },
+                description: 'Days of the week as integers (0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat)',
               },
             },
             required: ['title', 'description'],
@@ -123,7 +123,8 @@ export const toolDefinitions = [
               date: { type: 'string', description: 'YYYY-MM-DD for one-time' },
               recurringDays: {
                 type: 'array',
-                items: { type: 'string', enum: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] },
+                items: { type: 'integer', minimum: 0, maximum: 6 },
+                description: 'Days of the week as integers (0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat)',
               },
               contextNotes: { type: 'string' },
             },
@@ -142,7 +143,8 @@ export const toolDefinitions = [
               isRecurring: { type: 'boolean' },
               recurringDays: {
                 type: 'array',
-                items: { type: 'string', enum: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] },
+                items: { type: 'integer', minimum: 0, maximum: 6 },
+                description: 'Days of the week as integers (0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat)',
               },
             },
             required: ['title', 'description'],

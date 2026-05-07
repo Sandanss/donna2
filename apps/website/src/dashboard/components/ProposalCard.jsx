@@ -16,6 +16,13 @@ function formatDate(dateStr) {
   return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 }
 
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+function formatDays(days) {
+  if (!Array.isArray(days) || days.length === 0) return '';
+  return days.map(d => typeof d === 'number' ? (DAY_NAMES[d] || d) : d).join(', ');
+}
+
 function ScheduleItemRow({ item }) {
   return (
     <div className="db-proposal__item">
@@ -25,7 +32,7 @@ function ScheduleItemRow({ item }) {
         <span className="db-proposal__item-meta">
           {formatTime(item.time)}
           {item.date && ` \u2022 ${formatDate(item.date)}`}
-          {item.recurringDays?.length > 0 && ` \u2022 ${item.recurringDays.join(', ')}`}
+          {item.recurringDays?.length > 0 && ` \u2022 ${formatDays(item.recurringDays)}`}
         </span>
       </div>
     </div>
@@ -48,10 +55,16 @@ function ReminderItemRow({ reminder }) {
 
 function normalizeScheduleItem(item) {
   const DAY_MAP = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  let days = item.recurringDays;
+  if (days && !Array.isArray(days)) {
+    days = undefined;
+  }
   return {
     ...item,
     frequency: item.frequency === 'weekly' ? 'recurring' : item.frequency,
-    recurringDays: item.recurringDays?.map(d => typeof d === 'string' ? DAY_MAP[d] ?? d : d),
+    recurringDays: Array.isArray(days)
+      ? days.map(d => typeof d === 'string' ? (DAY_MAP[d] ?? d) : d)
+      : days,
   };
 }
 
@@ -85,16 +98,14 @@ export default function ProposalCard({ proposal, onConfirmed }) {
           schedule: [...existingSchedule, ...newItems],
         });
       } else if (proposal.type === 'reminder_proposal') {
-        for (const rem of proposal.reminders) {
-          await api.createReminder({
-            seniorId: senior.id,
-            title: rem.title,
-            description: rem.description,
-            ...(rem.scheduledTime && { scheduledTime: rem.scheduledTime }),
-            ...(rem.isRecurring !== undefined && { isRecurring: rem.isRecurring }),
-            ...(rem.recurringDays && { recurringDays: rem.recurringDays }),
-          });
-        }
+        const reminderItems = proposal.reminders.map(rem => ({
+          title: rem.title,
+          description: rem.description,
+          ...(rem.scheduledTime && { scheduledTime: rem.scheduledTime }),
+          ...(rem.isRecurring !== undefined && { isRecurring: rem.isRecurring }),
+          ...(rem.recurringDays && Array.isArray(rem.recurringDays) && { recurringDays: rem.recurringDays }),
+        }));
+        await api.createReminderBatch(senior.id, reminderItems);
       } else if (proposal.type === 'blended_proposal') {
         // Create schedule items
         const current = await api.getSchedule(senior.id);
@@ -109,19 +120,16 @@ export default function ProposalCard({ proposal, onConfirmed }) {
           reminderIds: [],
         }));
 
-        // Create reminders and collect IDs
-        const reminderIds = [];
-        for (const rem of proposal.reminders) {
-          const created = await api.createReminder({
-            seniorId: senior.id,
-            title: rem.title,
-            description: rem.description,
-            ...(rem.scheduledTime && { scheduledTime: rem.scheduledTime }),
-            ...(rem.isRecurring !== undefined && { isRecurring: rem.isRecurring }),
-            ...(rem.recurringDays && { recurringDays: rem.recurringDays }),
-          });
-          reminderIds.push(created.id);
-        }
+        // Create reminders in batch and collect IDs
+        const reminderItems = proposal.reminders.map(rem => ({
+          title: rem.title,
+          description: rem.description,
+          ...(rem.scheduledTime && { scheduledTime: rem.scheduledTime }),
+          ...(rem.isRecurring !== undefined && { isRecurring: rem.isRecurring }),
+          ...(rem.recurringDays && Array.isArray(rem.recurringDays) && { recurringDays: rem.recurringDays }),
+        }));
+        const batchResult = await api.createReminderBatch(senior.id, reminderItems);
+        const reminderIds = batchResult.reminders.map(r => r.id);
 
         // Link reminders to schedule items via linkages
         for (const link of proposal.linkages || []) {
@@ -139,7 +147,14 @@ export default function ProposalCard({ proposal, onConfirmed }) {
       if (onConfirmed) onConfirmed();
     } catch (err) {
       setStatus('error');
-      setErrorMsg(err.message || 'Failed to save');
+      const msg = err.message || '';
+      if (msg.includes('429') || msg.toLowerCase().includes('too many')) {
+        setErrorMsg('Saving too many items at once. Please wait a moment and try again.');
+      } else if (msg.includes('403')) {
+        setErrorMsg('You don\u2019t have access to save these items.');
+      } else {
+        setErrorMsg('Something went wrong while saving. Please try again.');
+      }
     }
   }
 

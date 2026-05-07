@@ -1,4 +1,4 @@
-import { pgTable, uuid, varchar, text, timestamp, boolean, json, integer, vector } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, text, timestamp, boolean, json, jsonb, integer, vector } from 'drizzle-orm/pg-core';
 
 // Senior profiles
 export const seniors = pgTable('seniors', {
@@ -79,6 +79,7 @@ export const reminders = pgTable('reminders', {
   cronExpression: varchar('cron_expression', { length: 100 }),
   isActive: boolean('is_active').default(true),
   deactivatedAt: timestamp('deactivated_at'),
+  recurringDays: jsonb('recurring_days'),
   lastDeliveredAt: timestamp('last_delivered_at'),
   createdAt: timestamp('created_at').defaultNow(),
   createdVia: varchar('created_via', { length: 20 }).notNull().default('manual'),

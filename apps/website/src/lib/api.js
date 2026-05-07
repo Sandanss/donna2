@@ -59,6 +59,7 @@ export function useApi() {
     // Reminders
     getReminders: () => get('/api/reminders'),
     createReminder: (data) => post('/api/reminders', data),
+    createReminderBatch: (seniorId, reminders) => post('/api/reminders/batch', { seniorId, reminders }),
     updateReminder: (id, data) => patch(`/api/reminders/${id}`, data),
     deleteReminder: (id) => del(`/api/reminders/${id}`),
 

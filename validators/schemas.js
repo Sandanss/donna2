@@ -158,6 +158,7 @@ export const createReminderSchema = z.object({
   isRecurring: z.boolean().default(false),
   isActive: z.boolean().default(true),
   cronExpression: cronSchema.optional(),
+  recurringDays: z.array(z.number().int().min(0).max(6)).max(7).optional(),
 });
 
 export const updateReminderSchema = z.object({
@@ -167,8 +168,21 @@ export const updateReminderSchema = z.object({
   isRecurring: z.boolean().optional(),
   cronExpression: cronSchema,
   isActive: z.boolean().optional(),
+  recurringDays: z.array(z.number().int().min(0).max(6)).max(7).optional(),
 }).refine(data => Object.keys(data).length > 0, {
   message: 'At least one field must be provided for update',
+});
+
+export const createReminderBatchSchema = z.object({
+  seniorId: uuidSchema,
+  reminders: z.array(z.object({
+    type: reminderTypeEnum.default('custom'),
+    title: z.string().min(1).max(255).trim(),
+    description: z.string().max(2000).optional(),
+    scheduledTime: isoDateSchema.optional(),
+    isRecurring: z.boolean().default(false),
+    recurringDays: z.array(z.number().int().min(0).max(6)).max(7).optional(),
+  })).min(1).max(100),
 });
 
 // =============================================================================
