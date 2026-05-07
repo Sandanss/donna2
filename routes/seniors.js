@@ -226,6 +226,7 @@ router.patch('/api/seniors/:id/schedule', requireAuth, validateParams(seniorIdPa
       topicsToAvoid: updated.preferredCallTimes?.topicsToAvoid || [],
     });
   } catch (error) {
+    console.error('[Schedule Update] Error:', error.message || error);
     routeError(res, error, 'PATCH /api/seniors/:id/schedule');
   }
 });

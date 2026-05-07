@@ -179,7 +179,7 @@ export const createReminderBatchSchema = z.object({
     type: reminderTypeEnum.default('custom'),
     title: z.string().min(1).max(255).trim(),
     description: z.string().max(2000).optional(),
-    scheduledTime: isoDateSchema.optional(),
+    scheduledTime: z.string().max(100).optional(),
     isRecurring: z.boolean().default(false),
     recurringDays: z.array(z.number().int().min(0).max(6)).max(7).optional(),
   })).min(1).max(100),

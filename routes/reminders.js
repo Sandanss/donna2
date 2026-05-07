@@ -167,6 +167,7 @@ router.post('/api/reminders/batch', requireAuth, validateBody(createReminderBatc
 
     res.json({ reminders: created.map(decryptReminderPhi) });
   } catch (error) {
+    console.error('[Batch Reminders] Error:', error.message || error, error.stack?.split('\n').slice(0, 3).join('\n'));
     routeError(res, error, 'POST /api/reminders/batch');
   }
 });

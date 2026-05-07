@@ -146,6 +146,7 @@ export default function ProposalCard({ proposal, onConfirmed }) {
       setStatus('confirmed');
       if (onConfirmed) onConfirmed();
     } catch (err) {
+      console.error('[ProposalCard] Save failed:', err.message || err);
       setStatus('error');
       const msg = err.message || '';
       if (msg.includes('429') || msg.toLowerCase().includes('too many')) {
@@ -153,7 +154,7 @@ export default function ProposalCard({ proposal, onConfirmed }) {
       } else if (msg.includes('403')) {
         setErrorMsg('You don\u2019t have access to save these items.');
       } else {
-        setErrorMsg('Something went wrong while saving. Please try again.');
+        setErrorMsg(msg || 'Something went wrong while saving. Please try again.');
       }
     }
   }
