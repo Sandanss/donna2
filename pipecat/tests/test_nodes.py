@@ -253,6 +253,14 @@ class TestWindingDownNode:
         assert "mark_reminder_acknowledged" in func_names
         assert "transition_to_closing" in func_names
 
+    def test_exposes_create_reminder(self):
+        # Last-minute "oh, by the way, remind me..." requests need the tool
+        # available even while wrapping up.
+        state = _make_session_state()
+        tools = make_flows_tools(state)
+        node = build_winding_down_node(state, tools)
+        assert "create_reminder" in _get_func_names(node)
+
     def test_transition_node_has_no_system_prompt(self):
         state = _make_session_state()
         tools = make_flows_tools(state)
@@ -318,6 +326,14 @@ class TestReminderNode:
         node = build_reminder_node(state, tools)
         func_names = _get_func_names(node)
         assert "mark_reminder_acknowledged" in func_names
+
+    def test_exposes_create_reminder(self):
+        # Seniors often ask Donna to remember a NEW thing during a delivery
+        # call — the tool must be available in this phase, not only in main.
+        state = _make_session_state()
+        tools = make_flows_tools(state)
+        node = build_reminder_node(state, tools)
+        assert "create_reminder" in _get_func_names(node)
 
     def test_includes_reminder_context(self):
         state = _make_session_state()

@@ -580,6 +580,10 @@ def build_reminder_node(
     functions: list = []
     if "mark_reminder_acknowledged" in flows_tools:
         functions.append(flows_tools["mark_reminder_acknowledged"])
+    # Allow new-reminder creation during the delivery phase too — seniors often
+    # ask for one while Donna is delivering an existing reminder.
+    if "create_reminder" in flows_tools:
+        functions.append(flows_tools["create_reminder"])
 
     functions.append(FlowsFunctionSchema(
         name="transition_to_main",
@@ -705,6 +709,9 @@ def build_winding_down_node(session_state: dict, flows_tools: dict) -> NodeConfi
     functions: list = []
     if "mark_reminder_acknowledged" in flows_tools:
         functions.append(flows_tools["mark_reminder_acknowledged"])
+    # Last-minute new-reminder requests still work while wrapping up.
+    if "create_reminder" in flows_tools:
+        functions.append(flows_tools["create_reminder"])
 
     functions.append(FlowsFunctionSchema(
         name="transition_to_closing",
