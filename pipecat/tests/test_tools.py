@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from flows.tools import (
+    CREATE_REMINDER_SCHEMA,
     MARK_REMINDER_SCHEMA,
     WEB_SEARCH_SCHEMA,
     get_web_search_schema,
@@ -27,6 +28,18 @@ class TestToolSchemas:
         assert MARK_REMINDER_SCHEMA["name"] == "mark_reminder_acknowledged"
         assert "reminder_id" in MARK_REMINDER_SCHEMA["properties"]
         assert "status" in MARK_REMINDER_SCHEMA["properties"]
+
+    def test_create_reminder_schema_uses_frequency_enum(self):
+        assert CREATE_REMINDER_SCHEMA["name"] == "create_reminder"
+        assert "frequency" in CREATE_REMINDER_SCHEMA["required"]
+        assert CREATE_REMINDER_SCHEMA["properties"]["frequency"]["enum"] == [
+            "daily",
+            "weekly",
+            "one-time",
+        ]
+        assert "recurring_days" in CREATE_REMINDER_SCHEMA["properties"]
+        # is_recurring boolean was retired in favour of frequency.
+        assert "is_recurring" not in CREATE_REMINDER_SCHEMA["properties"]
 
     def test_web_search_schema_can_be_generated_per_call_date(self):
         schema = get_web_search_schema(today_date=date(2030, 1, 2))
@@ -110,6 +123,57 @@ class TestToolHandlerFactory:
         })
         assert result["status"] == "success"
         assert "rem-1" in session_state.get("reminders_delivered", set())
+
+    @pytest.mark.asyncio
+    async def test_create_reminder_rejects_weekly_without_days(self):
+        session_state = {"senior_id": "test", "senior": {"timezone": "America/New_York"}}
+        handlers = make_tool_handlers(session_state)
+        result = await handlers["create_reminder"]({
+            "title": "Doctor",
+            "scheduled_time": "2026-05-12T10:00:00-04:00",
+            "type": "appointment",
+            "frequency": "weekly",
+            "recurring_days": [],
+        })
+        assert result["status"] == "error"
+        assert "days" in result["result"].lower()
+
+    @pytest.mark.asyncio
+    async def test_create_reminder_rejects_bad_iso_time(self):
+        session_state = {"senior_id": "test", "senior": {"timezone": "America/New_York"}}
+        handlers = make_tool_handlers(session_state)
+        result = await handlers["create_reminder"]({
+            "title": "Doctor",
+            "scheduled_time": "next tuesday",
+            "type": "appointment",
+            "frequency": "one-time",
+        })
+        assert result["status"] == "error"
+        assert "time" in result["result"].lower()
+
+    @pytest.mark.asyncio
+    async def test_create_reminder_passes_weekly_days_to_service(self):
+        session_state = {"senior_id": "s-1", "senior": {"timezone": "America/New_York"}}
+        handlers = make_tool_handlers(session_state)
+
+        with patch(
+            "services.reminder_management.create_reminder",
+            new_callable=AsyncMock,
+            return_value={"reminder": {"id": "r-1"}, "schedule_item_id": "sch-1"},
+        ) as mock_create:
+            result = await handlers["create_reminder"]({
+                "title": "Yoga",
+                "scheduled_time": "2026-05-11T08:00:00-04:00",
+                "type": "wellness",
+                "frequency": "weekly",
+                "recurring_days": ["Mon", "Wed", "Fri"],
+            })
+
+        assert result["status"] == "success"
+        kwargs = mock_create.await_args.kwargs
+        assert kwargs["frequency"] == "weekly"
+        # Mon=1, Wed=3, Fri=5 (JS Date.getDay convention).
+        assert kwargs["recurring_days"] == [1, 3, 5]
 
     @pytest.mark.asyncio
     async def test_web_search_uses_sanitized_query(self):

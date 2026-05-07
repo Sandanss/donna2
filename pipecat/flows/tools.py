@@ -92,17 +92,16 @@ WEB_SEARCH_SCHEMA = get_web_search_schema()
 CREATE_REMINDER_SCHEMA = {
     "name": "create_reminder",
     "description": (
-        "Save a new reminder for the senior when they explicitly ask you to remind "
-        "them about something. Triggers: 'recordame...', 'remind me to...', "
-        "'next Tuesday I have a doctor appointment, remind me'. "
-        "BEFORE calling: confirm the title and exact date/time aloud with the senior "
-        "in one short turn (e.g., 'So Tuesday May 12th at 10 in the morning, doctor "
-        "appointment — does that sound right?'). Only call after they confirm. "
-        "Compute scheduled_time in the senior's local timezone (provided in the "
-        "system prompt as 'Current time') and emit ISO 8601 WITH offset. "
-        "AFTER tool returns success, briefly confirm aloud (e.g., 'Got it, I saved that'). "
-        "Do NOT use this for medication reminders the family already manages — only when "
-        "the senior themselves asks to be reminded."
+        "Save a new reminder for the senior AND auto-schedule the call that will "
+        "remind them. Use ONLY after confirming all details with the senior in this order: "
+        "(1) propose a short title and confirm; (2) ask when the event is (date+time); "
+        "(3) ask if it repeats — daily, certain days of the week, or just once; "
+        "(4) read everything back ('So that's <title> on <date> at <time>, repeating "
+        "<frequency> — does that sound right?') and only call this tool after they confirm. "
+        "Compute scheduled_time in the senior's local timezone (from system prompt 'Current time') "
+        "and emit ISO 8601 WITH offset. AFTER the tool returns success, briefly confirm aloud "
+        "(e.g., 'Got it — I saved that and I'll call you at that time'). Do NOT use this for "
+        "medication reminders the family already manages — only when the senior themselves asks."
     ),
     "properties": {
         "title": {
@@ -117,10 +116,11 @@ CREATE_REMINDER_SCHEMA = {
         "scheduled_time": {
             "type": "string",
             "description": (
-                "ISO 8601 timestamp WITH timezone offset, in the senior's local timezone. "
-                "Example for May 12, 2026 at 10:00 AM Eastern: '2026-05-12T10:00:00-04:00'. "
-                "Use the 'Current time' from the system prompt to resolve relative phrases "
-                "like 'next Tuesday' or 'tomorrow at 3'."
+                "ISO 8601 timestamp WITH timezone offset for the FIRST occurrence, in the "
+                "senior's local timezone. Example for May 12, 2026 at 10:00 AM Eastern: "
+                "'2026-05-12T10:00:00-04:00'. For weekly/daily reminders, use the next "
+                "occurrence (e.g., next Monday at 8 AM if they said 'every Monday morning'). "
+                "Use 'Current time' from the system prompt to resolve relative phrases."
             ),
         },
         "type": {
@@ -136,15 +136,30 @@ CREATE_REMINDER_SCHEMA = {
             "type": "string",
             "description": "Optional extra context, e.g., 'Bring insurance card' or 'With breakfast'.",
         },
-        "is_recurring": {
-            "type": "boolean",
+        "frequency": {
+            "type": "string",
+            "enum": ["daily", "weekly", "one-time"],
             "description": (
-                "TRUE only if the senior explicitly said it repeats daily ('every day', "
-                "'todos los días'). Default FALSE for one-off events."
+                "How often it repeats. 'daily' = every day at the same time. "
+                "'weekly' = certain days of the week (also fill recurring_days). "
+                "'one-time' = a single occurrence on a specific date. If the senior is "
+                "unclear, ask: '¿es algo que se repite todos los días, ciertos días de la "
+                "semana, o una sola vez?' / 'is this every day, certain days, or just once?'"
+            ),
+        },
+        "recurring_days": {
+            "type": "array",
+            "items": {
+                "type": "string",
+                "enum": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+            },
+            "description": (
+                "REQUIRED ONLY when frequency='weekly'. Three-letter weekday codes for "
+                "the days the reminder should fire. Example: ['Mon', 'Wed', 'Fri']."
             ),
         },
     },
-    "required": ["title", "scheduled_time", "type"],
+    "required": ["title", "scheduled_time", "type", "frequency"],
 }
 
 MARK_REMINDER_SCHEMA = {
@@ -478,7 +493,8 @@ def make_tool_handlers(session_state: dict) -> dict:
         scheduled_time_str = (args.get("scheduled_time") or "").strip()
         reminder_type = (args.get("type") or "custom").strip().lower()
         description = args.get("description")
-        is_recurring = bool(args.get("is_recurring", False))
+        frequency = (args.get("frequency") or "one-time").strip().lower()
+        recurring_days_input = args.get("recurring_days") or []
 
         if not title:
             return {
@@ -488,6 +504,25 @@ def make_tool_handlers(session_state: dict) -> dict:
 
         if reminder_type not in {"medication", "appointment", "custom", "wellness", "social"}:
             reminder_type = "custom"
+
+        if frequency not in {"daily", "weekly", "one-time"}:
+            frequency = "one-time"
+
+        # Map English weekday codes to JS Date.getDay() integers (0=Sun..6=Sat).
+        day_map = {"Sun": 0, "Mon": 1, "Tue": 2, "Wed": 3, "Thu": 4, "Fri": 5, "Sat": 6}
+        recurring_days: list[int] = []
+        if frequency == "weekly":
+            for d in recurring_days_input:
+                if isinstance(d, str) and d.capitalize() in day_map:
+                    recurring_days.append(day_map[d.capitalize()])
+                elif isinstance(d, int) and 0 <= d <= 6:
+                    recurring_days.append(d)
+            recurring_days = sorted(set(recurring_days))
+            if not recurring_days:
+                return {
+                    "status": "error",
+                    "result": "I need to know which days. Ask them which days of the week.",
+                }
 
         try:
             from datetime import datetime
@@ -506,13 +541,14 @@ def make_tool_handlers(session_state: dict) -> dict:
 
         try:
             from services.reminder_management import create_reminder
-            reminder = await create_reminder(
+            result = await create_reminder(
                 senior_id=senior_id,
                 reminder_type=reminder_type,
                 title=title,
                 description=description,
                 scheduled_time=scheduled_time,
-                is_recurring=is_recurring,
+                frequency=frequency,
+                recurring_days=recurring_days,
                 timezone_name=timezone_name,
             )
         except Exception as e:
@@ -523,10 +559,11 @@ def make_tool_handlers(session_state: dict) -> dict:
             }
 
         logger.info(
-            "Tool: create_reminder saved rid={rid} senior={sid} title_chars={n}",
-            rid=str(reminder.get("id"))[:8],
+            "Tool: create_reminder saved rid={rid} schedule_id={sched} senior={sid} freq={f}",
+            rid=str(result.get("reminder", {}).get("id"))[:8],
+            sched=str(result.get("schedule_item_id"))[:8],
             sid=str(senior_id)[:8],
-            n=len(title),
+            f=frequency,
         )
         return {"status": "success", "result": f"Reminder saved: {title}"}
 

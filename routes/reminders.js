@@ -13,6 +13,7 @@ import {
 } from '../validators/schemas.js';
 import { getAccessibleSeniorIds, canAccessSenior, routeError } from './helpers.js';
 import { logAudit, authToRole } from '../services/audit.js';
+import { seniorService } from '../services/seniors.js';
 import { sendError } from '../lib/http-response.js';
 import { getDatePartsInTimezone, resolveTimezoneFromProfile } from '../lib/timezone.js';
 import { decryptReminderPhi, encryptReminderPhi } from '../lib/phi.js';
@@ -195,6 +196,34 @@ router.patch('/api/reminders/:id', requireAuth, validateParams(reminderIdParamSc
   }
 });
 
+// Strip a deleted reminder ID from the senior's preferred_call_times.schedule.
+// If a schedule item was created via voice and ends up with no remaining
+// reminder, drop the whole item — caregiver-edited items are kept (the
+// caregiver gets to decide whether the call still makes sense without it).
+async function cleanupScheduleItemsForDeletedReminder(seniorId, reminderId) {
+  const senior = await seniorService.getById(seniorId);
+  const schedule = senior?.preferredCallTimes?.schedule;
+  if (!Array.isArray(schedule) || schedule.length === 0) return;
+
+  let changed = false;
+  const updatedSchedule = [];
+  for (const item of schedule) {
+    if (!Array.isArray(item.reminderIds) || !item.reminderIds.includes(reminderId)) {
+      updatedSchedule.push(item);
+      continue;
+    }
+    const remaining = item.reminderIds.filter((id) => id !== reminderId);
+    changed = true;
+    if (remaining.length === 0 && item.createdVia === 'voice') continue;
+    updatedSchedule.push({ ...item, reminderIds: remaining });
+  }
+
+  if (!changed) return;
+  await seniorService.update(seniorId, {
+    preferredCallTimes: { ...senior.preferredCallTimes, schedule: updatedSchedule },
+  });
+}
+
 // Delete a reminder
 router.delete('/api/reminders/:id', requireAuth, validateParams(reminderIdParamSchema), idempotencyMiddleware, writeLimiter, async (req, res) => {
   try {
@@ -219,6 +248,7 @@ router.delete('/api/reminders/:id', requireAuth, validateParams(reminderIdParamS
     });
     await db.delete(reminderDeliveries).where(eq(reminderDeliveries.reminderId, req.params.id));
     await db.delete(reminders).where(eq(reminders.id, req.params.id));
+    await cleanupScheduleItemsForDeletedReminder(existing.seniorId, req.params.id);
     res.json({ success: true });
   } catch (error) {
     routeError(res, error, 'DELETE /api/reminders/:id');
