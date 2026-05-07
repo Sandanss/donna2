@@ -170,7 +170,7 @@ export default function ChatPanel({ onClose }) {
                 <strong>Ask Donna is still in beta</strong>
                 <p>For best results, we recommend being very detailed in your ask. If the chatbot gets stuck, try re-asking your question or starting over.</p>
               </div>
-              <p className="db-chat-empty__title">Schedule calls and reminders with natural language</p>
+              <p className="db-chat-empty__title" style={{ marginTop: 0 }}>Schedule calls and reminders with natural language</p>
               <div className="db-chat-empty__examples">
                 <button className="db-chat-empty__example" onClick={() => setInput('Schedule a call for tomorrow at 3pm')}>
                   "Schedule a call for tomorrow at 3pm"

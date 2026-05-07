@@ -1137,25 +1137,26 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   flex: 1;
   padding: var(--space-6);
+  padding-top: 15%;
   text-align: center;
 }
 
 .db-chat-beta-banner {
-  background: #FFF5F5;
-  border: 1px solid #FCA5A5;
+  background: rgba(250, 204, 21, 0.06);
+  border: 1px solid #FACC15;
   border-radius: var(--radius-lg);
   padding: var(--space-4);
-  margin-bottom: var(--space-5);
-  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.15);
+  margin-bottom: var(--space-4);
+  box-shadow: 0 1px 6px rgba(250, 204, 21, 0.18);
   text-align: center;
 }
 .db-chat-beta-banner strong {
   font-family: var(--font-body);
   font-size: 13px;
-  color: #DC2626;
+  color: var(--fg-1);
   display: block;
   margin-bottom: 6px;
 }
