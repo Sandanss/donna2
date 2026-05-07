@@ -128,3 +128,72 @@ class TestCreateReminderTransaction:
         # (existing + new voice item).
         assert args[0] == "enc-json:2"
         assert args[1] == "s-1"
+
+    @pytest.mark.asyncio
+    async def test_strips_tzinfo_before_insert(self, monkeypatch):
+        """Regression: reminders.scheduled_time is TIMESTAMP WITHOUT TIME ZONE,
+        so asyncpg rejects tz-aware datetimes. Must convert to UTC + strip tz."""
+        from datetime import timedelta
+
+        captured_insert_args: list = []
+
+        reminder_row = {
+            "id": "rem-x",
+            "senior_id": "s-1",
+            "type": "appointment",
+            "title": None,
+            "title_encrypted": "enc:fake",
+            "description": None,
+            "description_encrypted": None,
+            "scheduled_time": datetime(2026, 5, 12, 12, 0),
+            "is_recurring": False,
+            "cron_expression": None,
+            "created_via": "voice",
+        }
+        senior_row = {"preferred_call_times": {}, "preferred_call_times_encrypted": None}
+
+        async def fetchrow(sql, *args):
+            if "INSERT INTO reminders" in sql:
+                captured_insert_args.append(args)
+                return reminder_row
+            return senior_row
+
+        conn = MagicMock()
+        conn.fetchrow = AsyncMock(side_effect=fetchrow)
+        conn.execute = AsyncMock(return_value="UPDATE 1")
+
+        tx_ctx = MagicMock()
+        tx_ctx.__aenter__ = AsyncMock(return_value=None)
+        tx_ctx.__aexit__ = AsyncMock(return_value=None)
+        conn.transaction = MagicMock(return_value=tx_ctx)
+
+        pool_ctx = MagicMock()
+        pool_ctx.__aenter__ = AsyncMock(return_value=conn)
+        pool_ctx.__aexit__ = AsyncMock(return_value=None)
+        pool = MagicMock()
+        pool.acquire = MagicMock(return_value=pool_ctx)
+
+        async def _get_pool():
+            return pool
+
+        monkeypatch.setattr("services.reminder_management.get_pool", _get_pool)
+        monkeypatch.setattr("services.reminder_management.encrypt", lambda v: f"enc:{v}" if v else None)
+        monkeypatch.setattr("services.reminder_management.encrypt_json", lambda v: "enc-json:1")
+
+        # 08:00 in -04:00 == 12:00 UTC.
+        offset = timezone(timedelta(hours=-4))
+        await create_reminder(
+            senior_id="s-1",
+            reminder_type="appointment",
+            title="Doctor",
+            description=None,
+            scheduled_time=datetime(2026, 5, 12, 8, 0, tzinfo=offset),
+            frequency="one-time",
+            timezone_name="America/New_York",
+        )
+
+        assert len(captured_insert_args) == 1
+        # $7 in the INSERT VALUES (1-indexed) is the scheduled_time arg.
+        sched = captured_insert_args[0][6]
+        assert sched.tzinfo is None, "scheduled_time must be naive (column is TIMESTAMP WITHOUT TIME ZONE)"
+        assert sched == datetime(2026, 5, 12, 12, 0)

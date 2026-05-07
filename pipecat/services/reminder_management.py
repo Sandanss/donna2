@@ -102,6 +102,14 @@ async def create_reminder(
     cron = _daily_cron_from_local_time(scheduled_time, timezone_name) if is_recurring else None
     recurring_days = recurring_days or []
 
+    # `reminders.scheduled_time` is TIMESTAMP WITHOUT TIME ZONE. asyncpg rejects
+    # tz-aware datetimes against naive columns, so normalize to UTC + strip tzinfo
+    # (matches the JS/Drizzle path which stores the UTC instant).
+    if scheduled_time.tzinfo is not None:
+        scheduled_time_db = scheduled_time.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+    else:
+        scheduled_time_db = scheduled_time
+
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
@@ -121,7 +129,7 @@ async def create_reminder(
                 encrypt(title),
                 None,
                 encrypt(description) if description else None,
-                scheduled_time,
+                scheduled_time_db,
                 is_recurring,
                 cron,
             )
