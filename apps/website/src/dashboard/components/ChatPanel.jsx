@@ -2,9 +2,8 @@ import { useState, useRef, useEffect } from 'react';
 import { useDashboard } from '../DashboardContext';
 import ProposalCard from './ProposalCard';
 
-export default function ChatPanel({ onClose }) {
+export default function ChatPanel({ visible, messages, setMessages, onClose, onEndSession }) {
   const { senior, api } = useDashboard();
-  const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
   const [thinking, setThinking] = useState(null);
@@ -12,8 +11,8 @@ export default function ChatPanel({ onClose }) {
   const inputRef = useRef(null);
 
   useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
+    if (visible) inputRef.current?.focus();
+  }, [visible]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -142,6 +141,10 @@ export default function ChatPanel({ onClose }) {
     }
   }
 
+  if (!visible) {
+    return null;
+  }
+
   return (
     <>
       <div className="db-chat-overlay" onClick={onClose} />
@@ -154,12 +157,19 @@ export default function ChatPanel({ onClose }) {
             </svg>
             <span>Ask Donna</span>
           </div>
-          <button className="db-chat-header__close" onClick={onClose} aria-label="Close">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-          </button>
+          <div className="db-chat-header__actions">
+            {messages.length > 0 && (
+              <button className="db-chat-header__end" onClick={onEndSession}>
+                End Session
+              </button>
+            )}
+            <button className="db-chat-header__close" onClick={onClose} aria-label="Minimize">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          </div>
         </div>
 
         {/* Messages */}

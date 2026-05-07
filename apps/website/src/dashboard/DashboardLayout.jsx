@@ -70,6 +70,7 @@ function DashboardInner() {
   const { senior, api } = useDashboard();
   const [callModalOpen, setCallModalOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [chatMessages, setChatMessages] = useState([]);
   const location = useLocation();
 
   return (
@@ -149,9 +150,15 @@ function DashboardInner() {
       )}
 
       {/* Chat Panel */}
-      {chatOpen && senior && (
+      {senior && (
         <Suspense fallback={null}>
-          <ChatPanel onClose={() => setChatOpen(false)} />
+          <ChatPanel
+            visible={chatOpen}
+            messages={chatMessages}
+            setMessages={setChatMessages}
+            onClose={() => setChatOpen(false)}
+            onEndSession={() => { setChatMessages([]); setChatOpen(false); }}
+          />
         </Suspense>
       )}
     </div>

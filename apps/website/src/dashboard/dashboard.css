@@ -1107,6 +1107,31 @@
   color: var(--fg-1);
 }
 
+.db-chat-header__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.db-chat-header__end {
+  background: none;
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-pill);
+  padding: var(--space-1) var(--space-3);
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fg-2);
+  cursor: pointer;
+  transition: all var(--dur-fast);
+}
+
+.db-chat-header__end:hover {
+  background: var(--color-cream);
+  color: var(--fg-1);
+  border-color: var(--fg-3);
+}
+
 .db-chat-header__close {
   background: none;
   border: none;
