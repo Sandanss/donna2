@@ -33,6 +33,7 @@ const RETENTION_DAYS = {
   daily_call_context:    parseInt(process.env.RETENTION_DAILY_CONTEXT_DAYS              || '90',  10),
   call_metrics:          parseInt(process.env.RETENTION_CALL_METRICS_DAYS               || '180', 10),
   inactive_reminders:    parseInt(process.env.RETENTION_INACTIVE_REMINDERS_DAYS         || '365', 10),
+  expired_onetime_reminders: parseInt(process.env.RETENTION_EXPIRED_ONETIME_REMINDERS_DAYS || '1', 10),
   reminder_deliveries:   parseInt(process.env.RETENTION_REMINDER_DELIVERIES_DAYS        || '90',  10),
   notifications:         parseInt(process.env.RETENTION_NOTIFICATIONS_DAYS              || '180', 10),
   caregiver_notes:       parseInt(process.env.RETENTION_CAREGIVER_NOTES_DAYS            || '365', 10),
@@ -249,6 +250,68 @@ async function purgeInactiveReminders(days) {
 }
 
 /**
+ * Delete one-time reminders whose scheduled event passed more than `days` days
+ * ago. Recurring reminders are never touched. Deletes associated
+ * reminder_deliveries first (no FK cascade in schema). Respects legal_holds.
+ *
+ * Designed to expire one-time reminders the day after their event so the
+ * mobile UI doesn't keep showing past events.
+ */
+async function purgeExpiredOnetimeReminders(days) {
+  let totalDeleted = 0;
+
+  while (true) {
+    const result = await db.execute(sql`
+      WITH batch AS (
+        SELECT r.id
+        FROM reminders r
+        WHERE r.is_recurring = false
+          AND r.scheduled_time IS NOT NULL
+          AND r.scheduled_time < NOW() - make_interval(days => ${days})
+          AND NOT EXISTS (
+            SELECT 1
+            FROM legal_holds lh
+            WHERE lh.released_at IS NULL
+              AND lh.resource_type = 'reminder'
+              AND lh.resource_id = r.id::text
+          )
+          AND NOT EXISTS (
+            SELECT 1
+            FROM reminder_deliveries rd
+            JOIN legal_holds lh
+              ON lh.released_at IS NULL
+             AND lh.resource_type = 'reminder_delivery'
+             AND lh.resource_id = rd.id::text
+            WHERE rd.reminder_id = r.id
+          )
+        ORDER BY r.scheduled_time
+        LIMIT ${BATCH_SIZE}
+      ),
+      deleted_deliveries AS (
+        DELETE FROM reminder_deliveries rd
+        USING batch
+        WHERE rd.reminder_id = batch.id
+        RETURNING 1
+      ),
+      deleted_reminders AS (
+        DELETE FROM reminders r
+        USING batch
+        WHERE r.id = batch.id
+        RETURNING 1
+      )
+      SELECT count(*)::int AS count FROM deleted_reminders
+    `);
+
+    const batchCount = result.rows?.[0]?.count ?? 0;
+    totalDeleted += batchCount;
+    if (batchCount < BATCH_SIZE) break;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+
+  return totalDeleted;
+}
+
+/**
  * Count inactive senior profiles ready for manual review. This intentionally
  * does not delete profile rows because policy requires review before purge.
  */
@@ -329,6 +392,11 @@ export async function purgeExpiredData() {
         continue;
       }
 
+      if (table === 'expired_onetime_reminders') {
+        results[table] = await purgeExpiredOnetimeReminders(days);
+        continue;
+      }
+
       if (table === 'senior_profile_review') {
         results.senior_profile_review_candidates = await countSeniorProfileReviewCandidates(days);
         continue;
@@ -394,5 +462,6 @@ export const dataRetentionService = {
   runDailyPurgeIfNeeded,
   RETENTION_DAYS,
   purgeInactiveReminders,
+  purgeExpiredOnetimeReminders,
   countSeniorProfileReviewCandidates,
 };
