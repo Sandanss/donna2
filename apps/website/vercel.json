@@ -5,9 +5,7 @@
     { "source": "/privacy", "destination": "/privacypolicy" },
     { "source": "/terms", "destination": "/termsofservice" },
     { "source": "/thirdparty", "destination": "/third-party" },
-    { "source": "/signup/sso-callback", "destination": "/signup.html" },
-    { "source": "/signup", "destination": "/signup.html" },
-    { "source": "/dashboard", "destination": "/dashboard.html" },
-    { "source": "/dashboard/:path*", "destination": "/dashboard.html" }
+    { "source": "/signup/sso-callback", "destination": "/signup" },
+    { "source": "/dashboard/:path*", "destination": "/dashboard" }
   ]
 }
