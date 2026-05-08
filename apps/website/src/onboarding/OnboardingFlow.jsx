@@ -82,10 +82,12 @@ function OnboardingInner() {
   // Try to get Clerk auth (may not be available in dev mode / SSR)
   let getToken = null;
   let isSignedIn = false;
+  let signOut = null;
   try {
     const auth = useAuth();
     getToken = auth.getToken;
     isSignedIn = !!auth.isSignedIn;
+    signOut = auth.signOut;
   } catch {
     // Clerk hooks are unavailable during static rendering and local dev fallbacks.
   }
@@ -117,7 +119,7 @@ function OnboardingInner() {
     window.scrollTo(0, 0);
   }, [step, setStep]);
 
-  const handleExit = useCallback(() => {
+  const handleExit = useCallback(async () => {
     const confirmed = window.confirm(
       'Are you sure you want to leave? You\'ll lose all your progress in the signup flow.'
     );
@@ -125,14 +127,17 @@ function OnboardingInner() {
       // Clear any legacy persisted onboarding payload before navigation.
       try {
         localStorage.removeItem('donna_onboarding');
-        sessionStorage.setItem('donna_onboarding_exited', 'true');
       } catch {
         // Storage unavailable — reset() will still clear in-memory state
       }
       reset();
+      // Sign out of Clerk so the user sees the auth page if they return to /signup
+      if (signOut && isSignedIn) {
+        try { await signOut(); } catch { /* proceed with navigation */ }
+      }
       window.location.href = '/';
     }
-  }, [reset]);
+  }, [reset, signOut, isSignedIn]);
 
   const goBack = useCallback(() => {
     if (step <= 1) {
