@@ -223,6 +223,8 @@
     "answered": "Contestada",
     "missed": "Perdida",
     "noSummary": "Sin resumen disponible",
+    "showMore": "Ver más",
+    "showLess": "Ver menos",
     "defaultGreetingName": "",
     "yourLovedOne": "tu ser querido"
   },

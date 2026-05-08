@@ -392,6 +392,8 @@ function CallCard({ conversation }: { conversation: Conversation }) {
   const { t } = useTranslation();
   const statusKey = getCallStatusKey(conversation);
   const isAnswered = statusKey === "answered";
+  const [expanded, setExpanded] = useState(false);
+  const [canExpand, setCanExpand] = useState(false);
 
   const dateStr = useMemo(() => {
     try {
@@ -437,9 +439,39 @@ function CallCard({ conversation }: { conversation: Conversation }) {
         </View>
       </View>
       {conversation.summary ? (
-        <Text className="text-muted text-[14px] leading-5" numberOfLines={3}>
-          {conversation.summary}
-        </Text>
+        <View>
+          <Text
+            className="text-muted text-[14px] leading-5"
+            numberOfLines={expanded ? undefined : 3}
+          >
+            {conversation.summary}
+          </Text>
+          {!canExpand && (
+            <Text
+              className="text-[14px] leading-5"
+              style={{ position: "absolute", opacity: 0, left: 0, right: 0 }}
+              onTextLayout={(e) => {
+                if (e.nativeEvent.lines.length > 3) setCanExpand(true);
+              }}
+            >
+              {conversation.summary}
+            </Text>
+          )}
+          {canExpand && (
+            <Pressable
+              onPress={() => setExpanded((v) => !v)}
+              hitSlop={8}
+              className="mt-2 self-start"
+            >
+              <Text
+                className="text-[14px] font-semibold"
+                style={{ color: COLORS.sage }}
+              >
+                {expanded ? t("dashboard.showLess") : t("dashboard.showMore")}
+              </Text>
+            </Pressable>
+          )}
+        </View>
       ) : (
         <Text className="text-muted/60 text-[14px] italic">
           {t("dashboard.noSummary")}

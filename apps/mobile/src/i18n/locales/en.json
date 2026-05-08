@@ -223,6 +223,8 @@
     "answered": "Answered",
     "missed": "Missed",
     "noSummary": "No summary available",
+    "showMore": "Show more",
+    "showLess": "Show less",
     "defaultGreetingName": "there",
     "yourLovedOne": "your loved one"
   },
