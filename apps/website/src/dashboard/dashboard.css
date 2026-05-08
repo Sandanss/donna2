@@ -597,6 +597,7 @@
   font-size: 15px;
   font-weight: 500;
   color: var(--fg-1);
+  text-align: center;
 }
 
 .db-srow__chevron {

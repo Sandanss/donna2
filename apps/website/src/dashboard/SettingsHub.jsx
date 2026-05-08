@@ -1,14 +1,17 @@
 import { useState } from 'react';
-import { useClerk } from '@clerk/clerk-react';
+import { useClerk, useUser } from '@clerk/clerk-react';
 import { useNavigate } from 'react-router-dom';
 import { useDashboard } from './DashboardContext';
 import SettingsRow from './components/SettingsRow';
 
 export default function SettingsHub() {
   const { signOut } = useClerk();
+  const { user } = useUser();
   const navigate = useNavigate();
   const { senior, api } = useDashboard();
   const seniorName = senior?.name || senior?.seniorName || 'Loved One';
+  const seniorInitial = seniorName.charAt(0).toUpperCase();
+  const caregiverInitial = (user?.firstName || 'Y').charAt(0).toUpperCase();
 
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -44,23 +47,14 @@ export default function SettingsHub() {
         <SettingsRow
           to="/dashboard/settings/loved-one"
           label={`${seniorName}'s Profile`}
-          iconBg="var(--color-rose)"
-          icon={
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z" />
-            </svg>
-          }
+          iconBg="var(--color-sage-dark)"
+          icon={<span style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>{seniorInitial}</span>}
         />
         <SettingsRow
           to="/dashboard/settings/account"
           label="Your Account"
           iconBg="var(--color-sage-dark)"
-          icon={
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
-              <circle cx="12" cy="7" r="4" />
-            </svg>
-          }
+          icon={<span style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>{caregiverInitial}</span>}
         />
       </div>
 
@@ -72,7 +66,7 @@ export default function SettingsHub() {
           label="Notification Preferences"
           iconBg="var(--color-sage-dark)"
           icon={
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" />
               <path d="M13.73 21a2 2 0 01-3.46 0" />
             </svg>
@@ -81,10 +75,9 @@ export default function SettingsHub() {
         <SettingsRow
           to="/dashboard/settings/help"
           label="Help Center"
-          iconBg="var(--color-cream-deep)"
-          iconColor="var(--fg-2)"
+          iconBg="var(--color-sage-dark)"
           icon={
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="10" />
               <path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3" />
               <line x1="12" y1="17" x2="12.01" y2="17" />
@@ -104,7 +97,7 @@ export default function SettingsHub() {
               <line x1="21" y1="12" x2="9" y2="12" />
             </svg>
           </div>
-          <span className="db-srow__label" style={{ color: 'var(--color-danger)' }}>Sign Out</span>
+          <span className="db-srow__label">Sign Out</span>
         </button>
         <button className="db-srow" onClick={() => setShowDeleteModal(true)} style={{ width: '100%', border: 'none', background: 'none', cursor: 'pointer' }}>
           <div className="db-srow__icon" style={{ background: 'var(--color-danger-light, #FEE2E2)' }}>
@@ -115,7 +108,7 @@ export default function SettingsHub() {
               <line x1="14" y1="11" x2="14" y2="17" />
             </svg>
           </div>
-          <span className="db-srow__label" style={{ color: 'var(--color-danger)' }}>Delete Account</span>
+          <span className="db-srow__label">Delete Account</span>
         </button>
       </div>
 

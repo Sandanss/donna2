@@ -111,7 +111,7 @@ export default function HomePage() {
           <h1 className="db-page__title">Hello, {firstName}</h1>
           <p className="db-page__subtitle">Here&apos;s what&apos;s happening with {seniorName}</p>
         </div>
-        <div className="db-avatar">{seniorInitial}</div>
+        <div className="db-avatar" onClick={() => navigate('/dashboard/settings/loved-one')} style={{ cursor: 'pointer' }}>{seniorInitial}</div>
       </motion.div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
