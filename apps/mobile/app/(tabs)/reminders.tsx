@@ -11,6 +11,8 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Edit2, Trash2, Plus, Bell, Phone } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
+import { useFocusEffect } from "expo-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { COLORS } from "@/src/constants/theme";
 import { getErrorMessage } from "@/src/lib/api";
 import {
@@ -67,6 +69,7 @@ function getScheduleLabel(reminder: Reminder, timezone: string, t: (key: string,
 export default function RemindersScreen() {
   const { t } = useTranslation();
   const { senior, seniorId, isLoading: seniorLoading } = useCurrentSenior();
+  const queryClient = useQueryClient();
   const {
     data: reminders,
     isLoading: remindersLoading,
@@ -75,6 +78,15 @@ export default function RemindersScreen() {
   const createReminder = useCreateReminder(seniorId);
   const updateReminder = useUpdateReminder(seniorId);
   const deleteReminder = useDeleteReminder(seniorId);
+
+  // Refresh whenever the user enters this tab — Donna can create reminders
+  // out-of-band during a voice call, so the cache may be stale.
+  useFocusEffect(
+    useCallback(() => {
+      if (!seniorId) return;
+      queryClient.invalidateQueries({ queryKey: ["reminders", seniorId] });
+    }, [queryClient, seniorId]),
+  );
 
   const [refreshing, setRefreshing] = useState(false);
   const [formModalVisible, setFormModalVisible] = useState(false);

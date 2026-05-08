@@ -11,6 +11,7 @@ import { seniorService } from '../services/seniors.js';
 import { routeError } from './helpers.js';
 import { logAudit, authToRole } from '../services/audit.js';
 import { sendError } from '../lib/http-response.js';
+import { pushTokenSchema } from '../validators/schemas.js';
 
 const router = Router();
 
@@ -54,6 +55,38 @@ router.get('/api/caregivers/me', requireAuth, async (req, res) => {
     });
   } catch (error) {
     routeError(res, error, 'GET /api/caregivers/me');
+  }
+});
+
+// Register the Expo push token for the current caregiver across every
+// senior link they have. Allows the backend to push to the mobile app on
+// events like a voice-created reminder so the UI cache invalidates.
+router.post('/api/caregivers/me/push-token', requireAuth, writeLimiter, async (req, res) => {
+  try {
+    const parsed = pushTokenSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return sendError(res, 400, {
+        error: 'Validation error',
+        details: parsed.error.flatten().fieldErrors,
+      });
+    }
+
+    const clerkUserId = req.auth.userId;
+    const result = await db.update(caregivers)
+      .set({
+        expoPushToken: parsed.data.token,
+        expoPushTokenUpdatedAt: new Date(),
+      })
+      .where(eq(caregivers.clerkUserId, clerkUserId))
+      .returning({ id: caregivers.id });
+
+    if (result.length === 0) {
+      return sendError(res, 404, { error: 'Caregiver not found' });
+    }
+
+    res.json({ success: true, updated: result.length });
+  } catch (error) {
+    routeError(res, error, 'POST /api/caregivers/me/push-token');
   }
 });
 

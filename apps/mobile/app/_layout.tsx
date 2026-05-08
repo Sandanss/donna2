@@ -1,6 +1,7 @@
 import "../global.css";
 import "@/src/i18n";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { AppState, type AppStateStatus } from "react-native";
 import { Stack, usePathname, useRouter, useSegments } from "expo-router";
 import { ClerkProvider, useAuth } from "@clerk/clerk-expo";
 import { useQueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -10,6 +11,7 @@ import { tokenCache } from "@/src/lib/auth";
 import {
   registerForPushNotifications,
   addNotificationResponseListener,
+  addNotificationReceivedListener,
 } from "@/src/lib/notifications";
 import {
   useFonts,
@@ -160,25 +162,74 @@ function AuthGuard() {
   useEffect(() => {
     if (!isSignedIn) return;
 
-    registerForPushNotifications().then((token) => {
-      if (token) {
-        // TODO: Send token to backend when endpoint exists
-        // api.notifications.registerPushToken(token);
+    registerForPushNotifications().then(async (token) => {
+      if (!token) return;
+      try {
+        const authToken = await getToken();
+        if (authToken) {
+          await api.notifications.registerPushToken(token, authToken);
+        }
+      } catch (err) {
+        // Non-fatal: push registration is best-effort. The app falls back to
+        // useFocusEffect + AppState refresh for cache invalidation.
+        console.warn("[push] Failed to register token", err);
       }
     });
 
     // Handle notification tap — navigate to relevant screen
-    const subscription = addNotificationResponseListener((response) => {
+    const responseSub = addNotificationResponseListener((response) => {
       const data = response.notification.request.content.data;
-      if (data?.type === "call_summary") {
+      if (data?.type === "call_summary" || data?.type === "call_completed") {
         router.push("/(tabs)");
-      } else if (data?.type === "missed_call") {
+      } else if (data?.type === "missed_call" || data?.type === "reminder_missed") {
         router.push("/(tabs)/schedule");
       }
     });
 
-    return () => subscription.remove();
-  }, [isSignedIn]);
+    // Foreground notifications — invalidate caches that may have been
+    // updated server-side (voice-created reminders, post-call data).
+    const receivedSub = addNotificationReceivedListener((notification) => {
+      const data = notification.request.content.data as
+        | { type?: string; seniorId?: string }
+        | undefined;
+      if (!data?.type) return;
+
+      if (
+        data.type === "call_completed" ||
+        data.type === "reminder_missed" ||
+        data.type === "concern_detected"
+      ) {
+        const key = data.seniorId ? [data.seniorId] : [];
+        queryClient.invalidateQueries({ queryKey: ["reminders", ...key] });
+        queryClient.invalidateQueries({ queryKey: ["schedule", ...key] });
+        queryClient.invalidateQueries({ queryKey: ["conversations", ...key] });
+      }
+    });
+
+    return () => {
+      responseSub.remove();
+      receivedSub.remove();
+    };
+  }, [isSignedIn, getToken, queryClient, router]);
+
+  // Refresh server data when the app returns to the foreground — covers the
+  // common case of "I just hung up with Donna and opened the app".
+  const appStateRef = useRef<AppStateStatus>(AppState.currentState);
+  useEffect(() => {
+    if (!isSignedIn) return;
+
+    const sub = AppState.addEventListener("change", (next) => {
+      const prev = appStateRef.current;
+      appStateRef.current = next;
+      if (prev.match(/inactive|background/) && next === "active") {
+        queryClient.invalidateQueries({ queryKey: ["reminders"] });
+        queryClient.invalidateQueries({ queryKey: ["schedule"] });
+        queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      }
+    });
+
+    return () => sub.remove();
+  }, [isSignedIn, queryClient]);
 
   const showBootstrapError =
     isLoaded &&

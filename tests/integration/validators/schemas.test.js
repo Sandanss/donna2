@@ -23,6 +23,7 @@ import {
   voiceAnswerSchema,
   voiceStatusSchema,
   notificationTriggerSchema,
+  pushTokenSchema,
   seniorIdParamSchema,
 } from '../../../validators/schemas.js';
 
@@ -1094,6 +1095,46 @@ describe('seniorIdParamSchema', () => {
 
   it('rejects missing id', () => {
     const result = seniorIdParamSchema.safeParse({});
+    expect(result.success).toBe(false);
+  });
+});
+
+
+// =============================================================================
+// Push Token Schema (Expo push registration from mobile app)
+// =============================================================================
+
+describe('pushTokenSchema', () => {
+  it('accepts ExponentPushToken format', () => {
+    const result = pushTokenSchema.safeParse({
+      token: 'ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts ExpoPushToken format (newer SDKs)', () => {
+    const result = pushTokenSchema.safeParse({
+      token: 'ExpoPushToken[abc123]',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects raw FCM/APNs tokens (not Expo wrappers)', () => {
+    const result = pushTokenSchema.safeParse({
+      token: 'cMxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects missing token', () => {
+    const result = pushTokenSchema.safeParse({});
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects oversized payload', () => {
+    const result = pushTokenSchema.safeParse({
+      token: 'ExpoPushToken[' + 'a'.repeat(300) + ']',
+    });
     expect(result.success).toBe(false);
   });
 });

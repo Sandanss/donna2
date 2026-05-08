@@ -107,6 +107,8 @@ export const caregivers = pgTable('caregivers', {
   clerkUserId: varchar('clerk_user_id', { length: 255 }).notNull(), // Clerk user ID
   seniorId: uuid('senior_id').references(() => seniors.id).notNull(),
   role: varchar('role', { length: 50 }).default('caregiver'), // caregiver, family, admin
+  expoPushToken: varchar('expo_push_token', { length: 255 }),
+  expoPushTokenUpdatedAt: timestamp('expo_push_token_updated_at'),
   createdAt: timestamp('created_at').defaultNow(),
 });
 

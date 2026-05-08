@@ -461,5 +461,16 @@ export const api = {
         token,
         idempotencyKey: options?.idempotencyKey,
       }),
+
+    /** POST /api/caregivers/me/push-token -- register Expo push token */
+    registerPushToken: (pushToken: string, token: string) =>
+      fetchJson<{ success: boolean; updated: number }>(
+        "/api/caregivers/me/push-token",
+        {
+          method: "POST",
+          body: JSON.stringify({ token: pushToken }),
+          token,
+        },
+      ),
   },
 };

@@ -384,6 +384,16 @@ export const notificationTriggerSchema = z.object({
   data: z.object({}).passthrough(), // flexible payload
 });
 
+// Expo push token registration. Tokens look like
+// "ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]" or
+// "ExpoPushToken[xxxxxxxxxxxxxxxxxxxxxx]" (newer SDKs).
+export const pushTokenSchema = z.object({
+  token: z.string()
+    .min(10)
+    .max(255)
+    .regex(/^Exp(o|onent)PushToken\[[^\]]+\]$/, 'Invalid Expo push token format'),
+});
+
 // =============================================================================
 // URL Parameter Schemas
 // =============================================================================

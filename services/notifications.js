@@ -2,6 +2,7 @@ import { db } from '../db/client.js';
 import { notificationPreferences, notifications, caregivers, seniors } from '../db/schema.js';
 import { eq } from 'drizzle-orm';
 import { Resend } from 'resend';
+import { Expo } from 'expo-server-sdk';
 import { clerkClient } from '@clerk/express';
 import { createLogger } from '../lib/logger.js';
 import { decryptNotificationPhi, encryptNotificationPhi } from '../lib/phi.js';
@@ -16,6 +17,18 @@ const getResendClient = () => {
     resendClient = new Resend(process.env.RESEND_API_KEY);
   }
   return resendClient;
+};
+
+// Lazy-init Expo SDK. Works without an access token for unaccepted-receipt
+// flow; an EXPO_ACCESS_TOKEN can be provided later for stricter rate limits.
+let expoClient = null;
+const getExpoClient = () => {
+  if (!expoClient) {
+    expoClient = new Expo({
+      accessToken: process.env.EXPO_ACCESS_TOKEN || undefined,
+    });
+  }
+  return expoClient;
 };
 
 const FROM_EMAIL = process.env.NOTIFICATION_FROM_EMAIL || 'Donna <notifications@donna.care>';
@@ -196,7 +209,15 @@ export const notificationService = {
     );
 
     for (const cg of caregiverList) {
-      await this._sendIfAllowed(cg.id, cg.clerkUserId, seniorId, 'call_completed', content, data);
+      await this._sendIfAllowed(
+        cg.id,
+        cg.clerkUserId,
+        seniorId,
+        'call_completed',
+        content,
+        data,
+        { expoPushToken: cg.expoPushToken },
+      );
     }
   },
 
@@ -215,7 +236,15 @@ export const notificationService = {
 
     for (const cg of caregiverList) {
       // Concern notifications bypass quiet hours
-      await this._sendIfAllowed(cg.id, cg.clerkUserId, seniorId, 'concern_detected', content, data, { bypassQuietHours: true });
+      await this._sendIfAllowed(
+        cg.id,
+        cg.clerkUserId,
+        seniorId,
+        'concern_detected',
+        content,
+        data,
+        { bypassQuietHours: true, expoPushToken: cg.expoPushToken },
+      );
     }
   },
 
@@ -233,7 +262,15 @@ export const notificationService = {
     );
 
     for (const cg of caregiverList) {
-      await this._sendIfAllowed(cg.id, cg.clerkUserId, seniorId, 'reminder_missed', content, data);
+      await this._sendIfAllowed(
+        cg.id,
+        cg.clerkUserId,
+        seniorId,
+        'reminder_missed',
+        content,
+        data,
+        { expoPushToken: cg.expoPushToken },
+      );
     }
   },
 
@@ -242,7 +279,11 @@ export const notificationService = {
   // -------------------------------------------------------------------------
 
   async _getCaregiversForSenior(seniorId) {
-    return db.select({ id: caregivers.id, clerkUserId: caregivers.clerkUserId })
+    return db.select({
+      id: caregivers.id,
+      clerkUserId: caregivers.clerkUserId,
+      expoPushToken: caregivers.expoPushToken,
+    })
       .from(caregivers)
       .where(eq(caregivers.seniorId, seniorId));
   },
@@ -278,6 +319,67 @@ export const notificationService = {
     // backward-compatible API responses and legacy rows.
     if (prefs.emailEnabled) {
       await this._sendEmail(caregiverId, seniorId, eventType, content, metadata, contact.email);
+    }
+
+    // Push notification doubles as a cache-invalidation signal for the mobile
+    // app — for example, a voice-created reminder needs the reminder/schedule
+    // tabs to refresh. Same event-type gate as email so the user is not woken
+    // up by events they have disabled.
+    if (opts.expoPushToken) {
+      await this._sendPush(caregiverId, seniorId, eventType, content, metadata, opts.expoPushToken);
+    }
+  },
+
+  async _sendPush(caregiverId, seniorId, eventType, content, metadata, pushToken) {
+    if (!Expo.isExpoPushToken(pushToken)) {
+      log.warn('Invalid Expo push token, skipping', { caregiverId });
+      return;
+    }
+
+    const safeContent = sanitizeNotificationContent(content);
+    const titles = {
+      call_completed: 'Donna call summary',
+      concern_detected: '⚠️ Donna alert',
+      reminder_missed: 'Missed reminder',
+      weekly_summary: 'Weekly summary',
+    };
+
+    try {
+      const expo = getExpoClient();
+      const tickets = await expo.sendPushNotificationsAsync([{
+        to: pushToken,
+        sound: 'default',
+        title: titles[eventType] || 'Donna',
+        body: safeContent,
+        data: {
+          type: eventType,
+          seniorId,
+          // Include only safe ids — the mobile listener uses these to
+          // invalidate the right query keys, not to display PHI.
+        },
+        priority: 'high',
+      }]);
+
+      const ticket = tickets[0];
+      if (ticket?.status === 'error') {
+        log.warn('Expo push ticket error', {
+          caregiverId,
+          eventType,
+          message: ticket.message,
+          details: ticket.details,
+        });
+        // DeviceNotRegistered means the token is dead — clear it so we stop
+        // trying to push to it.
+        if (ticket.details?.error === 'DeviceNotRegistered') {
+          await db.update(caregivers)
+            .set({ expoPushToken: null })
+            .where(eq(caregivers.id, caregiverId));
+        }
+      } else {
+        log.info('Push sent', { caregiverId, eventType });
+      }
+    } catch (err) {
+      log.error('Push delivery failed', { caregiverId, error: err.message });
     }
   },
 

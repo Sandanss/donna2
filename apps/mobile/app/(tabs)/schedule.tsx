@@ -39,6 +39,8 @@ import {
   getDay,
 } from "date-fns";
 import { useTranslation } from "react-i18next";
+import { useFocusEffect } from "expo-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { getDateFnsLocale } from "@/src/lib/dateFnsLocale";
 import { COLORS } from "@/src/constants/theme";
 import {
@@ -133,9 +135,20 @@ export default function ScheduleScreen() {
   const DAY_LETTERS = t("schedule.dayLetters", { returnObjects: true }) as string[];
   const DAY_LABELS = t("schedule.dayLabels", { returnObjects: true }) as string[];
   const { senior, seniorId, isLoading: seniorLoading } = useCurrentSenior();
+  const queryClient = useQueryClient();
   const { data: rawSchedule, isLoading: scheduleLoading } = useSchedule(seniorId);
   const updateSchedule = useUpdateSchedule(seniorId);
   const { data: reminders } = useReminders(seniorId);
+
+  // Refresh schedule + reminders when the user enters this tab — voice
+  // reminders write to seniors.preferred_call_times.schedule out-of-band.
+  useFocusEffect(
+    useCallback(() => {
+      if (!seniorId) return;
+      queryClient.invalidateQueries({ queryKey: ["schedule", seniorId] });
+      queryClient.invalidateQueries({ queryKey: ["reminders", seniorId] });
+    }, [queryClient, seniorId]),
+  );
 
   const [selectedDate, setSelectedDate] = useState(startOfDay(new Date()));
   const [baseWeekDate, setBaseWeekDate] = useState(startOfWeek(new Date(), { weekStartsOn: 0 }));
