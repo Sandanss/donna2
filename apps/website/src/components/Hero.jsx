@@ -39,6 +39,7 @@ export default function Hero({ onOpenWaitlist }) {
                 <div className="hero__store-label">Download on the</div>
                 <div className="hero__store-name">App Store</div>
               </div>
+              <span className="hero__soon-badge">SOON</span>
             </button>
             <a
               href="/signup"

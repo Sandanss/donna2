@@ -5,7 +5,7 @@ const setupSteps = [
   {
     number: '1',
     title: 'Download the app',
-    description: 'Available on iOS. Free to download.',
+    description: <>Available on iOS. Free to download. You can also sign up <a href="/signup" className="setup__link">here</a>.</>,
   },
   {
     number: '2',
@@ -15,7 +15,7 @@ const setupSteps = [
   {
     number: '3',
     title: "You're all set",
-    description: "That's it. Donna will call on schedule, and you'll get updates and call summaries right in the app.",
+    description: "That's it. Donna will call on schedule, and you'll get updates and call summaries right in the app and on this site.",
   },
 ];
 

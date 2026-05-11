@@ -151,6 +151,16 @@
   line-height: 1.6;
 }
 
+.setup__link {
+  color: var(--color-sage);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.setup__link:hover {
+  color: var(--color-sage-dark);
+}
+
 .timeline__header--second {
   margin-top: 16px;
 }
