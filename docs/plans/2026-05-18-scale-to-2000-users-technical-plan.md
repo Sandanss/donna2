@@ -21,6 +21,14 @@ The target architecture should change from "find due calls and fire them" to "ma
 - Database constraints, indexes, pooling, and idempotency changes for concurrent writes.
 - PHI-safe queue, Redis, logging, retention, and audit practices.
 
+Several design decisions are made now to avoid expensive re-architecture later, when the system needs to grow past 2,000 users (see "Forward Path To 10,000 Users" at the end of this doc for context):
+
+- Operational tables (`call_queue`, `call_attempts`, `post_call_jobs`, `outbound_call_guards`) live under a dedicated `ops.*` schema so they can later be moved to a dedicated operational Postgres without rewriting application SQL or denormalizing joins.
+- Queue, attempt, and job tables use `PARTITION BY HASH (senior_id)` from day one. Cheap to do now, painful to retrofit, and gives the dispatcher headroom past the initial 2,000-user target.
+- `PIPECAT_REQUIRE_REDIS=true` is the supported production posture from Phase 0 (with a sequenced rollout), not a flag flipped on later.
+- Capacity heartbeats and reservations are region-aware (region in Redis keys, `region` column on `call_attempts`) even though we deploy in one region today. Multi-region becomes a configuration change, not a schema change.
+- Post-call work is structured to run on a durable workflow engine (Temporal Cloud or Inngest) using `post_call_jobs` as source-of-truth metadata, because retry/backoff/dead-letter semantics already exist in those engines and the post-call burst is the highest-value place to use them.
+
 Contracts with Telnyx and ElevenLabs are necessary but not sufficient. We also need provider capacity and BAAs for Deepgram, Anthropic, Google/Gemini, OpenAI/Tavily if used during calls or post-call work, Resend for notifications, Neon, Railway, Sentry, and any cache/queue vendor that can hold PHI.
 
 ## Capacity Model
@@ -407,6 +415,38 @@ Do not A/B the same senior across architectures during the same testing period. 
 
 ## Data Model Changes
 
+### Schema Layout And Partitioning
+
+Operational tables live under a dedicated `ops.*` schema. Application-domain tables (`seniors`, `conversations`, `memories`, `reminders`, `caregivers`, etc.) stay under `public.*`. This forces a clean boundary in app code — no SQL joins from `ops.call_queue` to `public.seniors` — so senior hydration for queued work happens through service calls or denormalized fields on the queue row itself rather than database joins. Later, the entire `ops.*` schema can be moved to a dedicated operational Postgres (separate Neon project, Crunchy Bridge, RDS, or CloudSQL) without rewriting application SQL; only the connection string for the operational pool changes.
+
+All queue/attempt/job tables are hash-partitioned on `senior_id` from day one:
+
+```sql
+CREATE TABLE ops.call_queue ( ... )
+  PARTITION BY HASH (senior_id);
+
+DO $$ BEGIN
+  FOR i IN 0..15 LOOP
+    EXECUTE format(
+      'CREATE TABLE ops.call_queue_p%s PARTITION OF ops.call_queue
+       FOR VALUES WITH (MODULUS 16, REMAINDER %s)', i, i
+    );
+  END LOOP;
+END $$;
+```
+
+- 16 partitions sized for 10,000 seniors (~625 per partition). Power-of-two count so partitions can later be split without remodulus.
+- Partition key must appear in the primary key and in every unique constraint:
+  - Primary key on partitioned tables is `(senior_id, id)`, not `id`.
+  - Unique constraints all include `senior_id` as the leading column (e.g., `UNIQUE (senior_id, dedupe_key)`). This is a free strengthening because dedupe keys are already senior-scoped (`schedule:{senior_id}:{date}:...`).
+- Foreign keys between partitioned tables use compound references: `ops.call_attempts.(senior_id, queue_id)` references `ops.call_queue.(senior_id, id)`. Foreign keys from partitioned tables to non-partitioned tables (e.g., `ops.call_queue.senior_id references public.seniors(id)`) are simple FKs.
+- `call_attempts` and `post_call_jobs` use the same partitioning scheme so cross-table operations for a single senior stay within a single partition heap file. The dispatcher's hot path benefits from this locality.
+- `FOR UPDATE SKIP LOCKED` works correctly across partitioned tables and benefits from reduced lock manager contention (per-partition heap locks instead of one global heap).
+- One Postgres limitation worth noting explicitly: `UNIQUE (call_control_id)` cannot be enforced on a partitioned table without including the partition key. We get global uniqueness from Telnyx itself (one `call_control_id` per call) and additionally maintain a small unpartitioned `ops.call_control_index` lookup that maps `call_control_id → (senior_id, queue_id, attempt_id)` for fast inbound webhook routing without scanning all partitions.
+- Retrofitting partitioning after live queue rows exist requires a `pg_partman`-style table swap with downtime; doing it now is essentially free.
+
+Region awareness is a day-one decision. `call_attempts.region`, heartbeat Redis keys (`pipecat:instance:{region}:{instance_id}`), and capacity reservation Redis keys all include a region dimension. Today there is only one value (`us-east-1`), so no behavior changes, but the schema is forward-compatible with multi-region Pipecat fleets without a migration. See "Pipecat Horizontal Scaling → Region Awareness" for the runtime implications.
+
 ### `senior_call_schedules`
 
 Move scheduled calls out of `seniors.preferred_call_times.schedule` for runtime dispatch. Keep the JSON field only as legacy/profile input during migration.
@@ -487,11 +527,12 @@ Statuses:
 
 Indexes and constraints:
 
-- Unique `dedupe_key`.
+- Unique `(senior_id, dedupe_key)` — `senior_id` required as the leading column to satisfy hash partitioning.
 - `(status, priority_lane, earliest_at)`.
 - `(status, latest_at)`.
 - `(senior_id, status)`.
 - `(lease_expires_at)` for lease recovery.
+- Partitioned by `HASH (senior_id)` into 16 partitions; partition key is part of the primary key. See "Schema Layout And Partitioning" above.
 
 PHI rule:
 
@@ -510,6 +551,7 @@ Suggested columns:
 - `senior_id uuid not null references seniors(id)`
 - `attempt_number integer not null`
 - `provider text not null default 'telnyx'`
+- `region text not null default 'us-east-1'`
 - `call_control_id text`
 - `status text not null`
 - `reservation_id text`
@@ -525,10 +567,11 @@ Suggested columns:
 
 Indexes and constraints:
 
-- Unique `(queue_id, attempt_number)`.
-- Unique `call_control_id` where not null.
+- Unique `(senior_id, queue_id, attempt_number)` — `senior_id` required as leading column for hash partitioning. Global uniqueness on `(queue_id, attempt_number)` follows from `queue_id` being unique per senior.
+- `call_control_id` global uniqueness enforced via the unpartitioned `ops.call_control_index` lookup table (see "Schema Layout And Partitioning"), not via a direct unique constraint on this partitioned table.
 - `(status, created_at)`.
 - `(senior_id, created_at desc)`.
+- Partitioned by `HASH (senior_id)` into 16 partitions; partition key is part of the primary key.
 
 Add fields to support A/B migration analysis:
 
@@ -563,10 +606,13 @@ Suggested columns:
 
 Indexes and constraints:
 
-- Unique `dedupe_key`.
+- Unique `(senior_id, dedupe_key)` — `senior_id` required as leading column for hash partitioning.
 - `(status, priority, run_after)`.
 - `(lease_expires_at)`.
 - `(senior_id, created_at desc)`.
+- Partitioned by `HASH (senior_id)` into 16 partitions; partition key is part of the primary key.
+
+Implementation note: this schema describes the canonical metadata layout. The recommended production implementation is a durable workflow engine (Temporal Cloud or Inngest) with `post_call_jobs` retained as a metadata/audit table — not as the work queue itself. See "Post-Call Queue Plan → Recommended Implementation" below.
 
 Job types:
 
@@ -734,6 +780,14 @@ Later optimization:
 
 ## Pipecat Horizontal Scaling
 
+`PIPECAT_REQUIRE_REDIS=true` is the supported production posture from Phase 0, not a flag flipped on when we move to multiple replicas. Single-instance fallback paths are documented and tested, but flipping the flag in production is what removes the local-state branch from the active code path. Sequenced rollout:
+
+1. Provision multi-AZ Redis (Upstash regional pro, Redis Cloud HA, or ElastiCache cluster mode with automatic failover). BAA required because encrypted PHI shared-state payloads transit Redis.
+2. Audit every code path that today checks Redis and falls back to local memory. Plan inventory: WebSocket token claims, Telnyx event dedupe, media-stream start lock, call metadata reads, rate limits, prewarm/context cache. Each fallback must be replaced with a fail-closed error in production mode.
+3. Add a test that runs Pipecat with Redis unreachable and confirms `/health` reports unhealthy and `/ws` rejects new admissions.
+4. Flip `PIPECAT_REQUIRE_REDIS=true` in dev → staging → production, watching Sentry for surprise errors during the rollout.
+5. Update the on-call runbook: Redis unavailable now means all voice unavailable. The tradeoff is intentional — at scale, Redis uptime SLA matches Telnyx uptime SLA in operational importance.
+
 ### Instance Heartbeats
 
 Each Pipecat replica should publish:
@@ -814,6 +868,25 @@ Add an operational drain workflow:
 
 Current 7-second shutdown is not enough for production voice calls. For Railway deploys, we should avoid deploying/scaling down during peak windows until drain orchestration is implemented and verified.
 
+### Region Awareness
+
+The first 2,000 users are served from a single region. Multi-region Pipecat fleets are not deployed in this plan, but the code and data are designed to be region-aware from day one so that adding a second region later is a configuration change rather than a refactor.
+
+Day-one requirements:
+
+- `PIPECAT_REGION` env var is required on every Pipecat replica, defaulting to `us-east-1`. Plumb it through instance startup so heartbeats, reservations, and attempt records always carry a region.
+- Redis heartbeat key shape: `pipecat:instance:{region}:{instance_id}` (TTL 15s). Capacity reservation key shape: `pipecat:reservation:{region}:{reservation_id}` (TTL 2–5 minutes).
+- `ops.call_attempts.region text not null default 'us-east-1'` from the first migration. Same for any future operational table whose rows correspond to a specific call instance.
+- Dispatcher reads global capacity by summing across all regions today (no behavior change for one-region deploys). The same aggregation function naturally extends to "prefer the senior's region, spill to others" once `seniors.preferred_region` is populated.
+- `seniors.preferred_region text` nullable, defaulting `NULL` (meaning "any region"). Backfill from area code or timezone is a future task; schema readiness today is what matters.
+
+What we explicitly defer:
+
+- Actually deploying a Pipecat fleet in a second region. Cross-region DB latency (50–100ms per query on the hot call-start path) and cross-region Redis writes are real engineering problems that do not pay off at one-region 2,000-user scale.
+- Cross-region failover for the primary Postgres or Redis. Current single-region posture is acceptable until we measurably need geo-distribution for voice latency.
+
+The point of this section is that we should not have to migrate `call_attempts` to add a `region` column, redesign Redis key shapes, or reroute capacity reservation queries the day we decide to add a West Coast or international Pipecat fleet.
+
 ## Scheduled Auto Capacity
 
 Recommended schedule for common windows:
@@ -839,6 +912,21 @@ Implementation options:
 - Do not scale down based only on queue depth. Scale down only when active calls, pending reservations, and post-call critical backlog are low.
 
 ## Post-Call Queue Plan
+
+### Recommended Implementation: Durable Workflow Engine
+
+The post-call burst (hundreds of calls ending near each other, each kicking off analysis + memory extraction + notifications + snapshot rebuild) is the single highest-value place to use a durable workflow engine rather than a hand-rolled Postgres job table. Retry policy, backoff, dead-letter routing, per-job-type concurrency caps, observability, and idempotency are all first-class features of Temporal Cloud or Inngest — features we would otherwise spend weeks reimplementing on top of `post_call_jobs`.
+
+Recommended target: Temporal Cloud or Inngest.
+
+- Each job type (`analysis`, `memory_extraction`, `caregiver_notifications`, etc.) becomes a workflow definition.
+- `ops.post_call_jobs` is retained as a metadata/audit table — the system of record for "what work was enqueued for this call SID" — but the workflow engine owns lease, retry, dead-letter, and execution.
+- Per-workflow concurrency caps replace per-worker concurrency caps. Provider-specific concurrency (Anthropic, Gemini, ElevenLabs) is enforced at the workflow engine level.
+- Idempotency key is the `(call_sid, job_type)` pair, identical to the dedupe key on `post_call_jobs`.
+
+The Postgres-backed worker architecture described below remains a viable Plan B if the team prefers not to take on Temporal/Inngest as a dependency, but every operational concern in the lists below (lease/retry/dead-letter/per-job-type caps/observability/idempotency) has to be re-implemented in app code in that case.
+
+### Critical-Path Minimization
 
 The voice call teardown path should do only the minimum required work:
 
@@ -890,6 +978,21 @@ SLOs:
 - Memory/snapshot freshness: within 30 minutes.
 
 ## Database Scaling Plan
+
+### Schema And Cluster Isolation
+
+Operational tables (`ops.call_queue`, `ops.call_attempts`, `ops.post_call_jobs`, `ops.outbound_call_guards`, `ops.scheduler_shadow_comparisons`, `ops.call_control_index`) live under a dedicated Postgres schema from day one. Application-domain tables stay under `public.*`. This forces a clean code-level boundary: app code never writes a SQL join from `ops.call_queue` to `public.seniors`. Senior hydration for queued work happens through service calls or denormalized fields on the queue row itself.
+
+A static check (CI lint or runtime startup check) should fail if app code attempts a cross-schema join, so the boundary is enforced from Phase 1 rather than rediscovered during a future migration.
+
+The forward path is to split `ops.*` onto a dedicated operational Postgres cluster once Neon's write-throughput characteristics start to bound dispatch latency. Today, all schemas live in the same Neon project; tomorrow, only the operational-pool connection string changes.
+
+Suggested operational cluster characteristics when the split happens:
+
+- Provisioned IOPS suited to a write-heavy queue workload (unlike Neon's serverless model, which optimizes for storage-compute separation and is shaped around read-mostly app workloads).
+- BAA-covered managed Postgres: Crunchy Bridge, AWS RDS for Postgres, or Google Cloud SQL.
+- Read replica for dispatcher introspection queries ("what's queued for this senior?").
+- Connection pool tuned for the worker fleet, separate from the app/API pool.
 
 ### Connection Pooling
 
@@ -1458,11 +1561,14 @@ Tasks:
 - Add a documented scale target of 600 active calls for the first 2,000-user milestone.
 - Set public environments to `LOG_LEVEL=INFO`.
 - Verify Neon pooled URL usage.
+- Provision multi-AZ Redis (Upstash regional pro, Redis Cloud HA, or ElastiCache cluster mode) with BAA. Prerequisite for the `PIPECAT_REQUIRE_REDIS=true` rollout in Phase 4.
+- Audit existing Pipecat code paths that fall back to local memory when Redis is unavailable. Document the fallback inventory (WebSocket tokens, Telnyx event dedupe, stream-start lock, call metadata, rate limits, prewarm) and which paths must become fail-closed in scaled mode.
 - Add a config guard: if Pipecat replicas > 1 or `PIPECAT_REQUIRE_REDIS=true`, Redis failures fail readiness.
 - Add metrics for current scheduler cycle duration, plan size, success/fail counts, and Pipecat active calls.
 - Add migration flags with safe defaults.
 - Add PHI sentinel scan script for logs/tables touched by the migration.
 - Decide initial provider concurrency numbers for Deepgram, Anthropic/Gemini, ElevenLabs, and Telnyx.
+- Pick the workflow engine target for Phase 6 (Temporal Cloud, Inngest, or Postgres-backed Plan B) so Phase 6 implementation is unblocked.
 
 Acceptance:
 
@@ -1477,15 +1583,18 @@ Goal: create durable scheduling and idempotency primitives.
 
 Tasks:
 
-- Add `senior_call_schedules`.
-- Add `call_queue`.
-- Add `call_attempts`.
-- Add `post_call_jobs`.
-- Add `outbound_call_guards`.
-- Add optional shadow comparison/test-run tables.
-- Add unique/index changes for conversations, reminder deliveries, queue, attempts, and jobs.
+- Create the `ops` schema and place all new operational tables under it.
+- Add `public.senior_call_schedules` (stays in `public.*` because it shares a senior-profile concern with `public.seniors`).
+- Add `ops.call_queue` with `PARTITION BY HASH (senior_id)` into 16 partitions, primary key `(senior_id, id)`, unique constraint `(senior_id, dedupe_key)`.
+- Add `ops.call_attempts` with the same partitioning scheme, plus `region text not null default 'us-east-1'` column. Compound FK `(senior_id, queue_id)` to `ops.call_queue.(senior_id, id)`.
+- Add `ops.post_call_jobs` with the same partitioning scheme. If a workflow engine is chosen in Phase 0 (Temporal/Inngest), this becomes the metadata/audit table only.
+- Add `ops.outbound_call_guards`.
+- Add `ops.call_control_index` (unpartitioned) lookup mapping `call_control_id → (senior_id, queue_id, attempt_id)` for inbound webhook routing.
+- Add optional `ops.scheduler_shadow_comparisons` and test-run tables.
+- Add unique/index changes for conversations, reminder deliveries, queue, attempts, and jobs. Unique constraints on partitioned tables include `senior_id` as the leading column.
 - Add retention coverage for new tables.
 - Add migrations in root DB path and Pipecat migration path if both runtime paths need visibility.
+- Add a CI lint or runtime startup check that fails if app code attempts a SQL join between `ops.*` and `public.*`, so the schema boundary is enforced from this phase rather than discovered later.
 
 Acceptance:
 
@@ -1710,6 +1819,8 @@ These do not block starting the implementation, but they should be decided befor
 - Whether one outbound caller ID is acceptable or whether Telnyx should provide branded calling/number pool guidance.
 - Whether Redis is Railway Redis or Upstash for production scale.
 - Whether queue operational rows can be retained 90/180 days or need a shorter PHI-minimized retention policy.
+- Which durable workflow engine handles post-call jobs in production: Temporal Cloud, Inngest, or stay with the Postgres-backed worker pattern as Plan B. Decision drives Phase 6 implementation.
+- When to split `ops.*` onto a dedicated operational Postgres cluster, and which provider/tier (Crunchy Bridge, RDS, CloudSQL). Default: stay in the same Neon project until write throughput becomes a measurable bottleneck.
 
 ## Initial Engineering Checklist
 
@@ -1742,3 +1853,58 @@ The architecture is ready for 2,000 users when:
 - Logs and metrics remain PHI-safe under load.
 - Retention/export/delete/audit behavior covers new PHI-bearing tables and caches.
 - Provider contracts/quotas and BAAs are confirmed for every PHI path used in production.
+
+## Forward Path To 10,000 Users
+
+This plan delivers durable, multi-instance voice infrastructure capable of 600 concurrent active calls and 2,000 daily users. Scaling further — to roughly 10,000 daily users and 3,000 concurrent at peak — is past the design point of the architecture described above. It is not a "more replicas" exercise. Each of the assumptions below breaks before 10,000 users, and each requires its own design pass when the time comes.
+
+The current plan has been written to *avoid the worst kinds of rework* when 10,000 becomes the target, not to deliver 10,000 today. The intent is to make the eventual transition mechanical rather than a re-architecture.
+
+### What we've already done to make 10k cheaper
+
+Several decisions earlier in this plan were chosen specifically with the 10k transition in mind:
+
+- **`ops.*` schema isolation.** Moving operational tables to a dedicated Postgres later is a connection-string change, not a code refactor.
+- **Hash partitioning by `senior_id`.** 16 partitions hold ~625 seniors each at 10k. The partition key is also the natural shard key if we ever need to move from "one partitioned table" to "many physical tables across shards."
+- **`PIPECAT_REQUIRE_REDIS=true` from day one.** Removes the single-instance code path. Multi-region Redis later requires Redis Cluster, but application code already assumes Redis as the source of truth.
+- **Region-aware capacity heartbeats and reservations.** Adding a second Pipecat region later is a deploy and config change. The schema and Redis key shapes do not change.
+- **Workflow engine for post-call jobs.** Per-job-type concurrency caps, retry/backoff, and dead-letter are first-class features of Temporal/Inngest. Scaling job concurrency by 10x is a configuration knob, not new code.
+
+### What breaks first
+
+In order of how soon the wall hits as daily users grow past 2,000:
+
+1. **Outbound caller ID reputation.** Long before any code-level metric moves, a single Donna caller ID placing ~3,000 outbound calls in a 15-minute window triggers carrier spam analytics. Answer rate collapses silently. Resolving this is a vendor problem: Telnyx-managed number pool, STIR/SHAKEN attestation, branded calling, regional caller IDs, reputation monitoring. Coordinate with Telnyx before this becomes the bottleneck.
+2. **Provider concurrency quotas.** 3,000 concurrent calls means 3,000 concurrent Deepgram streams, 3,000 active Claude contexts, ~6,000 Director LLM RPS at the splits described in the architecture. Each provider's per-org quota becomes a hard ceiling. Plan: committed-tier contracts with Anthropic, Deepgram, ElevenLabs, Gemini, and OpenAI; multi-provider sharding with AI Gateway routing for STT and LLM; provider failover paths exercised in chaos tests.
+3. **Single Postgres write throughput.** Even with `FOR UPDATE SKIP LOCKED` and partitioning, one Postgres primary handles a fixed write rate. `ops.call_attempts`, `ops.post_call_jobs`, `audit_logs`, and `conversations` all spike simultaneously during burst windows. Plan: dedicated operational Postgres with provisioned IOPS for the `ops.*` schema; read replicas for context hydration; consider moving the `audit_logs` append path to S3/Parquet rather than a Postgres table at 10k volume.
+4. **Redis as a single point of failure.** Single-region Redis is acceptable for one Pipecat region. Multi-region voice requires Redis Cluster with cross-AZ failover, and capacity coherence becomes a consensus problem. Plan: Redis Cluster mode, capacity reservations consider Redis quorum, fallback path that leases through Postgres at higher latency if Redis is degraded.
+5. **Single-region voice latency.** US coast-to-coast users on a single Pipecat region accept ~80–100ms additional one-way audio latency. Tolerable but noticeable. International expansion (Spanish-language users on the West Coast, or non-US markets) makes this worse. Plan: deploy Pipecat in multiple regions, route on `seniors.preferred_region`, accept cross-region writes for shared state (Postgres + Redis primaries stay in one region; reads are local).
+6. **Caregiver notification throughput.** 10,000 daily notifications, bursty by call-end window. Resend (or any single email provider) starts throttling. Plan: notification service tier with batching, provider failover, and per-provider concurrency caps.
+7. **Cost.** Roughly 1.7M call-minutes per day at 10k. STT + TTS + LLM costs dominate infrastructure costs and start determining margin. Plan: committed-tier contracts on every minute-billed vendor; evaluate self-hosted STT (Whisper, or self-hosted Deepgram) or cheaper TTS for low-stakes utterances.
+
+### Architecture transitions between 2,000 and 10,000
+
+Roughly in the order they become necessary:
+
+| Transition | Driver | Approximate trigger |
+| --- | --- | --- |
+| Split `ops.*` to dedicated Postgres | Burst write throughput; pool exhaustion on Neon | ~3,000 daily users or first sustained alert on DB pool idle |
+| Pipecat second region | Audio latency complaints from West Coast or international users | Product signal, not capacity signal |
+| Telnyx managed number pool | Answer rate decline correlated with outbound volume | First measurable answer-rate drop |
+| Multi-provider sharding (STT/LLM) | Provider rate-limit alerts | First sustained provider 429s at peak |
+| Redis Cluster | Pipecat multi-region rollout or single-AZ Redis incident | Either trigger first |
+| Workflow engine concurrency cap increase | Post-call job backlog growing | 10x current per-job-type cap with no DB stress |
+| `audit_logs` archival to S3/Parquet | `audit_logs` write rate or storage cost | Storage-cost trigger before throughput trigger |
+
+### Product transitions
+
+Code and infrastructure are necessary but not sufficient at 10,000 users. Two product-level changes become structurally important:
+
+- **Schedule distribution.** Stop letting all users pick "9:00 AM." Offer scheduling bands ("morning: 8–9 AM, we'll pick a quiet minute"), use historical answer-rate data to suggest off-peak slots, and use deterministic jitter within the band to spread load. This is a product change that buys massive capacity headroom — possibly more than any single infrastructure change.
+- **Tiered call types.** Hard reminders (medication, appointments) remain time-sensitive. Companion check-ins become flexible within a multi-hour window. The lane reservation policy from the 2k plan extends naturally; the product change is exposing the flexibility to caregivers in the mobile app.
+
+### When to start the 10,000-user plan
+
+Not now. The 2,000-user architecture should run in production for at least 90 days with documented SLOs, real burst-window data, and a known cost profile before the 10,000-user plan starts. Most of the assumptions above (answer rate, p95 call duration, per-provider concurrency utilization) need measured production data to design against. Designing for 10,000 today, before 2,000 has shipped, repeats the same mistake as scaling `MAX_CONCURRENT_CALLS` instead of building the queue.
+
+The forward-compatible decisions in this plan (`ops.*` schema, partitioning, Redis-required, region-aware, workflow engine) are the parts that *would have been expensive to retrofit*. Everything else in the 10,000-user transition can wait for real production data.
