@@ -93,6 +93,16 @@ export function TimePickerField({
 
       {showPicker ? (
         <View className="mt-2 rounded-2xl border border-charcoal/10 bg-white overflow-hidden">
+          {Platform.OS === "ios" ? (
+            <Pressable
+              onPress={handleDone}
+              className="items-center py-3 border-b border-charcoal/10"
+              accessibilityRole="button"
+              accessibilityLabel="Done selecting time"
+            >
+              <Text className="text-[15px] font-semibold text-sage">Done</Text>
+            </Pressable>
+          ) : null}
           <DateTimePicker
             value={pickerValue}
             mode="time"
@@ -100,16 +110,6 @@ export function TimePickerField({
             minuteInterval={1}
             onChange={handlePickerChange}
           />
-          {Platform.OS === "ios" ? (
-            <Pressable
-              onPress={handleDone}
-              className="items-center py-3 border-t border-charcoal/10"
-              accessibilityRole="button"
-              accessibilityLabel="Done selecting time"
-            >
-              <Text className="text-[15px] font-semibold text-sage">Done</Text>
-            </Pressable>
-          ) : null}
         </View>
       ) : null}
     </View>

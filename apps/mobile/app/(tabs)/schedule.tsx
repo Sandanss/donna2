@@ -952,7 +952,9 @@ function ScheduleCallCard({
           onPress={onEdit}
           className="min-w-[44px] min-h-[44px] items-center justify-center"
           accessibilityRole="button"
-          accessibilityLabel={`${t("schedule.editCall")} ${displayTitle}`}
+          accessibilityLabel={t("schedule.editCallAccessibility", {
+            title: displayTitle,
+          })}
         >
           <Edit2 size={16} color={COLORS.muted} />
         </Pressable>

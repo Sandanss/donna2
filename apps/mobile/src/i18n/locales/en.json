@@ -1,6 +1,7 @@
 {
   "common": {
     "back": "Back",
+    "goBack": "Go back",
     "next": "Next",
     "continue": "Continue",
     "save": "Save Changes",
@@ -234,6 +235,7 @@
     "tapToAdd": "Tap + to add a call for {{name}}",
     "addCall": "Add Call",
     "editCall": "Edit Call",
+    "editCallAccessibility": "Edit {{title}}",
     "callTitle": "Call Title",
     "callTitlePlaceholder": "e.g., Daily Call, Morning Check-in",
     "frequency": "Frequency",

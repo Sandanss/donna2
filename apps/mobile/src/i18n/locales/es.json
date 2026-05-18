@@ -1,6 +1,7 @@
 {
   "common": {
     "back": "Volver",
+    "goBack": "Volver",
     "next": "Siguiente",
     "continue": "Continuar",
     "save": "Guardar Cambios",
@@ -234,6 +235,7 @@
     "tapToAdd": "Toca + para agregar una llamada para {{name}}",
     "addCall": "Agregar Llamada",
     "editCall": "Editar Llamada",
+    "editCallAccessibility": "Editar {{title}}",
     "callTitle": "Título de Llamada",
     "callTitlePlaceholder": "ej., Llamada Diaria, Control Matutino",
     "frequency": "Frecuencia",

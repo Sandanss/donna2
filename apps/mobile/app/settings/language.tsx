@@ -34,7 +34,7 @@ export default function LanguageSettingsScreen() {
           onPress={() => router.back()}
           className="flex-row items-center gap-2"
           accessibilityRole="button"
-          accessibilityLabel={t("common.back")}
+          accessibilityLabel={t("common.goBack")}
           style={{ minHeight: 48 }}
         >
           <ArrowLeft size={20} color={COLORS.charcoal} />
