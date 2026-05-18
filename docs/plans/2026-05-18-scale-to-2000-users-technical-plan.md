@@ -11,6 +11,7 @@ Donna can scale to 2,000 daily users, but the current architecture should not be
 The target architecture should change from "find due calls and fire them" to "materialize eligible calls into a durable queue, prioritize them, lease them, and dispatch only when global voice capacity is available." This plan introduces:
 
 - A normalized schedule table and durable `call_queue`.
+- A parallel migration path that runs beside the legacy scheduler until measured safe.
 - A capacity-aware dispatcher with priority lanes and Postgres leasing.
 - Redis-backed global Pipecat capacity heartbeats and slot reservations.
 - Scheduled pre-scaling around 15-minute calling windows.
@@ -112,19 +113,19 @@ Current deployment behavior:
 - Pipecat shutdown waits about 7 seconds for calls, but typical calls are minutes long.
 - Scaling down or deploying during active calls can interrupt seniors unless we add an explicit drain workflow.
 
-## Product Readiness Dependencies
+## Product Readiness Verification
 
-This scaling plan assumes the core product flows are reliable enough to scale. It does not replace the pilot feature backlog. Before or alongside scale work, the remaining product-critical features are:
+This scaling plan assumes the core product flows are reliable enough to scale. It does not replace product readiness work, and this section is not a claim that these features are missing. Treat it as a verification checklist before ramping traffic through the new scheduler:
 
-- Mobile login/signup and account recovery that work consistently with Clerk.
-- Mobile onboarding that creates caregiver, senior, schedule, and reminder data through Node APIs.
-- Reminder CRUD from mobile and web caregiver surfaces.
-- Reminder delivery and acknowledgement during real Pipecat/Telnyx calls.
-- Mobile schedule controls and manual call initiation.
-- Inbound known-senior calls and inbound onboarding calls.
-- Post-call analysis, summary, memory, notification, and observability flows that run reliably after live calls.
-- Mobile no-crash/no-dead-end pass for caregiver workflows.
-- Sensitive debug log cleanup before broader PHI-bearing traffic.
+- Mobile login/signup and account recovery work consistently with Clerk.
+- Mobile onboarding creates caregiver, senior, schedule, and reminder data through Node APIs.
+- Reminder CRUD from mobile and web caregiver surfaces persists the right encrypted PHI fields.
+- Reminder delivery and acknowledgement work during real Pipecat/Telnyx calls.
+- Mobile schedule controls and manual call initiation route through Node, not directly to Pipecat.
+- Inbound known-senior calls and inbound onboarding calls still work when Pipecat has multiple replicas.
+- Post-call analysis, summary, memory, notification, and observability flows run reliably after live calls.
+- Mobile caregiver workflows have no known crash/dead-end paths for scheduling, reminders, or call controls.
+- Sensitive debug logs are cleaned up before broader PHI-bearing traffic.
 
 Scaling work should start with durable scheduling, capacity, and multi-instance safety because those are structural. Product work and scale work can run in parallel as long as the queue schema and call initiation contracts are stabilized early.
 
@@ -283,6 +284,127 @@ Node -> Pipecat /telnyx/outbound -> Telnyx -> /telnyx/events -> /ws
                      throttled post-call workers
 ```
 
+## Parallel Migration Strategy
+
+This is an additive migration. The legacy scheduler remains available until the queue-based architecture has passed shadow tests, live canaries, and rollback drills. The new architecture should never require deleting legacy scheduler code to test it.
+
+### Migration Principles
+
+- Add new tables and workers beside the existing scheduler.
+- Keep one dial authority at a time for any senior/time window.
+- Run the new materializer and dispatcher in dry-run modes before they can create Telnyx calls.
+- Dual-write schedule data into normalized tables, but do not dual-dial calls.
+- Use stable senior cohorts so A/B results are comparable across multiple calls.
+- Keep rollback simple: flip the dial authority back to legacy and leave queue rows for analysis.
+- Keep all PHI-bearing data encrypted or referenced by ID only.
+
+### Runtime Modes
+
+| Mode | Legacy scheduler | Queue materializer | Queue dispatcher | Telnyx dialing authority | Purpose |
+| --- | --- | --- | --- | --- | --- |
+| `legacy_only` | Active | Off | Off | Legacy | Current behavior. |
+| `shadow_materialize` | Active | Writes queue rows | Off | Legacy | Prove queue generation matches legacy due-call decisions. |
+| `shadow_dispatch` | Active | Writes queue rows | Dry-run leases only | Legacy | Prove priority/capacity decisions without dialing. |
+| `canary_queue` | Active for control cohort | Active | Active for treatment cohort | Split by cohort | A/B live calls while preventing duplicate calls. |
+| `queue_primary` | Fallback only | Active | Active | Queue | New architecture is primary. |
+| `legacy_rollback` | Active | Optional shadow | Off | Legacy | Immediate rollback state. |
+
+### Feature Flags
+
+Suggested flags:
+
+- `CALL_ARCHITECTURE_MODE=legacy_only|shadow_materialize|shadow_dispatch|canary_queue|queue_primary|legacy_rollback`
+- `CALL_QUEUE_DUAL_WRITE_SCHEDULES=true|false`
+- `CALL_QUEUE_SHADOW_MATERIALIZE=true|false`
+- `CALL_QUEUE_SHADOW_DISPATCH=true|false`
+- `CALL_QUEUE_CANARY_PERCENT=0`
+- `CALL_QUEUE_COHORT_ALLOWLIST=senior_id,...`
+- `CALL_QUEUE_COHORT_BLOCKLIST=senior_id,...`
+- `CALL_QUEUE_ENABLED_CALL_TYPES=manual,reminder,schedule,welfare`
+- `CALL_QUEUE_ALLOW_REAL_DIAL=false`
+- `CALL_QUEUE_REQUIRE_DIAL_GUARD=true`
+- `CALL_QUEUE_COMPARE_WITH_LEGACY=true`
+
+Default all flags to legacy-safe values. `CALL_QUEUE_ALLOW_REAL_DIAL` should be false unless `CALL_ARCHITECTURE_MODE` is `canary_queue` or `queue_primary`.
+
+### Dial Authority And Double-Call Guard
+
+The biggest migration risk is accidentally calling the same senior twice. Add a durable guard before either scheduler can initiate a call.
+
+Suggested `outbound_call_guards` table:
+
+- `id uuid primary key`
+- `senior_id uuid not null`
+- `guard_key text not null`
+- `call_type text not null`
+- `architecture text not null`
+- `queue_id uuid`
+- `legacy_dedup_key text`
+- `target_at timestamp not null`
+- `expires_at timestamp not null`
+- `call_control_id text`
+- `status text not null`
+- `created_at timestamp default now()`
+- `updated_at timestamp default now()`
+
+Constraints and indexes:
+
+- Unique `guard_key` while active.
+- `(senior_id, status, expires_at)`.
+- `(expires_at)` for cleanup.
+
+Guard key examples:
+
+- schedule call: `schedule:{senior_id}:{local_date}:{schedule_item_id_or_time}`
+- reminder call: `reminder:{reminder_id}:{normalized_scheduled_for}`
+- welfare call: `welfare:{senior_id}:{local_date}`
+- manual call: `manual:{senior_id}:{request_id}`
+
+Rule:
+
+- Legacy and queue paths must both acquire the same guard before dialing.
+- If the guard already exists, the second path records `suppressed_duplicate` and does not call Telnyx.
+- Guard acquisition should happen in Postgres for durability. Redis can mirror it for fast observability, but Redis alone is not enough.
+
+### Shadow Comparison
+
+During `shadow_materialize` and `shadow_dispatch`, collect comparison records without dialing from the queue path:
+
+- seniors legacy would call
+- seniors queue would call
+- call type and priority lane
+- target time and dispatch time
+- skip reason
+- paused/inactive/cooldown decisions
+- pending reminders included
+- capacity decision
+- estimated queue lag
+
+Add a lightweight `scheduler_shadow_comparisons` table or structured metrics. Do not store names, phone numbers, reminder titles, or reminder descriptions.
+
+Pass criteria before live canary:
+
+- At least 7 days of shadow windows.
+- 99 percent or better agreement for due scheduled calls after expected intentional differences are excluded.
+- 100 percent agreement on paused/inactive senior suppression.
+- 100 percent duplicate-call suppression in synthetic race tests.
+- Queue-generated reminder calls match legacy reminder eligibility for the same scheduled instances.
+
+### Cohort Assignment
+
+Use stable cohorts:
+
+- Control: legacy scheduler.
+- Treatment: queue scheduler.
+
+Assignment options:
+
+- Explicit allowlist for first test seniors.
+- Stable hash of `senior_id` for percent rollout.
+- Separate flags by call type, because manual calls, reminders, scheduled check-ins, and welfare calls have different risk.
+
+Do not A/B the same senior across architectures during the same testing period. Senior-level assignment keeps post-call outcomes, reminder retries, and caregiver experience easier to compare.
+
 ## Data Model Changes
 
 ### `senior_call_schedules`
@@ -407,6 +529,13 @@ Indexes and constraints:
 - Unique `call_control_id` where not null.
 - `(status, created_at)`.
 - `(senior_id, created_at desc)`.
+
+Add fields to support A/B migration analysis:
+
+- `architecture text not null` such as `legacy` or `queue`.
+- `cohort text` such as `control`, `treatment`, or `shadow`.
+- `test_run_id text`.
+- `dispatch_decision_id uuid`.
 
 ### `post_call_jobs`
 
@@ -905,6 +1034,46 @@ Logging:
 - `LOG_LEVEL=INFO` in all public Railway environments.
 - Load tests and staging smoke tests should include a log review for PHI leakage.
 
+### PHI Protection Test Gates
+
+PHI protection has to be tested throughout the migration, not only before production rollout.
+
+Use synthetic PHI sentinels in dev/staging tests:
+
+- senior name: `Donna Phi Sentinel`
+- phone: a controlled test number only
+- reminder title: `PHI_SENTINEL_REMINDER_DO_NOT_LOG`
+- caregiver note: `PHI_SENTINEL_NOTE_DO_NOT_LOG`
+- medical note: `PHI_SENTINEL_MEDICAL_DO_NOT_LOG`
+- transcript phrase: `PHI_SENTINEL_TRANSCRIPT_DO_NOT_LOG`
+
+For every phase that introduces a new table, cache, queue, worker, log path, or dashboard, run tests that assert:
+
+- Sentinel strings do not appear in application logs.
+- Sentinel strings do not appear in Sentry/event payloads.
+- Sentinel strings do not appear in Redis raw values except inside encrypted shared-state blobs.
+- Sentinel strings do not appear in plaintext queue/job/test-run operational tables.
+- PHI-bearing values are stored only in encrypted companion columns or encrypted payload fields.
+- Authorized export paths can retrieve/decrypt new PHI-bearing data where required.
+- Delete/retention paths cover new tables and encrypted payloads.
+- Audit logs are created for PHI reads/hydration/export/delete paths and do not store raw PHI in metadata.
+
+This should become a repeatable test command or CI job before queue canaries. The test should fail on any raw sentinel match outside explicitly allowed encrypted columns.
+
+### PHI Data Classification For New Architecture
+
+| Surface | PHI allowed? | Storage rule | Retention/export/delete requirement |
+| --- | --- | --- | --- |
+| `senior_call_schedules` | Only encrypted context notes | IDs/times/plain operational fields; context encrypted | Covered by senior export/delete and schedule retention |
+| `call_queue` | No raw PHI | IDs, lane, status, timestamps only | Operational retention and senior delete cleanup |
+| `call_attempts` | No raw PHI | IDs, provider IDs, outcomes only | Operational retention and senior delete cleanup |
+| `outbound_call_guards` | No raw PHI | IDs, guard keys, status only | Short retention and senior delete cleanup |
+| `scheduler_shadow_comparisons` | No raw PHI | IDs, decisions, skip reasons only | Short retention; no transcripts/reminder text |
+| `post_call_jobs` | Yes, only if necessary | Prefer IDs; encrypt any payload body | Export/delete/retention/legal hold coverage |
+| Redis call metadata | Yes | Encrypted shared-state payload, short TTL | TTL plus incident runbook |
+| Redis locks/heartbeats | No raw PHI | IDs and counters only | TTL |
+| Logs/metrics/dashboards | No raw PHI | IDs/counts/status only; hash where possible | Log retention and review |
+
 ## Observability And Alerts
 
 Add metrics:
@@ -948,6 +1117,336 @@ Dashboard views:
 - Post-call backlog.
 - Database health.
 
+## A/B And Multi-Call Test Plan
+
+The migration needs two kinds of testing:
+
+1. Exact shadow comparison, where legacy is the only dialer and the queue path predicts what it would have done.
+2. Live A/B, where control seniors use legacy and treatment seniors use the queue architecture.
+
+Shadow comparison proves scheduling equivalence. Live A/B proves real call setup, Telnyx events, Pipecat routing, post-call behavior, and caregiver outcomes.
+
+### Test Data Rules
+
+- Use synthetic seniors and controlled test phone numbers for early live calls.
+- Do not use real senior PHI in fixtures, screenshots, logs, or synthetic transcripts.
+- Use non-PHI reminder titles such as "test reminder A" for automated test calls.
+- Keep test caregiver notes synthetic and minimal.
+- Mark test accounts with `test_run_id` or an equivalent metadata field so retention and cleanup are explicit.
+- Never record or publish raw call audio/transcripts from test calls in logs or CI output.
+
+### A/B Assignment
+
+Use stable senior-level assignment:
+
+- Control cohort: legacy scheduler and legacy post-call path.
+- Treatment cohort: queue materializer, queue dispatcher, Redis capacity, and new post-call queue where enabled.
+
+Do not alternate architectures per call for the same senior during the same test. Per-call randomization makes reminder retry state, cooldowns, caregiver notifications, and post-call memories hard to interpret. Senior-level cohorts are cleaner and safer.
+
+### Test Run Tracking
+
+Add a test-run identifier to every migration run:
+
+- `test_run_id`
+- `architecture`
+- `cohort`
+- `call_type`
+- `senior_id`
+- `queue_id`
+- `legacy_dedup_key`
+- `call_control_id`
+- `scheduled_for`
+- `dial_started_at`
+- `answered_at`
+- `media_started_at`
+- `ended_at`
+- `outcome`
+- `failure_class`
+
+This can live in `call_attempts`, a dedicated `scheduler_test_runs` table, or both. Keep it operational and ID-based; do not store PHI-bearing call content in test-run tables.
+
+### Stage 1: Shadow Materialization
+
+Goal: prove the queue creates the same eligible work as the legacy scheduler without dialing any queue calls.
+
+Setup:
+
+- `CALL_ARCHITECTURE_MODE=shadow_materialize`
+- `CALL_QUEUE_ALLOW_REAL_DIAL=false`
+- Legacy remains the only dial authority.
+
+Run:
+
+- At least 7 calendar days.
+- Include morning, afternoon, and evening windows.
+- Include scheduled calls, reminders, recurring reminders, paused caregivers, inactive seniors, and welfare eligibility.
+
+Compare:
+
+- Legacy due calls versus queue rows.
+- Legacy skip reasons versus queue skip reasons.
+- Reminder instance normalization.
+- Schedule timezone handling.
+- Paused/inactive suppression.
+- Cooldown behavior.
+
+Pass criteria:
+
+- 99 percent or better agreement on scheduled-call eligibility after known intentional differences are excluded.
+- 100 percent agreement on paused caregiver suppression.
+- 100 percent agreement on inactive senior suppression.
+- 100 percent agreement on reminder instance dedupe.
+- No PHI in scheduler comparison logs.
+
+### Stage 2: Shadow Dispatch
+
+Goal: prove leasing, priority lanes, and capacity math without dialing from the queue.
+
+Setup:
+
+- `CALL_ARCHITECTURE_MODE=shadow_dispatch`
+- Queue dispatcher can lease dry-run rows.
+- Legacy remains the only dial authority.
+
+Run:
+
+- Simulate Pipecat capacity levels: 0, 10, 50, 150, 600.
+- Simulate lane pressure: manual, hard reminders, reminder retries, scheduled check-ins, welfare.
+- Run at least one 667-call/15-minute synthetic window.
+
+Compare:
+
+- Which queue rows would dispatch.
+- Dispatch order by lane.
+- Estimated queue lag.
+- Capacity reservations that would be made.
+- Rows suppressed by cooldown, pause, inactive senior, or existing guard.
+
+Pass criteria:
+
+- Manual and hard-reminder lanes preserve protected capacity.
+- Queue lag stays within lane SLOs under 600 mocked slots.
+- Multiple dispatcher workers produce no duplicate leases.
+- Expired leases are recovered by the reconciler.
+- No real Telnyx calls are created by the queue path.
+
+### Stage 3: Paired Synthetic Live Calls
+
+Goal: compare real call behavior across architectures without involving real seniors.
+
+Setup:
+
+- Use controlled test phone numbers answered by the team or an automated test endpoint.
+- Create matched synthetic seniors:
+  - 10 control seniors on legacy.
+  - 10 treatment seniors on queue.
+- Use equivalent schedules, reminders, timezones, and call settings.
+- Keep all test content synthetic and non-PHI.
+
+Minimum live-call matrix:
+
+| Scenario | Control calls | Treatment calls | Required checks |
+| --- | ---: | ---: | --- |
+| Manual call now | 5 | 5 | exactly one dial, conversation created, post-call complete |
+| Scheduled check-in | 10 | 10 | window timing, no duplicate dial, context loaded |
+| One-time reminder | 10 | 10 | delivery row created once, acknowledgement persists |
+| Recurring reminder | 10 | 10 | normalized scheduled instance, no duplicate delivery |
+| No answer/busy | 5 | 5 | reservation released, retry/defer state correct |
+| Inbound known senior | 5 | 5 | metadata visible across replicas, ws token consumed once |
+| Inbound onboarding | 5 | 5 | prospect path unaffected |
+| Post-call burst | 20 | 20 | job backlog drains inside SLO |
+
+Pass criteria:
+
+- 0 duplicate outbound calls.
+- 0 duplicate `reminder_deliveries` for the same reminder instance.
+- 0 duplicate conversation rows for one `call_control_id`.
+- 0 WebSocket token replays accepted.
+- 0 duplicate Telnyx stream starts.
+- 95 percent or better successful media start for answered test calls.
+- Post-call critical jobs meet SLOs.
+- No PHI-bearing logs.
+
+### Stage 4: Small Live Canary
+
+Goal: test with real operational conditions while limiting blast radius.
+
+Setup:
+
+- Start with allowlisted internal/test seniors or consenting pilot users.
+- `CALL_ARCHITECTURE_MODE=canary_queue`
+- `CALL_QUEUE_CANARY_PERCENT=0`
+- Use `CALL_QUEUE_COHORT_ALLOWLIST`.
+
+Run:
+
+- 5 treatment seniors for 2 days.
+- 10 treatment seniors for 2 days.
+- 25 treatment seniors for 3 days.
+- Include at least one morning, afternoon, and evening window.
+
+Compare to control:
+
+- call setup success rate
+- answer-to-media-start latency
+- queue lag
+- duplicate suppression count
+- reminder acknowledgement rate
+- post-call summary latency
+- caregiver notification success
+- subjective call quality from internal review where available
+
+Pass criteria:
+
+- No duplicate calls.
+- Treatment call setup success is not worse than control by more than 1 percentage point.
+- Treatment reminder delivery correctness is not worse than control.
+- p95 queue lag stays below:
+  - hard reminders: 3 minutes
+  - scheduled check-ins: 10 minutes
+  - welfare: 60 minutes
+- No unresolved P0/P1 incidents.
+
+### Stage 5: Window Load Canary
+
+Goal: prove burst behavior under realistic window load.
+
+Run:
+
+- 50 treatment seniors in one 15-minute window.
+- 100 treatment seniors in one 15-minute window.
+- 250 treatment seniors in one 15-minute window.
+- 600 treatment seniors only after provider contracts and mocked-load tests pass.
+
+For each window:
+
+- Pre-materialize queue rows.
+- Prewarm context.
+- Scale Pipecat to target replicas.
+- Verify Redis heartbeats before dispatch.
+- Run legacy control cohort in the same broad time period, but not on the same seniors.
+- Review queue, provider, DB, and post-call dashboards immediately after the window.
+
+Pass criteria:
+
+- Capacity estimator predicts required replicas within 10 percent.
+- No scale-down while calls are active.
+- DB pool idle stays above 10 percent.
+- Redis remains available and below command/memory thresholds.
+- Provider rate-limit errors stay below alert thresholds.
+- Post-call backlog returns to normal within 30 minutes for non-critical jobs.
+
+### Rollback Gates
+
+Immediately disable queue dialing and return to legacy if any of these occur:
+
+- Any duplicate call to the same senior for the same schedule/reminder guard key.
+- Any accepted WebSocket token replay.
+- Any duplicate Telnyx media stream start for one call.
+- Redis unavailable while scaled mode is enabled.
+- Queue dispatcher creates real calls while not in `canary_queue` or `queue_primary`.
+- Treatment call setup success drops more than 2 percentage points below control.
+- Hard-reminder queue lag exceeds 5 minutes for more than 2 percent of reminders.
+- DB connection exhaustion or sustained pool idle below 5 percent.
+- PHI appears in logs, metrics, fixtures, screenshots, or CI output.
+
+Rollback action:
+
+1. Set `CALL_ARCHITECTURE_MODE=legacy_rollback`.
+2. Set `CALL_QUEUE_ALLOW_REAL_DIAL=false`.
+3. Stop queue dispatcher workers.
+4. Keep materializer in shadow mode only if it is not contributing to the incident.
+5. Preserve queue rows, attempts, and guards for analysis.
+6. Run duplicate-call and reminder-delivery reconciliation before re-enabling queue canaries.
+
+## Continuous Concurrency Test Cadence
+
+Do not wait until the full architecture exists to test concurrency. Each piece should ship with targeted concurrency tests before the next piece builds on it.
+
+### Concurrency Ladder
+
+Run each relevant component at these levels as soon as it exists:
+
+| Level | Purpose | Example target |
+| --- | --- | --- |
+| 1 | correctness | one senior, one schedule, one call |
+| 10 | basic parallelism | 10 seniors due in same minute |
+| 50 | first realistic burst | 50 due calls, 4 dispatcher workers |
+| 100 | small window canary | 100 due calls, 4-8 workers |
+| 250 | meaningful stress | 250 due calls, Redis locks, DB pool monitoring |
+| 600 | first 2,000-user target | 667 queued calls in 15 minutes, 600 active capacity |
+| 900 | headroom target | heavier single-window scenario |
+
+Every level should record:
+
+- duplicate queue rows
+- duplicate guards
+- duplicate call attempts
+- duplicate Telnyx stream starts
+- queue lease conflicts
+- Redis lock failures
+- DB pool usage
+- slow query count
+- queue lag by lane
+- post-call backlog age
+- PHI sentinel scan results
+
+### Component-Level Concurrency Tests
+
+Build these tests incrementally:
+
+- Schedule normalization:
+  - Run concurrent schedule writes for the same senior.
+  - Assert one normalized active schedule per source schedule item.
+  - Assert encrypted context notes do not leak to plaintext columns or logs.
+- Queue materializer:
+  - Run multiple materializer workers for the same window.
+  - Assert unique `dedupe_key` prevents duplicate queue rows.
+  - Assert paused/inactive seniors never get queued.
+- Guard acquisition:
+  - Race legacy and queue dialers against the same guard key.
+  - Assert only one path receives the right to dial.
+  - Assert losing path records `suppressed_duplicate`.
+- Dispatcher leasing:
+  - Run 4, 8, and 16 dispatcher workers with `FOR UPDATE SKIP LOCKED`.
+  - Assert every queue row is leased at most once per lease period.
+  - Assert expired leases are recovered.
+- Redis coordination:
+  - Race duplicate Telnyx event IDs across simulated replicas.
+  - Race duplicate stream-start attempts for one `call_control_id`.
+  - Race duplicate WebSocket token consumption.
+  - Assert fail-closed behavior when Redis is unavailable in scaled mode.
+- Capacity reservation:
+  - Dispatch against changing fake Pipecat heartbeat capacity.
+  - Assert reservations never exceed available lane capacity.
+  - Assert stale reservations expire and are reconciled.
+- Pipecat multi-instance:
+  - Run at least two Pipecat processes against shared Redis in dev/staging.
+  - Route webhook and WebSocket steps to different replicas.
+  - Assert call metadata and token consumption still work.
+- Post-call jobs:
+  - Enqueue 50, 100, 250, and 600 call completions with provider stubs.
+  - Assert worker concurrency caps hold.
+  - Assert critical jobs complete before non-critical jobs.
+  - Assert encrypted payloads and retention coverage.
+- End-to-end windows:
+  - Run 50, 100, 250, and 600 queued test calls through mocked providers.
+  - Run smaller live Telnyx windows with controlled test numbers.
+  - Assert no PHI sentinels in logs after each run.
+
+### Required Test Types Per Pull Request
+
+Every implementation PR in this migration should include at least one focused test from each relevant category:
+
+- Unit test for pure scheduling/capacity/priority logic.
+- Database integration test for idempotency, leasing, or guard constraints.
+- Concurrency test for the shared state being introduced.
+- PHI sentinel test for any new table/cache/log/dashboard path.
+- Rollback or failure-mode test if the PR changes dial authority, Redis dependency, or post-call processing.
+
+Small PRs can use small test sizes, but the test category should appear immediately. Larger synthetic load runs can remain nightly/manual until they are stable enough for CI.
+
 ## Implementation Phases
 
 ### Phase 0: Baseline And Guardrails
@@ -961,12 +1460,16 @@ Tasks:
 - Verify Neon pooled URL usage.
 - Add a config guard: if Pipecat replicas > 1 or `PIPECAT_REQUIRE_REDIS=true`, Redis failures fail readiness.
 - Add metrics for current scheduler cycle duration, plan size, success/fail counts, and Pipecat active calls.
+- Add migration flags with safe defaults.
+- Add PHI sentinel scan script for logs/tables touched by the migration.
 - Decide initial provider concurrency numbers for Deepgram, Anthropic/Gemini, ElevenLabs, and Telnyx.
 
 Acceptance:
 
 - We can see current call demand, active calls, and scheduler cycle duration in dev/staging.
 - Scaled mode cannot accidentally run without Redis.
+- Queue dialing cannot be enabled accidentally.
+- PHI sentinel scan passes against current legacy test calls.
 
 ### Phase 1: Database Schema
 
@@ -978,6 +1481,8 @@ Tasks:
 - Add `call_queue`.
 - Add `call_attempts`.
 - Add `post_call_jobs`.
+- Add `outbound_call_guards`.
+- Add optional shadow comparison/test-run tables.
 - Add unique/index changes for conversations, reminder deliveries, queue, attempts, and jobs.
 - Add retention coverage for new tables.
 - Add migrations in root DB path and Pipecat migration path if both runtime paths need visibility.
@@ -987,6 +1492,8 @@ Acceptance:
 - Migrations apply without table locks on production-sized data.
 - Existing scheduler still runs while new tables are dark.
 - Tests cover unique dedupe behavior.
+- PHI sentinel tests prove queue/attempt/guard/test-run tables do not store raw PHI.
+- Retention/delete/export coverage is defined for each new PHI-bearing or senior-linked table.
 
 ### Phase 2: Schedule Normalization And Materialization
 
@@ -999,6 +1506,7 @@ Tasks:
 - Build materializer worker.
 - Materialize 15-minute windows with deterministic jitter.
 - Materialize reminders into hard-reminder and retry lanes.
+- Run `shadow_materialize` with legacy as the only dialer.
 - Keep old scheduler as fallback behind feature flag.
 
 Acceptance:
@@ -1006,6 +1514,9 @@ Acceptance:
 - 2,000 seniors can be materialized for a day quickly and idempotently.
 - Re-running materializer creates no duplicate queue entries.
 - Paused/inactive seniors are excluded or cancelled.
+- Shadow comparison meets Stage 1 pass criteria.
+- Concurrent materializer tests pass at 10, 50, and 100 due calls before live canary work starts.
+- PHI sentinel schedule context remains encrypted.
 
 ### Phase 3: Capacity-Aware Dispatcher
 
@@ -1019,6 +1530,8 @@ Tasks:
 - Pass `queue_id` and `reservation_id` through Node -> Pipecat outbound request.
 - Persist `call_attempts`.
 - Add reconciler for expired leases/reservations.
+- Implement guard acquisition shared by legacy and queue dialers.
+- Run `shadow_dispatch` with no queue Telnyx calls.
 - Feature flag dispatcher by environment.
 
 Acceptance:
@@ -1026,6 +1539,10 @@ Acceptance:
 - Multiple dispatcher instances can run without duplicate calls.
 - Manual lane can bypass lower-priority backlog.
 - Queue lag remains bounded in mocked 667-call/15-minute test.
+- Shadow dispatch meets Stage 2 pass criteria.
+- Guard race tests pass with legacy and queue dialers contending for the same call.
+- Dispatcher concurrency tests pass at 50, 100, and 250 queue rows before treatment live calls.
+- PHI sentinel scan passes after dry-run dispatch logs.
 
 ### Phase 4: Pipecat Multi-Instance Hardening
 
@@ -1048,8 +1565,29 @@ Acceptance:
 - Duplicate WebSocket token use is rejected across replicas.
 - Stream start happens once per call.
 - Draining replica gets no new reservations.
+- Redis outage tests prove fail-closed behavior in scaled mode.
+- Two-replica dev/staging tests route webhook and WebSocket paths to different instances successfully.
+- PHI sentinel metadata remains encrypted in Redis and absent from logs.
 
-### Phase 5: Post-Call Queue
+### Phase 5: Paired Synthetic Live A/B
+
+Goal: prove the new architecture with real Telnyx/Pipecat calls before pilot traffic.
+
+Tasks:
+
+- Create matched synthetic control/treatment seniors.
+- Run the Stage 3 live-call matrix.
+- Verify reminder delivery, post-call, Redis, and DB behavior.
+- Run duplicate-call reconciliation after each batch.
+- Review logs for PHI leakage.
+
+Acceptance:
+
+- Stage 3 pass criteria met.
+- Rollback path tested at least once.
+- PHI sentinel scan passes across Node logs, Pipecat logs, Redis, queue tables, and post-call tables.
+
+### Phase 6: Post-Call Queue
 
 Goal: prevent post-call stampedes after burst windows.
 
@@ -1067,8 +1605,28 @@ Acceptance:
 - 600 mocked call completions do not exhaust DB pools.
 - Critical completion/reminder jobs meet SLOs.
 - Analysis/memory backlog drains under configured limits.
+- Post-call concurrency tests pass at 50, 100, 250, and 600 completions with provider stubs.
+- Encrypted job payload, export/delete, retention, and audit tests pass.
 
-### Phase 6: Scheduled Auto Capacity
+### Phase 7: Small Live Canary
+
+Goal: run queue dialing for a small real cohort while legacy continues for the control cohort.
+
+Tasks:
+
+- Enable `canary_queue` for allowlisted seniors only.
+- Run 5, 10, then 25 treatment seniors.
+- Compare treatment metrics against legacy control.
+- Keep queue dispatcher rollback-ready during every window.
+
+Acceptance:
+
+- Stage 4 pass criteria met.
+- No duplicate-call guard violations.
+- No PHI log findings.
+- Treatment metrics are reviewed against control after every ramp step before expanding the cohort.
+
+### Phase 8: Scheduled Auto Capacity
 
 Goal: provision capacity before known windows and safely scale down after.
 
@@ -1085,8 +1643,10 @@ Acceptance:
 - Pipecat is at target capacity 10 minutes before a test window.
 - No scale-down happens while calls are active.
 - Operators can see and override capacity state.
+- Capacity/reservation concurrency tests pass at 250, 600, and 900 simulated slots.
+- PHI sentinel scan confirms autoscaler logs contain no senior names, phone numbers, reminder text, or medical context.
 
-### Phase 7: Load Testing And Rollout
+### Phase 9: Load Testing And Rollout
 
 Goal: prove the architecture before real seniors depend on it.
 
@@ -1103,6 +1663,7 @@ Tests:
 - Provider rate-limit simulations.
 - Deploy/drain during active calls.
 - PHI log review after load test.
+- Live window canaries at 50, 100, 250, then 600 treatment seniors.
 
 Rollout:
 
