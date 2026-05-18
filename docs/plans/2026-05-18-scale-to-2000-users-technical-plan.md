@@ -961,9 +961,9 @@ Single biggest discipline: **Phase 0 is not optional.** Rev 1 let the team jump 
 
 # 8. Forward Path To 10,000 Users
 
-This plan delivers durable, multi-instance voice infrastructure capable of 600 concurrent active calls and 2,000 daily users. Scaling further — to roughly 10,000 daily users and 3,000 concurrent at peak — is past the design point of the architecture described above. It is not a "more replicas" exercise. Each of the assumptions below breaks before 10,000 users.
+This plan delivers durable, multi-instance voice infrastructure capable of 600 concurrent active calls and 2,000 daily users. Scaling further — to roughly 10,000 daily users and 3,000 concurrent at peak — is past the original design point of the architecture, but **rev 2 itself is the in-flight 10k-shaped iteration** of the 2k plan: the move from "find due calls and fire" to durable queue + capacity-aware dispatcher + workflow engine + numeric SLOs + ops-schema isolation + senior-id hash partitioning is a 10k-shaped architecture executed against a 2k milestone.
 
-10k design work is being prototyped in parallel with the 2,000-user delivery. This section is not a deferred plan; it is the operating record of what 10k infrastructure decisions are forward-compatible with rev 2, what breaks first when daily users grow past 2,000, and what transitions are being staged in parallel. Specific in-flight 10k prototypes are tracked in `docs/plans/` and linked here as they land.
+This section is not a deferred future plan and not a catalog of separate side-environment prototypes. It is the operating record of which 10k transitions are already addressed by rev 2 work items, which require additional work that is not yet in rev 2, and the triggers that determine when each transition starts. Refinements to this material land in rev 2 directly, not in parallel docs.
 
 ## 8.1 What rev 2 already does for 10k
 
@@ -990,17 +990,19 @@ In order of how soon the wall hits:
 
 ## 8.3 Transitions between 2,000 and 10,000
 
-| Transition | Driver | Trigger | Parallel work status |
-| --- | --- | --- | --- |
-| Split `ops.*` to dedicated operational Postgres | Burst write throughput; DB pool exhaustion | ~3,000 daily users or sustained §1.3 DB pool idle alert | TBD — link prototype doc when started |
-| Pipecat second region | Audio latency complaints from West Coast / international users | Product signal, not capacity signal | TBD |
-| Telnyx managed number pool | Answer rate decline correlated with outbound volume | First measurable drop below §1.3 80%-of-baseline target | TBD |
-| Multi-provider sharding (STT/LLM) | Provider rate-limit alerts at peak | First sustained provider 429s | TBD |
-| Redis Cluster | Pipecat multi-region rollout or single-AZ Redis incident | Either trigger first | TBD |
-| Workflow engine concurrency cap increase | Post-call job backlog growing | 10x current per-job-type cap with no DB stress | TBD |
-| `audit_logs` archival to S3/Parquet | `audit_logs` write rate or storage cost | Storage-cost trigger before throughput trigger | TBD |
+For each transition, "Status in rev 2" records what is already addressed inside this plan and what is explicitly not. The trigger column records the SLO or product signal that escalates the row from "scheduled to be addressed" to "active work item."
 
-The "Parallel work status" column is intentionally TBD here so this section stays the operating record. As 10k prototypes land in `docs/plans/`, those rows get linked and updated.
+| Transition | Driver | Trigger to escalate | Status in rev 2 |
+| --- | --- | --- | --- |
+| Split `ops.*` to dedicated operational Postgres | Burst write throughput; DB pool exhaustion | Sustained §1.3 DB-pool-idle alert during burst, or ~3,000 daily users | Forward-compat complete (§2.7). Trigger and target tier specified in §6 Open Decisions. Migration is a connection-string change, no SQL rewrites. |
+| Pipecat second region | Audio latency for West Coast / international users | Product signal, not capacity signal | Schema and Redis key shapes ready (`call_attempts.region`, region-keyed heartbeats and reservations, §2.7). Actual multi-region deploy explicitly out of scope per §1.7. |
+| Telnyx managed number pool / caller-ID strategy | Answer-rate decline correlated with outbound volume | First measurable drop below §1.3 80%-of-baseline target | Strategy decision is Phase 0 §4. Canary validation is Phase 5 §3 with answer-rate gate. Number-pool integration code not yet in rev 2. |
+| Multi-provider sharding (STT/LLM via AI Gateway) | Provider rate-limit alerts at peak | First sustained provider 429s | Per-provider concurrency caps tied to Phase 0 measured peaks, applied in Phase 6 §5. Failover routing across providers (e.g., Deepgram + AssemblyAI) not yet in rev 2 — additional work. |
+| Redis Cluster (HA / multi-region) | Pipecat multi-region rollout or single-AZ Redis incident | Either trigger first | Required-mode (`PIPECAT_REQUIRE_REDIS=true`) and fail-closed admission in Phase 3 §1. Cluster topology and cross-AZ failover not yet in rev 2 — additional work. |
+| Workflow engine concurrency cap increase | Post-call job backlog growing | 10x current per-job-type cap with no DB stress | Engine choice is Phase 0 Open Decision. Caps and dependency graph are Phase 6 §2–§5. Increase is a config change, not new code. |
+| `audit_logs` archival to S3/Parquet | `audit_logs` write rate or storage cost | Storage-cost trigger before throughput trigger | Not yet addressed in rev 2 — additional work when triggered. |
+
+Rows marked "additional work" are the explicit 10k-only items not covered by current rev 2 work items. They become PRs against rev 2 when the trigger fires.
 
 ## 8.4 Product transitions
 
@@ -1009,13 +1011,16 @@ Code and infrastructure are necessary but not sufficient at 10k. Two product-lev
 - **Schedule distribution.** Stop letting all users pick "9:00 AM." Offer scheduling bands ("morning: 8–9 AM, we'll pick a quiet minute"), use historical answer-rate data to suggest off-peak slots, and use deterministic jitter within the band to spread load. Possibly more capacity headroom than any single infrastructure change.
 - **Tiered call types.** Hard reminders remain time-sensitive. Companion check-ins become flexible within a multi-hour window. The lane reservation policy in §2.3 extends naturally; the product change is exposing the flexibility to caregivers in the mobile app.
 
-## 8.5 Coordination with 2k delivery
+## 8.5 How 10k iteration happens inside rev 2
 
-Running 10k design in parallel with 2k delivery is supportable as long as a few rules hold:
+Rev 2 is the working doc for the 10k-shaped iteration; this is not a side environment. A few rules keep that workable:
 
-- **2k Phase 0 measurements are not blocked by 10k work.** The baseline data that drives §1.3 SLO targets, vendor concurrency inventory, and the cost model must still close before Phase 1 starts. 10k prototypes that need those measurements should consume them as outputs, not lobby for skipping them.
-- **10k prototypes do not couple into rev 2's critical path.** A prototype of `ops.*` on a separate Postgres, or a Redis Cluster spike, or a number-pool integration with Telnyx, can run in a side environment with its own DB / Redis / Telnyx subaccount. It should not change `db/migrations/`, `ops` schema definitions, or production env vars on the path of the 2k rollout.
-- **What's learned in a 10k prototype updates this section.** When a prototype validates or invalidates an assumption in §8.2 or §8.3, the table here gets the link and the row gets updated. This section is the durable record; prototype docs are the working space.
-- **A 10k prototype that needs to land in production code (not a side environment) gets its own design doc and PR review.** No silent landing.
+- **Phase 0 measurements stay the gate for everything downstream.** Baseline data that drives §1.3 SLO targets, vendor concurrency inventory, and the cost model still close before Phase 1 starts. 10k-flavored work items consume those measurements as inputs; they do not skip them.
+- **Additional 10k work items (the "additional work" rows in §8.3) land as edits to rev 2, not as separate plan docs.** When the trigger for a row in §8.3 fires, the corresponding phase in rev 2 gets the new work item appended, with the existing prerequisite-gate / work-items / exit-criteria structure. Examples:
+  - "Multi-provider STT failover" becomes a Phase 3 or Phase 4 work item once first sustained provider 429s are observed.
+  - "Redis Cluster topology" becomes a Phase 3 work item once a single-AZ Redis incident occurs or multi-region deploy is decided in.
+  - "`audit_logs` archival to S3" becomes a Phase 1 or Phase 6 work item once storage-cost signals fire.
+- **Out-of-scope items in §1.7 stay out of scope until explicitly reopened.** Multi-region call routing, multi-database/multi-tenant sharding, B2B tenancy, and replacing Telnyx or Claude are listed as separate-plan candidates. If 10k pressure forces one of them, the response is a new plan, not a rev-2 expansion.
+- **Schema cheapness that's already in rev 2 stays in rev 2.** The `ops.*` schema, partitioning, region columns, and workflow-engine recommendation are not "10k-only" additions — they live in the main 2k flow because they cost nothing to do now.
 
-The forward-compatible decisions in rev 2 (`ops.*` schema, hash partitioning, Redis-required, region-aware key shapes, workflow engine recommendation) are what made parallel 10k work cheap to start. Everything in §8.2 / §8.3 can be prototyped while 2k ships, as long as the prototype work does not block 2k Phase 0 or alter rev 2's critical path without explicit review.
+The forward-compatible decisions already in rev 2 (`ops.*` schema, hash partitioning, Redis-required posture, region-aware key shapes, workflow engine recommendation in Phase 6) are what make further 10k iteration cheap to keep folding back into this document. New 10k work follows the same structure: prerequisite gate, work items, numeric exit criteria, rollback drill where applicable.
