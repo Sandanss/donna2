@@ -96,7 +96,7 @@ def test_cartesia_uses_sonic3_model(cartesia_env):
 
 
 def test_cartesia_speed_configured(cartesia_env):
-    """Cartesia generation config has speed=1.0."""
+    """Cartesia generation config keeps non-phone calls slightly faster."""
     from bot import create_tts_service
 
     session_state = {"_flags": {"tts_provider": "cartesia"}}
@@ -104,6 +104,16 @@ def test_cartesia_speed_configured(cartesia_env):
     gen_config = tts._settings.get("generation_config")
     assert gen_config is not None
     assert gen_config.speed == 1.05
+
+
+def test_elevenlabs_speed_configured_for_senior_pacing(cartesia_env):
+    """ElevenLabs uses slower pacing for senior calls."""
+    from bot import create_tts_service
+
+    session_state = {"_flags": {"tts_provider": "elevenlabs"}}
+    tts = create_tts_service(session_state)
+
+    assert tts._settings["speed"] == 0.85
 
 
 def test_audio_profile_prefers_cartesia_48k_and_16k_input(cartesia_env):
@@ -147,7 +157,7 @@ def test_cartesia_uses_lower_volume_for_telnyx(cartesia_env):
     gen_config = tts._settings.get("generation_config")
 
     assert tts._init_sample_rate == 16000
-    assert gen_config.speed == 1.0
+    assert gen_config.speed == 0.94
     assert gen_config.volume == 0.9
 
 

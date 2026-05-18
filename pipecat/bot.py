@@ -279,7 +279,7 @@ def create_tts_service(session_state: dict):
             encoding="pcm_s16le",
             params=CartesiaTTSService.InputParams(
                 generation_config=GenerationConfig(
-                    speed=1.0 if is_telnyx else 1.05,
+                    speed=0.94 if is_telnyx else 1.05,
                     volume=0.9 if is_telnyx else 1.2,
                     emotion="enthusiastic",
                 ),
@@ -297,7 +297,7 @@ def create_tts_service(session_state: dict):
         voice_id=voice_id,
         model=cfg.elevenlabs_model,
         sample_rate=output_sample_rate,
-        params=ElevenLabsTTSService.InputParams(speed=0.9),
+        params=ElevenLabsTTSService.InputParams(speed=0.85),
     )
 
 
@@ -318,8 +318,9 @@ def resolve_vad_params(transport_type: str, call_type: str | None) -> dict[str, 
     """Return VAD settings tuned for senior speech unless caller is onboarding."""
     is_onboarding = call_type == "onboarding"
     return {
+        "start_secs": 0.3,
         "stop_secs": 0.8 if is_onboarding else 1.2,
-        "confidence": 0.6,
+        "confidence": 0.68,
         "min_volume": 0.5,
     }
 
@@ -590,13 +591,15 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
     # Senior calls keep longer pause tolerance for elderly speech patterns.
     vad_profile = resolve_vad_params(transport_type, session_state.get("call_type"))
     vad_stop_secs = vad_profile["stop_secs"]
+    vad_start_secs = vad_profile["start_secs"]
     vad_confidence = vad_profile["confidence"]
     vad_min_volume = vad_profile["min_volume"]
     logger.info(
-        "[{cs}] VAD profile provider={provider} confidence={confidence} stop_secs={stop_secs} min_volume={min_volume}",
+        "[{cs}] VAD profile provider={provider} confidence={confidence} start_secs={start_secs} stop_secs={stop_secs} min_volume={min_volume}",
         cs=call_sid,
         provider=transport_type,
         confidence=vad_confidence,
+        start_secs=vad_start_secs,
         stop_secs=vad_stop_secs,
         min_volume=vad_min_volume,
     )
@@ -623,6 +626,7 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
             vad_analyzer=SileroVADAnalyzer(
                 params=VADParams(
                     confidence=vad_confidence,
+                    start_secs=vad_start_secs,
                     stop_secs=vad_stop_secs,
                     min_volume=vad_min_volume,
                 ),
