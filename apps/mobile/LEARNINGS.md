@@ -93,7 +93,7 @@
 **Problem:** The app could show a blank launch gap even though a splash draft existed in the repo. The checked-in iOS launch storyboard referenced splash constraints but had no splash image view, and `_layout.tsx` hid the native splash as soon as fonts loaded, before Clerk and profile routing finished.
 
 **Fix:**
-1. Inserted the draft from `docs/plans/screenshots/splash-screen-draft.jpg` as `assets/images/splash.png`.
+1. Inserted the draft from `docs/plans/archive/screenshots/splash-screen-draft.jpg` as `assets/images/splash.png`.
 2. Pointed Expo splash config at `splash.png` with `resizeMode: "cover"` and sage background `#4A5D4F`.
 3. Added the checked-in iOS `SplashScreenLegacy.imageset` and full-screen `SplashScreen.storyboard` image view so EAS/TestFlight builds show the splash without relying on prebuild.
 4. Moved `SplashScreen.hideAsync()` behind the initial fonts, Clerk auth, incomplete-account cleanup, and profile-route readiness gate.

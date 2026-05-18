@@ -703,6 +703,17 @@ describe('onboardingSchema', () => {
     expect(result.success).toBe(true);
   });
 
+  it('accepts caregiver data without client-provided email for social signups', () => {
+    const result = onboardingSchema.safeParse({
+      ...validPayload,
+      caregiver: {
+        name: 'Susan Smith',
+      },
+    });
+    expect(result.success).toBe(true);
+    expect(result.data.caregiver).not.toHaveProperty('email');
+  });
+
   it('rejects missing senior name', () => {
     const result = onboardingSchema.safeParse({
       senior: { phone: '5551234567' },

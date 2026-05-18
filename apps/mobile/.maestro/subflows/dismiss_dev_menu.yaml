@@ -6,6 +6,14 @@ appId: com.donna.caregiver
 ---
 - runFlow:
     when:
+      visible: "DEVELOPMENT SERVERS|http://localhost:8081"
+    commands:
+      - tapOn: "http://localhost:8081"
+      - extendedWaitUntil:
+          notVisible: "DEVELOPMENT SERVERS"
+          timeout: 15000
+- runFlow:
+    when:
       visible: "This is the developer menu.*|Continue"
     commands:
       - tapOn: "Continue"

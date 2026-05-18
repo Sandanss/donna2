@@ -206,7 +206,7 @@ These payloads can contain PHI-bearing memory context, reminders, transcript fra
 | Scheduler deduplication | Ready | PostgreSQL advisory locks |
 | Connection pool per instance | Ready | Each instance creates own pool |
 | Health monitoring | Ready | Per-instance `/health` endpoint |
-| WebSocket affinity | Needed | Telnyx routes by call control ID (TBD) |
+| WebSocket affinity | Not required for current flow | Each Telnyx media stream stays on one WebSocket connection; Redis-backed metadata lets startup land on any Pipecat instance |
 | Rate limiting | Needed | Redis-backed slowapi (currently in-memory) |
 | Context cache sharing | Needed | Redis-backed cache (currently in-memory) |
 
@@ -381,7 +381,8 @@ Mitigated by predictive prefetch cache and Director-owned memory injection; most
 | `pipecat/main.py` | Semaphore, health endpoint, graceful shutdown |
 | `pipecat/db/client.py` | Connection pool, slow query logging |
 | `pipecat/lib/redis_client.py` | Redis/InMemory shared state |
-| `pipecat/services/scheduler.py` | Leader election, parallel initiation |
-| `pipecat/api/routes/voice.py` | TwiML fallback when at capacity |
+| `services/scheduler.js` | Active Node scheduler, call planning, reminder prewarm, outbound retries |
+| `pipecat/services/scheduler.py` | Pipecat-side scheduler helpers and Redis reminder-context handoff; disabled for active production scheduling |
+| `pipecat/api/routes/telnyx.py` | Telnyx webhooks, context prewarm, outbound call creation, call termination |
 | `pipecat/scripts/rollout.sh` | Production rollout script |
 | `db/migrations/001_add_indexes.sql` | Database index definitions |

@@ -66,7 +66,8 @@ router.post('/api/onboarding/validate-phone', requireAuth, validateBody(onboardi
   }
 });
 
-// Complete onboarding - creates senior + links to Clerk user + creates reminders
+// Complete onboarding - creates senior + links to Clerk user + creates reminders.
+// Caregiver identity is Clerk-derived; clients do not need to submit email.
 router.post('/api/onboarding', requireAuth, validateBody(onboardingSchema), idempotencyMiddleware, writeLimiter, async (req, res) => {
   let clerkUserId;
 

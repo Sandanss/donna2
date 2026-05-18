@@ -10,8 +10,8 @@
                      └─────────────┬────────────────────────┘
                                    │
                     ┌──────────────▼──────────────┐
-                    │ /telnyx/prewarm + events     │
-                    │ + /outbound                  │
+                    │ /telnyx/events, /prewarm,    │
+                    │ /outbound                    │
                     │ Reuses or fetches senior     │
                     │ context, creates conversation│
                     │ starts media stream to /ws   │
@@ -451,7 +451,7 @@ pipecat/
 │   └── tools.py                     ← LLM tool schemas + async handlers (2 active tools: web_search, mark_reminder_acknowledged)
 │
 ├── processors/
-│   ├── patterns.py                  ← Regex pattern data (503 LOC)
+│   ├── patterns.py                  ← Regex pattern data
 │   ├── quick_observer.py            ← Layer 1: analysis logic + goodbye EndFrame
 │   ├── conversation_director.py     ← Layer 2: Groq/Gemini guidance (non-blocking)
 │   ├── conversation_tracker.py      ← In-call topic/question/advice tracking + transcript
@@ -461,24 +461,24 @@ pipecat/
 │
 ├── services/
 │   ├── prefetch.py                  ← Predictive Context Engine: cache, extraction, runner
-│   ├── director_llm.py              ← Groq/Gemini Director analysis + prefetch hints (598 LOC)
+│   ├── director_llm.py              ← Groq/Gemini Director analysis + prefetch hints
 │   ├── post_call.py                 ← Post-call orchestration (analysis, memory, cleanup, snapshot rebuild)
 │   ├── reminder_delivery.py         ← Reminder delivery CRUD + prompt formatting
-│   ├── call_analysis.py             ← Post-call analysis + call quality scoring (354 LOC)
-│   ├── memory.py                    ← Semantic memory (pgvector, HNSW, circuit breaker) (526 LOC)
-│   ├── greetings.py                 ← Sentiment-aware greeting templates + rotation (352 LOC)
+│   ├── call_analysis.py             ← Post-call analysis + call quality scoring
+│   ├── memory.py                    ← Semantic memory (pgvector, HNSW, circuit breaker)
+│   ├── greetings.py                 ← Sentiment-aware greeting templates + rotation
 │   ├── conversations.py             ← Conversation CRUD + transcript history
 │   ├── interest_discovery.py        ← Interest extraction, category mapping, editable details
 │   ├── seniors.py                   ← Senior profile CRUD + encrypted PHI fields + per-senior call_settings
-│   ├── caregivers.py                ← Caregiver relationships + notes delivery (111 LOC)
+│   ├── caregivers.py                ← Caregiver relationships + notes delivery
 │   ├── scheduler.py                 ← Pipecat-side scheduler helpers + encrypted Redis context handoff; Node scheduler is active
-│   ├── call_snapshot.py             ← Pre-computed call context snapshot (71 LOC)
+│   ├── call_snapshot.py             ← Pre-computed call context snapshot
 │   ├── context_cache.py             ← Pre-cache senior context + news persistence (5 AM local)
 │   ├── daily_context.py             ← Cross-call same-day memory
-│   └── news.py                      ← Cached OpenAI news + Tavily/OpenAI in-call web search + circuit breakers (256 LOC)
+│   └── news.py                      ← Cached OpenAI news + Tavily/OpenAI in-call web search + circuit breakers
 │
 ├── db/
-│   ├── client.py                    ← asyncpg pool + query helpers + health check (126 LOC)
+│   ├── client.py                    ← asyncpg pool + query helpers + health check
 │   └── migrations/                  ← SQL migrations (HNSW index, call_context_snapshot, call_metrics)
 │
 ├── lib/
@@ -494,7 +494,7 @@ pipecat/
 ├── docs/
 │   └── ARCHITECTURE.md              ← This file
 │
-├── tests/                           ← 61 test files + support dirs
+├── tests/                           ← unit, regression, integration, and scenario tests
 │   ├── test_*.py                    (test modules — unit, frame, pipeline, simulation)
 │   ├── test_regression_scenarios.py ← Scenario-based regression tests
 │   ├── helpers/                     pipeline_builder, assertions
@@ -572,14 +572,14 @@ Running separate backends is an explicit decision. Pipecat handles real-time voi
 | **Post-Call** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Summary, concerns, engagement |
 | **STT** | Deepgram Nova 3 | Telnyx 16kHz L16 is passed through as internal 16kHz PCM before STT; language follows `familyInfo.donnaLanguage` |
 | **TTS** | ElevenLabs by default; Cartesia behind provider flag | Telnyx calls request 16kHz PCM; optional Spanish voice IDs selected for Spanish calls |
-| **VAD** | Silero | confidence=0.6, min_volume=0.5; stop_secs=1.2 (senior calls), 0.8 (onboarding) |
+| **VAD** | Silero | confidence=0.68, start_secs=0.3, min_volume=0.5; stop_secs=1.2 (senior calls), 0.8 (onboarding) |
 | **Database** | Neon PostgreSQL + pgvector | asyncpg, connection pooling |
 | **Embeddings** | OpenAI text-embedding-3-small | 1536 dimensions |
 | **News** | OpenAI GPT-4o-mini | Web search tool, 1hr cache |
 
 ## Database Schema (shared)
 
-11 tables, same schema as Node.js:
+Core shared tables, same schema as Node.js:
 
 | Table | Purpose |
 |-------|---------|

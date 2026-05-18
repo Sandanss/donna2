@@ -242,7 +242,7 @@ Background: Memory prefetch, Claude web_search tool when needed, call analysis, 
 - **2-layer observer architecture** — instant regex patterns + background LLM analysis
 - **Post-call pipeline** — analysis, memory extraction, caregiver email/in-app notifications, snapshot rebuild
 
-Full technical docs: [pipecat/docs/ARCHITECTURE.md](../pipecat/docs/ARCHITECTURE.md) and [CLAUDE.md](../CLAUDE.md)
+Full technical docs: [pipecat/docs/ARCHITECTURE.md](../pipecat/docs/ARCHITECTURE.md) and [claude.md](../claude.md)
 
 ---
 

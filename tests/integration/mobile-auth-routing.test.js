@@ -10,6 +10,18 @@ const signInSource = fs.readFileSync(
   path.resolve("apps/mobile/app/(auth)/sign-in.tsx"),
   "utf-8",
 );
+const onboardingStep1Source = fs.readFileSync(
+  path.resolve("apps/mobile/app/(onboarding)/step1.tsx"),
+  "utf-8",
+);
+const onboardingStoreSource = fs.readFileSync(
+  path.resolve("apps/mobile/src/stores/onboarding.ts"),
+  "utf-8",
+);
+const authCreateAccountFlowSource = fs.readFileSync(
+  path.resolve("apps/mobile/.maestro/manual/auth_create_account.yaml"),
+  "utf-8",
+);
 const rootLayoutSource = fs.readFileSync(
   path.resolve("apps/mobile/app/_layout.tsx"),
   "utf-8",
@@ -75,6 +87,35 @@ describe("mobile auth routing", () => {
     expect(signInSource).toContain("resolvePostAuthRoute");
     expect(signInSource).not.toContain(
       "} catch {\n      router.replace(\"/(onboarding)/step1\" as any);",
+    );
+  });
+
+  it("keeps Apple signup social-first and makes email signup opt-in on iOS", () => {
+    expect(createAccountSource).toContain(
+      'useState(Platform.OS !== "ios")',
+    );
+    expect(createAccountSource).toContain("!showEmailForm ?");
+    expect(createAccountSource).toContain('title={t("auth.continueWithApple")}');
+    expect(createAccountSource).toContain('title={t("auth.continueWithEmail")}');
+    expect(createAccountSource).toContain('testID="create-account-show-email"');
+
+    expect(createAccountSource.indexOf("!showEmailForm ?")).toBeLessThan(
+      createAccountSource.indexOf('testID="create-account-email"'),
+    );
+  });
+
+  it("keeps caregiver onboarding from asking for email after Clerk signup", () => {
+    expect(onboardingStep1Source).not.toContain('testID="input-email"');
+    expect(onboardingStep1Source).not.toContain('setField("email"');
+    expect(onboardingStep1Source).not.toContain("emailRequired");
+    expect(onboardingStoreSource).not.toMatch(/\bemail:\s*string\b/);
+    expect(onboardingStoreSource).not.toContain("email: state.email");
+  });
+
+  it("keeps email/password Maestro setup on the explicit email fallback", () => {
+    expect(authCreateAccountFlowSource).toContain('id: "create-account-show-email"');
+    expect(authCreateAccountFlowSource.indexOf('id: "create-account-show-email"')).toBeLessThan(
+      authCreateAccountFlowSource.indexOf('id: "create-account-email"'),
     );
   });
 

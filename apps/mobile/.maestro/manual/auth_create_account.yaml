@@ -37,6 +37,13 @@ appId: com.donna.caregiver
     id: "create-account-sign-in"
 
 - tapOn:
+    id: "create-account-show-email"
+    optional: true
+- extendedWaitUntil:
+    visible: "Email Address"
+    timeout: 5000
+
+- tapOn:
     id: "create-account-email"
 - eraseText: 50
 - inputText: ${TEST_CREATE_EMAIL}

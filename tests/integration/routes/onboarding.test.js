@@ -101,6 +101,11 @@ describe('Onboarding Route — Security', () => {
     expect(routeSource).toContain("clerkUserId === 'cofounder'");
   });
 
+  it('does not depend on client-provided caregiver email', () => {
+    expect(routeSource).toContain('clerkUserId = req.auth.userId');
+    expect(routeSource).not.toContain('caregiver.email');
+  });
+
   it('does not auto-link a new Clerk user to an existing senior by phone', () => {
     expect(routeSource).toContain("pgCode === '23505'");
     expect(routeSource).toContain('This phone number is already registered for another senior');

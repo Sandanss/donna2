@@ -1,16 +1,41 @@
-# React + Vite
+# Donna Website
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React/Vite public website and caregiver web surface for Donna. The app uses Clerk for authenticated caregiver flows and talks only to the repo-root Node API; it does not call Pipecat directly.
 
-Currently, two official plugins are available:
+## Active Surface
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- Public marketing and legal pages
+- Caregiver-facing onboarding and dashboard routes
+- Waitlist and app-download callouts
+- Clerk-authenticated API calls through `src/lib/api.js`
 
-## React Compiler
+## Local Development
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+```bash
+cd apps/website
+npm install
+npm run dev
+```
 
-## Expanding the ESLint configuration
+The local Vite server runs on the port configured in `vite.config.js` and should point at an explicit dev or mock API. Do not silently fall back to production Railway APIs during local development or tests.
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+## Validation
+
+```bash
+cd apps/website
+npm run build
+```
+
+Run website/browser E2E from the repo root:
+
+```bash
+npm run test:e2e:website
+# legacy project/script name still used by Playwright:
+npm run test:e2e:consumer
+```
+
+## Docs
+
+- Repo map: [`../../DIRECTORY.md`](../../DIRECTORY.md)
+- Frontend E2E guide: [`../../docs/guides/FRONTEND_TESTING.md`](../../docs/guides/FRONTEND_TESTING.md)
+- System architecture: [`../../docs/architecture/OVERVIEW.md`](../../docs/architecture/OVERVIEW.md)

@@ -107,6 +107,7 @@ export default function CreateAccountScreen() {
   const [oauthLoading, setOauthLoading] = useState<
     "google" | "apple" | null
   >(null);
+  const [showEmailForm, setShowEmailForm] = useState(Platform.OS !== "ios");
   const [errors, setErrors] = useState<{ email?: string; password?: string }>(
     {}
   );
@@ -320,6 +321,42 @@ export default function CreateAccountScreen() {
     }
   }
 
+  const socialAuthDisabled = loading || oauthLoading !== null;
+  const socialButtons = (
+    <View className="gap-3 mb-8">
+      {Platform.OS === "ios" && (
+        <Button
+          title={t("auth.continueWithApple")}
+          onPress={() => handleOAuth("apple")}
+          variant="secondary"
+          loading={oauthLoading === "apple"}
+          disabled={socialAuthDisabled}
+          icon={
+            <Ionicons
+              name="logo-apple"
+              size={20}
+              color={COLORS.charcoal}
+            />
+          }
+        />
+      )}
+      <Button
+        title={t("auth.continueWithGoogle")}
+        onPress={() => handleOAuth("google")}
+        variant="secondary"
+        loading={oauthLoading === "google"}
+        disabled={socialAuthDisabled}
+        icon={
+          <Ionicons
+            name="logo-google"
+            size={18}
+            color={COLORS.charcoal}
+          />
+        }
+      />
+    </View>
+  );
+
   return (
     <SafeAreaView className="flex-1 bg-cream">
       <KeyboardAvoidingView
@@ -329,149 +366,142 @@ export default function CreateAccountScreen() {
         <ScrollView
           contentContainerStyle={{ flexGrow: 1 }}
           keyboardShouldPersistTaps="handled"
-          className="px-6"
         >
-          <Pressable
-            onPress={handleBack}
-            className="mt-2 mb-6 min-h-[48px] justify-center self-start"
-            accessibilityRole="button"
-            accessibilityLabel={t("auth.goBack")}
-          >
-            <Text className="text-sage text-[16px] font-medium">
-              {"<"} {t("common.back")}
-            </Text>
-          </Pressable>
-
-          <Text className="text-[28px] font-semibold text-charcoal mb-2">
-            {t("auth.createAccount")}
-          </Text>
-          <Text className="text-[15px] text-muted mb-8">
-            {t("auth.createAccountSubtitle")}
-          </Text>
-
-          <View className="mb-4">
-            <Input
-              label={t("auth.email")}
-              placeholder={t("auth.emailPlaceholder")}
-              value={email}
-              onChangeText={(value) => {
-                setEmail(value);
-                if (existingAccountEmail) setExistingAccountEmail(null);
-                if (errors.email) {
-                  setErrors((current) => ({ ...current, email: undefined }));
-                }
-              }}
-              error={errors.email}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoCorrect={false}
-              textContentType="emailAddress"
-              autoComplete="email"
-              testID="create-account-email"
-            />
-            {existingAccountEmail && (
-              <Button
-                title={t("auth.signInInstead")}
-                onPress={() => router.replace("/(auth)/sign-in")}
-                variant="secondary"
-                className="mt-3"
-                testID="create-account-existing-email-sign-in"
-              />
-            )}
-          </View>
-
-          <View className="mb-6">
-            <Input
-              label={t("auth.password")}
-              placeholder="••••••••"
-              value={password}
-              onChangeText={(value) => {
-                setPassword(value);
-                if (errors.password) {
-                  setErrors((current) => ({
-                    ...current,
-                    password: undefined,
-                  }));
-                }
-              }}
-              error={errors.password}
-              secureTextEntry
-              textContentType="oneTimeCode"
-              autoComplete="one-time-code"
-              returnKeyType="done"
-              onSubmitEditing={handleCreateAccount}
-              testID="create-account-password"
-            />
-            {!errors.password && (
-              <Text className="text-muted text-[13px] mt-2 leading-5">
-                {t("auth.passwordMinLength", { count: MIN_PASSWORD_LENGTH })}
-              </Text>
-            )}
-          </View>
-
-          <Button
-            title={t("common.continue")}
-            onPress={handleCreateAccount}
-            loading={loading}
-            disabled={loading || oauthLoading !== null}
-            className="mb-6"
-            testID="create-account-submit"
-          />
-
-          <View className="flex-row items-center mb-6">
-            <View className="flex-1 h-[1px] bg-charcoal/10" />
-            <Text className="mx-3 text-muted text-[13px]">{t("auth.or")}</Text>
-            <View className="flex-1 h-[1px] bg-charcoal/10" />
-          </View>
-
-          <View className="gap-3 mb-8">
-            {Platform.OS === "ios" && (
-              <Button
-                title={t("auth.continueWithApple")}
-                onPress={() => handleOAuth("apple")}
-                variant="secondary"
-                loading={oauthLoading === "apple"}
-                disabled={loading || oauthLoading !== null}
-                icon={
-                  <Ionicons
-                    name="logo-apple"
-                    size={20}
-                    color={COLORS.charcoal}
-                  />
-                }
-              />
-            )}
-            <Button
-              title={t("auth.continueWithGoogle")}
-              onPress={() => handleOAuth("google")}
-              variant="secondary"
-              loading={oauthLoading === "google"}
-              disabled={loading || oauthLoading !== null}
-              icon={
-                <Ionicons
-                  name="logo-google"
-                  size={18}
-                  color={COLORS.charcoal}
-                />
-              }
-            />
-          </View>
-
-          <View className="items-center mb-8">
-            <Text className="text-muted text-[15px] text-center mb-1">
-              {t("auth.hasAccount")}
-            </Text>
+          <View className="flex-1 px-6">
             <Pressable
-              onPress={() => router.replace("/(auth)/sign-in")}
-              className="min-h-[48px] px-6 items-center justify-center"
-              accessibilityRole="link"
-              accessibilityLabel={t("auth.signIn")}
-              testID="create-account-sign-in"
+              onPress={handleBack}
+              className="mt-2 mb-6 min-h-[48px] justify-center self-start"
+              accessibilityRole="button"
+              accessibilityLabel={t("auth.goBack")}
             >
-              <Text className="text-sage text-[17px] font-semibold text-center">
-                {t("auth.signIn")}
+              <Text className="text-sage text-[16px] font-medium">
+                {"<"} {t("common.back")}
               </Text>
             </Pressable>
+
+            <Text className="text-[28px] font-semibold text-charcoal mb-2">
+              {t("auth.createAccount")}
+            </Text>
+            <Text className="text-[15px] text-muted mb-8">
+              {t("auth.createAccountSubtitle")}
+            </Text>
+
+            {!showEmailForm ? (
+              <>
+                {socialButtons}
+
+                <View className="flex-row items-center mb-6">
+                  <View className="flex-1 h-[1px] bg-charcoal/10" />
+                  <Text className="mx-3 text-muted text-[13px]">{t("auth.or")}</Text>
+                  <View className="flex-1 h-[1px] bg-charcoal/10" />
+                </View>
+
+                <Button
+                  title={t("auth.continueWithEmail")}
+                  onPress={() => setShowEmailForm(true)}
+                  variant="secondary"
+                  disabled={socialAuthDisabled}
+                  className="mb-8"
+                  testID="create-account-show-email"
+                />
+              </>
+            ) : (
+              <>
+                <View className="mb-4">
+                  <Input
+                    label={t("auth.email")}
+                    placeholder={t("auth.emailPlaceholder")}
+                    value={email}
+                    onChangeText={(value) => {
+                      setEmail(value);
+                      if (existingAccountEmail) setExistingAccountEmail(null);
+                      if (errors.email) {
+                        setErrors((current) => ({ ...current, email: undefined }));
+                      }
+                    }}
+                    error={errors.email}
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    textContentType="emailAddress"
+                    autoComplete="email"
+                    testID="create-account-email"
+                  />
+                  {existingAccountEmail && (
+                    <Button
+                      title={t("auth.signInInstead")}
+                      onPress={() => router.replace("/(auth)/sign-in")}
+                      variant="secondary"
+                      className="mt-3"
+                      testID="create-account-existing-email-sign-in"
+                    />
+                  )}
+                </View>
+
+                <View className="mb-6">
+                  <Input
+                    label={t("auth.password")}
+                    placeholder="••••••••"
+                    value={password}
+                    onChangeText={(value) => {
+                      setPassword(value);
+                      if (errors.password) {
+                        setErrors((current) => ({
+                          ...current,
+                          password: undefined,
+                        }));
+                      }
+                    }}
+                    error={errors.password}
+                    secureTextEntry
+                    textContentType="oneTimeCode"
+                    autoComplete="one-time-code"
+                    returnKeyType="done"
+                    onSubmitEditing={handleCreateAccount}
+                    testID="create-account-password"
+                  />
+                  {!errors.password && (
+                    <Text className="text-muted text-[13px] mt-2 leading-5">
+                      {t("auth.passwordMinLength", { count: MIN_PASSWORD_LENGTH })}
+                    </Text>
+                  )}
+                </View>
+
+                <Button
+                  title={t("common.continue")}
+                  onPress={handleCreateAccount}
+                  loading={loading}
+                  disabled={socialAuthDisabled}
+                  className="mb-6"
+                  testID="create-account-submit"
+                />
+
+                <View className="flex-row items-center mb-6">
+                  <View className="flex-1 h-[1px] bg-charcoal/10" />
+                  <Text className="mx-3 text-muted text-[13px]">{t("auth.or")}</Text>
+                  <View className="flex-1 h-[1px] bg-charcoal/10" />
+                </View>
+
+                {socialButtons}
+              </>
+            )}
+
+            <View className="items-center mb-8">
+              <Text className="text-muted text-[15px] text-center mb-1">
+                {t("auth.hasAccount")}
+              </Text>
+              <Pressable
+                onPress={() => router.replace("/(auth)/sign-in")}
+                className="min-h-[48px] px-6 items-center justify-center"
+                accessibilityRole="link"
+                accessibilityLabel={t("auth.signIn")}
+                testID="create-account-sign-in"
+              >
+                <Text className="text-sage text-[17px] font-semibold text-center">
+                  {t("auth.signIn")}
+                </Text>
+              </Pressable>
+            </View>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>

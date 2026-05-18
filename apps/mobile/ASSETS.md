@@ -22,7 +22,7 @@ The Donna mobile app requires brand-appropriate icon and splash screen assets fo
 - **Format**: PNG without transparency
 - **Background**: Donna sage (#4A5D4F) as defined in `app.json`
 - **Purpose**: Full-screen launch screen shown while the native app, Clerk, fonts, and initial profile route load
-- **Status**: ✅ Present — inserted from `docs/plans/screenshots/splash-screen-draft.jpg`
+- **Status**: ✅ Present — inserted from `docs/plans/archive/screenshots/splash-screen-draft.jpg`
 - **Design notes**: Uses `resizeMode: "cover"` and native iOS `SplashScreenLegacy.imageset` so App Store/TestFlight builds show the Donna splash instead of a blank launch screen.
 
 ### Adaptive Icon (1024×1024 PNG)

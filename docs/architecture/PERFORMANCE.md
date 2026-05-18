@@ -60,7 +60,7 @@ Result: scheduled reminder calls usually spend ring time on Telnyx setup and con
 
 ## Predictive Context Engine
 
-**File**: `pipecat/services/prefetch.py` (329 LOC)
+**File**: `pipecat/services/prefetch.py`
 
 Speculative memory prefetch that starts while the user is still speaking:
 
@@ -162,7 +162,7 @@ Alert thresholds:
 
 ## Circuit Breakers
 
-**File**: `pipecat/lib/circuit_breaker.py` (109 LOC)
+**File**: `pipecat/lib/circuit_breaker.py`
 
 Prevents cascading failures when external services are slow or unavailable:
 
@@ -344,9 +344,9 @@ call metrics.
 
 | File | Purpose |
 |------|---------|
-| `pipecat/services/prefetch.py` | Predictive context prefetch engine (329 LOC) |
-| `pipecat/lib/circuit_breaker.py` | Circuit breaker pattern (109 LOC) |
-| `pipecat/db/client.py` | Pool config, slow query logging (126 LOC) |
-| `pipecat/main.py` | Health endpoint, graceful shutdown (438 LOC) |
-| `pipecat/processors/quick_observer.py` | Programmatic call ending (404 LOC) |
+| `pipecat/services/prefetch.py` | Predictive context prefetch engine |
+| `pipecat/lib/circuit_breaker.py` | Circuit breaker pattern |
+| `pipecat/db/client.py` | Pool config, slow query logging |
+| `pipecat/main.py` | Health endpoint, graceful shutdown |
+| `pipecat/processors/quick_observer.py` | Programmatic call ending |
 | `db/migrations/001_add_indexes.sql` | HNSW + B-tree indexes |

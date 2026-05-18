@@ -184,7 +184,7 @@ Step 4: Daily context (depends on Step 2)        ── sequential
 | Post-Call Analysis | Google Gemini Flash | gemini-3-flash-preview |
 | STT | Deepgram Nova 3 | Telnyx L16/16k reaches STT as 16kHz PCM; language follows `familyInfo.donnaLanguage` (`en`/`es`) |
 | TTS | ElevenLabs by default; Cartesia behind provider flag | Telnyx L16 calls use 16kHz PCM from TTS; optional Spanish voice IDs selected for Spanish calls |
-| VAD | Silero | confidence=0.6, stop_secs=1.2 |
+| VAD | Silero | confidence=0.68, start_secs=0.3, stop_secs=1.2 |
 | Embeddings | OpenAI | text-embedding-3-small |
 | News / Web Search | OpenAI GPT-4o-mini + Tavily | OpenAI cached news; Tavily first/OpenAI fallback for in-call web_search |
 | Telephony | Telnyx | Call Control + bidirectional media streams |
@@ -227,7 +227,7 @@ pipecat/
 │   ├── context_cache.py        ← Pre-cache at 5 AM local + news persistence
 │   └── ...                     ← 8+ additional service modules
 ├── api/
-│   ├── routes/                 ← voice.py, calls.py
+│   ├── routes/                 ← telnyx.py, call_context.py, calls.py, auth.py, metrics.py, export.py, data.py
 │   ├── middleware/             ← auth, api_auth, rate_limit, security, error_handler
 │   └── validators/schemas.py   ← Pydantic input validation
 ├── db/client.py                ← asyncpg pool + slow query logging
@@ -236,5 +236,5 @@ pipecat/
 │   ├── redis_client.py         ← Redis/InMemory shared state
 │   ├── growthbook.py           ← GrowthBook feature flags
 │   └── sanitize.py             ← PII-safe logging
-└── tests/                      ← 61 test files, 543+ tests
+└── tests/                      ← unit, regression, integration, and scenario tests
 ```

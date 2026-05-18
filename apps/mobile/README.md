@@ -46,7 +46,9 @@ A stale dev-client binary can load fresh JavaScript but still lack native entitl
 
 ## Splash Screen
 
-The draft splash is checked in at `assets/images/splash.png` and comes from `docs/plans/screenshots/splash-screen-draft.jpg`. Expo config points at that file with `resizeMode: "cover"` and the checked-in iOS project includes `SplashScreenLegacy.imageset` plus a full-screen launch storyboard image view.
+The splash source is checked in at `assets/images/splash.png` and synced into the native iOS `SplashScreenLegacy.imageset`. Expo config points at that file with `resizeMode: "cover"` and the checked-in iOS project includes a full-screen launch storyboard image view.
+
+Keep the outer pixels of `splash.png`, `splash-icon.png`, and the native iOS splash images sage (`#4A5D4F`). A light or transparent outer canvas can show up as white side bands on taller iPhones when the image is scaled during launch.
 
 The native splash is hidden only after fonts, Clerk auth state, and the initial Donna profile route are ready. This prevents the blank launch gap tracked as BUG-006.
 

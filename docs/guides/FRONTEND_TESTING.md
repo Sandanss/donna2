@@ -4,7 +4,7 @@
 
 We use [Playwright](https://playwright.dev/) for end-to-end browser testing across the admin dashboard, website/caregiver web app, and observability dashboard. Tests mock API responses by default (no backend needed) and verify that UI components, navigation, and user flows work correctly.
 
-**Current coverage:** 31 tests across 5 projects (~15s total runtime).
+Coverage changes frequently. Use the commands below or Playwright's list/report output when you need the current test count.
 
 ## Quick Start
 

@@ -55,7 +55,7 @@ Level 1: Processor Frame Tests        ← Single processor as FrameProcessor
   │  Uses: Custom run_processor_test() helper
   │  Tests: Each processor's process_frame() with real Frame objects
   │
-Existing: Pure Function Tests (163+)  ← Already covered
+Existing: Pure function/unit tests     ← Already covered
 ```
 
 ### Level 1: Processor Frame Tests

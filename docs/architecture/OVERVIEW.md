@@ -1,6 +1,6 @@
 # Donna Architecture Overview
 
-This document describes the Donna v5.3 system architecture with the **Pipecat voice pipeline**, **Conversation Director** (Groq fast path, Gemini fallback for non-speculative analysis), **Predictive Context Engine** (memory prefetch), **Pipecat Flows** call state machine, and **infrastructure reliability** features (circuit breakers, GrowthBook feature flags, graceful shutdown).
+This document describes Donna's current system architecture with the **Pipecat voice pipeline**, **Conversation Director** (Groq fast path, Gemini fallback for non-speculative analysis), **Predictive Context Engine** (memory prefetch), **Pipecat Flows** call state machine, and **infrastructure reliability** features (circuit breakers, GrowthBook feature flags, graceful shutdown).
 
 > For detailed Pipecat implementation specifics, see [pipecat/docs/ARCHITECTURE.md](../../pipecat/docs/ARCHITECTURE.md).
 
@@ -24,7 +24,7 @@ This document describes the Donna v5.3 system architecture with the **Pipecat vo
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│              DONNA v5.3 — PIPECAT VOICE PIPELINE                            │
+│              DONNA — PIPECAT VOICE PIPELINE                                 │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
 │   ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐            │
@@ -36,7 +36,7 @@ This document describes the Donna v5.3 system architecture with the **Pipecat vo
 │            ▼                     ▼                     ▼                     │
 │   ┌──────────────────────────────────────────────────────────────┐          │
 │   │                  Node.js API (Railway)                        │          │
-│   │    routes/ (17 files) — frontend APIs, health, waitlist      │          │
+│   │    routes/ — frontend APIs, health, waitlist                 │          │
 │   │    services/scheduler.js — active reminder polling           │          │
 │   └──────────────────────────────────────────────────────────────┘          │
 │                                                                              │
@@ -242,7 +242,7 @@ Quick Observer pattern categories:
 | **Post-Call** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Summary, concerns, engagement |
 | **STT** | Deepgram Nova 3 (`nova-3-general`) | Real-time, interim results, 16kHz linear PCM; English/Spanish based on senior call language |
 | **TTS** | ElevenLabs (`eleven_flash_v2_5`) by default; Cartesia behind provider flag | Telnyx calls use native 16kHz PCM from TTS; optional Spanish voice IDs for Spanish calls |
-| **VAD** | Silero | confidence=0.6, stop_secs=1.2, min_volume=0.5 |
+| **VAD** | Silero | confidence=0.68, start_secs=0.3, stop_secs=1.2, min_volume=0.5 |
 | **Database** | Neon PostgreSQL + pgvector | asyncpg, connection pooling |
 | **Embeddings** | OpenAI text-embedding-3-small | 1536 dimensions |
 | **News / Web Search** | OpenAI GPT-4o-mini for cached news; Tavily first/OpenAI fallback for in-call web_search | 1hr cache for news/search results |
@@ -293,7 +293,7 @@ pipecat/
 │   ├── routes/                      ← telnyx.py, call_context.py, calls.py
 │   └── middleware/                   ← auth, api_auth, rate_limit, security
 ├── db/client.py                     ← asyncpg pool + query helpers
-├── tests/                           ← 61 test files + helpers/mocks/scenarios
+├── tests/                           ← unit, regression, integration, and scenario tests
 ├── pyproject.toml                   ← Python 3.12, dependencies
 └── Dockerfile                       ← python:3.12-slim + uv
 ```
@@ -364,4 +364,4 @@ Three environments: **dev** (experiments), **staging** (CI), **production** (cus
 
 ---
 
-*Last updated: May 2026 — v5.3 with Groq Director fast path, memory prefetch, GrowthBook feature flags, updated active-tool surface, and mobile onboarding cleanup*
+*Last updated: May 2026 — current Groq Director fast path, memory prefetch, GrowthBook feature flags, active-tool surface, and mobile onboarding cleanup*

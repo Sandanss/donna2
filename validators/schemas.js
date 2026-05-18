@@ -289,10 +289,11 @@ const callScheduleSchema = z.object({
 });
 
 export const onboardingSchema = z.object({
-  // Caregiver info is optional - we get it from Clerk auth
+  // Caregiver identity comes from Clerk auth. Keep this legacy client object
+  // permissive so social signups never need to collect an extra email.
   caregiver: z.object({
     name: z.string().min(1).max(255).trim(),
-    email: z.string().email().max(255),
+    email: z.string().email().max(255).optional(),
     clerkUserId: z.string().max(255).optional(),
   }).optional(),
   caregiverPhone: phoneSchema.optional(),

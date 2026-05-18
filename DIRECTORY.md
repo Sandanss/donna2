@@ -82,62 +82,62 @@ Donna runs two backend services. Change the wrong one and nothing happens.
 
 ## Directory Map
 
-### `pipecat/` — Voice Pipeline (Python, 15.7k LOC excluding tests)
+### `pipecat/` — Voice Pipeline (Python)
 
 The primary codebase. All voice/call features live here. **Clean architecture: no circular imports, flat service dependencies.**
 
 ```
 pipecat/
-├── main.py              FastAPI entry: /health, /live, /ws, graceful shutdown (438 LOC)
-├── bot.py               Pipeline assembly + audio profile + sentiment-aware greetings (652 LOC)
-├── bot_gemini.py        Gemini Live evaluation pipeline (228 LOC)
-├── config.py            All environment variables, centralized + production validation (310 LOC)
-├── prompts.py           System prompts + phase task instructions (202 LOC)
+├── main.py              FastAPI entry: /health, /live, /ws, graceful shutdown
+├── bot.py               Pipeline assembly + audio profile + sentiment-aware greetings
+├── bot_gemini.py        Gemini Live evaluation pipeline
+├── config.py            All environment variables, centralized + production validation
+├── prompts.py           System prompts + phase task instructions
 │
 ├── flows/               Call state machine (Pipecat Flows)
-│   ├── nodes.py         Conditional reminder → main → winding_down → closing (+ onboarding) (565 LOC)
+│   ├── nodes.py         Conditional reminder → main → winding_down → closing (+ onboarding)
 │   │                    Imports prompts from prompts.py
-│   ├── tools.py         2 active Claude tools (web_search, mark_reminder_acknowledged) + retired handlers (409 LOC)
-│   └── gemini_tools.py  Gemini Live tool adapter (133 LOC)
+│   ├── tools.py         2 active Claude tools (web_search, mark_reminder_acknowledged) + retired handlers
+│   └── gemini_tools.py  Gemini Live tool adapter
 │
 ├── processors/          Frame processors in the audio pipeline
-│   ├── patterns.py             250+ regex patterns across 19 Quick Observer categories (503 LOC)
-│   ├── quick_observer.py       Layer 1: analysis logic + goodbye detection (404 LOC)
-│   ├── conversation_director.py Layer 2: Split Director (Query + Guidance) + memory/news injection + ephemeral context (993 LOC)
-│   ├── conversation_tracker.py  Tracks topics/questions/advice per call (359 LOC)
-│   ├── metrics_logger.py        Call metrics + prefetch stats logging (151 LOC)
-│   ├── goodbye_gate.py          False-goodbye grace period — NOT in active pipeline (135 LOC)
-│   └── guidance_stripper.py     Strips <guidance> tags before TTS (121 LOC)
+│   ├── patterns.py             250+ regex patterns across 19 Quick Observer categories
+│   ├── quick_observer.py       Layer 1: analysis logic + goodbye detection
+│   ├── conversation_director.py Layer 2: Split Director (Query + Guidance) + memory/news injection + ephemeral context
+│   ├── conversation_tracker.py  Tracks topics/questions/advice per call
+│   ├── metrics_logger.py        Call metrics + prefetch stats logging
+│   ├── goodbye_gate.py          False-goodbye grace period — NOT in active pipeline
+│   └── guidance_stripper.py     Strips <guidance> tags before TTS
 │
 ├── services/            Business logic — mostly independent, DB-only deps
-│   ├── scheduler.py         Pipecat-side reminder polling helpers + Redis context handoff; Node scheduler is active (638 LOC)
-│   ├── reminder_delivery.py Delivery CRUD + prompt formatting (190 LOC)
-│   ├── post_call.py         Post-call orchestration: analysis, memory, cleanup, snapshot rebuild (827 LOC)
-│   ├── memory.py            Semantic memory: pgvector, HNSW, decay, dedup, circuit breaker (526 LOC)
-│   ├── prefetch.py          Predictive Context Engine: cache, extraction, runner (329 LOC)
-│   ├── director_llm.py      Split Director LLM: Query Director (~200ms) + Guidance Director (~400ms) (598 LOC)
-│   ├── call_snapshot.py     Pre-computed call context snapshot for seniors (71 LOC)
-│   ├── context_cache.py     Pre-cache senior context + news at 5 AM (471 LOC)
-│   ├── call_analysis.py     Post-call analysis via Gemini + call quality (354 LOC)
-│   ├── interest_discovery.py Interest extraction from conversations (190 LOC)
-│   ├── greetings.py         Sentiment-aware greeting templates + rotation (352 LOC)
-│   ├── conversations.py     Conversation CRUD (412 LOC)
-│   ├── daily_context.py     Same-day cross-call memory (165 LOC)
-│   ├── seniors.py           Senior profile + per-senior call_settings (188 LOC)
-│   ├── news.py              OpenAI cached news; in-call web_search uses Tavily first, OpenAI fallback (256 LOC)
-│   ├── caregivers.py        Caregiver relationships + notes delivery (111 LOC)
-│   ├── data_retention.py    HIPAA data retention: batched purge of 7 tables (214 LOC)
-│   ├── audit.py             Fire-and-forget HIPAA audit logging (111 LOC)
-│   └── token_revocation.py  JWT token revocation: per-token + per-admin + expired cleanup (94 LOC)
+│   ├── scheduler.py         Pipecat-side reminder polling helpers + Redis context handoff; Node scheduler is active
+│   ├── reminder_delivery.py Delivery CRUD + prompt formatting
+│   ├── post_call.py         Post-call orchestration: analysis, memory, cleanup, snapshot rebuild
+│   ├── memory.py            Semantic memory: pgvector, HNSW, decay, dedup, circuit breaker
+│   ├── prefetch.py          Predictive Context Engine: cache, extraction, runner
+│   ├── director_llm.py      Split Director LLM: Query Director (~200ms) + Guidance Director (~400ms)
+│   ├── call_snapshot.py     Pre-computed call context snapshot for seniors
+│   ├── context_cache.py     Pre-cache senior context + news at 5 AM
+│   ├── call_analysis.py     Post-call analysis via Gemini + call quality
+│   ├── interest_discovery.py Interest extraction from conversations
+│   ├── greetings.py         Sentiment-aware greeting templates + rotation
+│   ├── conversations.py     Conversation CRUD
+│   ├── daily_context.py     Same-day cross-call memory
+│   ├── seniors.py           Senior profile + per-senior call_settings
+│   ├── news.py              OpenAI cached news; in-call web_search uses Tavily first, OpenAI fallback
+│   ├── caregivers.py        Caregiver relationships + notes delivery
+│   ├── data_retention.py    HIPAA data retention: batched purge of 7 tables
+│   ├── audit.py             Fire-and-forget HIPAA audit logging
+│   └── token_revocation.py  JWT token revocation: per-token + per-admin + expired cleanup
 │
 ├── lib/                 Shared utilities
-│   ├── circuit_breaker.py   Async circuit breaker for external services (109 LOC)
-│   ├── encryption.py        AES-256-GCM field-level PHI encryption (150 LOC)
-│   ├── redis_client.py      Shared Redis client helpers (319 LOC)
-│   ├── growthbook.py        GrowthBook Cloud SDK feature flags (144 LOC)
-│   ├── phi.py               PHI-safe serialization helpers (147 LOC)
-│   ├── shared_state_phi.py  Encrypted shared-state payload helpers (40 LOC)
-│   └── sanitize.py          PII masking for logs (38 LOC)
+│   ├── circuit_breaker.py   Async circuit breaker for external services
+│   ├── encryption.py        AES-256-GCM field-level PHI encryption
+│   ├── redis_client.py      Shared Redis client helpers
+│   ├── growthbook.py        GrowthBook Cloud SDK feature flags
+│   ├── phi.py               PHI-safe serialization helpers
+│   ├── shared_state_phi.py  Encrypted shared-state payload helpers
+│   └── sanitize.py          PII masking for logs
 │
 ├── api/                 HTTP layer
 │   ├── routes/telnyx.py     /telnyx/events, /telnyx/outbound, /telnyx/calls/{id}/end
@@ -148,12 +148,12 @@ pipecat/
 │   ├── routes/export.py     HIPAA right-to-access: /api/seniors/{id}/export (full data bundle)
 │   ├── routes/data.py       Data retention management endpoints
 │   ├── middleware/           auth, api_auth, rate_limit, security, error_handler
-│   └── validators/schemas.py  Pydantic request validation (139 LOC)
+│   └── validators/schemas.py  Pydantic request validation
 │
 ├── db/
-│   ├── client.py            asyncpg pool + query helpers + health check (126 LOC)
+│   ├── client.py            asyncpg pool + query helpers + health check
 │   └── migrations/          SQL migrations (HNSW, snapshots, audit_logs, revoked_tokens, encrypted_phi)
-├── tests/               61 test files + helpers/mocks/scenarios
+├── tests/               Unit, regression, integration, and scenario tests
 ├── docs/ARCHITECTURE.md Full architecture docs
 ├── docs/LEARNINGS.md    Engineering learnings from production debugging
 ├── pyproject.toml       Python 3.12, dependencies
@@ -202,7 +202,7 @@ apps/
 
 **Mobile onboarding invariant:** a Clerk user without a Donna profile is not a valid sign-in destination. Fresh setup must start from the visible Create Account flow, which marks a runtime pending-onboarding session before profile creation. If a no-profile Clerk session appears after app restart or sign-in, `AuthGuard` calls Node `DELETE /api/caregivers/me/incomplete-account`, clears the encrypted onboarding draft, signs out locally, and returns to landing. Maestro flows `10_onboarding_full.yaml`, `12_incomplete_account_cleanup.yaml`, and `13_leave_setup_cleanup.yaml` cover the success, abandoned-account, and explicit leave-setup paths.
 
-### `tests/e2e/` — Frontend E2E Tests (Playwright, 31 tests)
+### `tests/e2e/` — Frontend E2E Tests (Playwright)
 
 Browser tests for all 3 frontend apps. Mock API responses by default (no backend needed).
 
@@ -213,7 +213,7 @@ tests/e2e/
 │   ├── test-data.ts             Mock data (seniors, calls, reminders, etc.)
 │   ├── auth.ts                  JWT auth helpers for admin/observability
 │   └── api-mocks.ts             page.route() API mock setup functions
-├── admin/                       Admin dashboard tests (17 tests)
+├── admin/                       Admin dashboard tests
 │   ├── login.spec.ts            Login flow, error handling
 │   ├── navigation.spec.ts       Sidebar navigation, responsive layout
 │   ├── seniors.spec.ts          Senior list, create form
@@ -222,10 +222,10 @@ tests/e2e/
 ├── consumer/                    Website/caregiver app tests (legacy directory name)
 │   ├── landing.spec.ts          Landing page, FAQ (public)
 │   ├── dashboard.spec.ts        Protected route redirects (public)
-│   └── authenticated/           Clerk-authenticated tests (5 tests)
+│   └── authenticated/           Clerk-authenticated tests
 │       ├── dashboard.spec.ts    Dashboard access, nav, sign out
 │       └── onboarding.spec.ts   Onboarding flow access
-├── observability/               Observability tests (4 tests)
+├── observability/               Observability tests
 │   ├── history.spec.ts          Call history, timeline
 │   └── navigation.spec.ts       History/Live toggle, view switching
 └── integration/                 Real API integration tests (excluded by default)
@@ -255,54 +255,54 @@ Serves all API endpoints that frontends consume. Also runs the reminder schedule
 /
 ├── index.js             Express server entry — CORS, middleware, GrowthBook, scheduler start
 │
-├── routes/              17 files — frontend-facing /api/* endpoints plus public health/waitlist
+├── routes/              Frontend-facing /api/* endpoints plus public health/waitlist
 │   ├── calls.js         /api/call — initiate manual outbound call through Pipecat /telnyx/outbound
-│   ├── seniors.js       CRUD /api/seniors (335 LOC)
-│   ├── reminders.js     CRUD /api/reminders + delivery tracking (221 LOC)
-│   ├── observability.js Call monitoring endpoints (582 LOC)
-│   ├── notifications.js Notification preferences, in-app notifications, service-triggered sends (184 LOC)
-│   ├── waitlist.js      Public /waitlist endpoint (56 LOC)
-│   ├── onboarding.js    Consumer onboarding flow (113 LOC)
+│   ├── seniors.js       CRUD /api/seniors
+│   ├── reminders.js     CRUD /api/reminders + delivery tracking
+│   ├── observability.js Call monitoring endpoints
+│   ├── notifications.js Notification preferences, in-app notifications, service-triggered sends
+│   ├── waitlist.js      Public /waitlist endpoint
+│   ├── onboarding.js    Consumer onboarding flow
 │   ├── caregivers.js    Caregiver links, current profile, account deletion, incomplete onboarding cleanup
-│   ├── admin-auth.js    JWT admin login (196 LOC)
-│   ├── stats.js         Dashboard statistics (78 LOC)
-│   ├── memories.js      Memory search/store (92 LOC)
-│   ├── daily-context.js Daily context queries (68 LOC)
-│   ├── conversations.js Conversation history (85 LOC)
-│   ├── call-analyses.js Analysis results (54 LOC)
-│   └── health.js, helpers.js, index.js (118 LOC combined)
+│   ├── admin-auth.js    JWT admin login
+│   ├── stats.js         Dashboard statistics
+│   ├── memories.js      Memory search/store
+│   ├── daily-context.js Daily context queries
+│   ├── conversations.js Conversation history
+│   ├── call-analyses.js Analysis results
+│   └── health.js, helpers.js, index.js
 │
-├── services/            14 files — dual implementation with pipecat/services/
-│   ├── scheduler.js     Active reminder polling + outbound calls (925 LOC)
-│   ├── context-cache.js Pre-cache senior context (370 LOC)
-│   ├── memory.js        Semantic memory, pgvector (369 LOC)
-│   ├── call-analyses.js Post-call analysis API queries (106 LOC)
-│   ├── notifications.js Notification preferences + send helpers (384 LOC)
-│   ├── weekly-report.js Weekly caregiver report helpers (258 LOC)
-│   ├── greetings.js     Greeting templates (262 LOC)
-│   ├── conversations.js Conversation CRUD (335 LOC)
-│   ├── news.js          OpenAI cached news helper (103 LOC)
-│   ├── caregivers.js    Caregiver relationships (90 LOC)
-│   ├── seniors.js       Senior profiles (216 LOC)
-│   ├── audit.js         Fire-and-forget HIPAA audit logging (55 LOC)
-│   ├── token-revocation.js  JWT token revocation (per-token + per-admin + cleanup) (81 LOC)
-│   └── data-retention.js    HIPAA data retention purge (269 LOC)
+├── services/            Dual implementation with pipecat/services/
+│   ├── scheduler.js     Active reminder polling + outbound calls
+│   ├── context-cache.js Pre-cache senior context
+│   ├── memory.js        Semantic memory, pgvector
+│   ├── call-analyses.js Post-call analysis API queries
+│   ├── notifications.js Notification preferences + send helpers
+│   ├── weekly-report.js Weekly caregiver report helpers
+│   ├── greetings.js     Greeting templates
+│   ├── conversations.js Conversation CRUD
+│   ├── news.js          OpenAI cached news helper
+│   ├── caregivers.js    Caregiver relationships
+│   ├── seniors.js       Senior profiles
+│   ├── audit.js         Fire-and-forget HIPAA audit logging
+│   ├── token-revocation.js  JWT token revocation (per-token + per-admin + cleanup)
+│   └── data-retention.js    HIPAA data retention purge
 │
-├── middleware/           7 files
-│   ├── auth.js          Clerk + JWT mixed auth (300 LOC)
-│   ├── validate.js      Zod request validation (169 LOC)
-│   ├── idempotency.js   Idempotency middleware for safe retries (255 LOC)
-│   ├── rate-limit.js    5 rate limiter configs (100 LOC)
-│   ├── api-auth.js      API key auth (72 LOC)
-│   ├── security.js      Security headers (49 LOC)
-│   └── error-handler.js Error formatting (16 LOC)
+├── middleware/
+│   ├── auth.js          Clerk + JWT mixed auth
+│   ├── validate.js      Zod request validation
+│   ├── idempotency.js   Idempotency middleware for safe retries
+│   ├── rate-limit.js    5 rate limiter configs
+│   ├── api-auth.js      API key auth
+│   ├── security.js      Security headers
+│   └── error-handler.js Error formatting
 │
 ├── db/
 │   ├── schema.js        Drizzle tables for seniors, reminders, notifications, waitlist, audit logs, etc.
 │   ├── client.js        Neon PostgreSQL + Drizzle ORM init
 │   └── setup-pgvector.js
 │
-├── validators/schemas.js  Zod validation schemas (413 LOC)
+├── validators/schemas.js  Zod validation schemas
 ├── lib/                   logger.js, sanitize.js, encryption.js (AES-256-GCM PHI encryption)
 └── tests/                 Node fixtures, helpers, mocks, and integration tests
 ```
@@ -315,7 +315,7 @@ Serves all API endpoints that frontends consume. Also runs the reminder schedule
 docs/
 ├── architecture/                 Architecture suite (current, authoritative)
 │   (see also: pipecat/docs/LEARNINGS.md for engineering learnings)
-│   ├── OVERVIEW.md               v5.3 high-level architecture
+│   ├── OVERVIEW.md               High-level architecture
 │   ├── ARCHITECTURE.md           System architecture reference
 │   ├── FEATURES.md               Complete product feature inventory
 │   ├── SECURITY.md               Authentication, validation, PII
@@ -330,9 +330,9 @@ docs/
 │   ├── DATA_RETENTION_POLICY.md  Retention schedule per table + purge procedures
 │   └── VENDOR_SECURITY_EVALUATION.md  16 vendor security evaluations
 ├── plans/
-│   ├── 2026-02-07-roadmap-and-feature-flags.md  Feature flag roadmap (future)
-│   ├── 2026-02-05-multi-senior-management.md    Multi-senior management (future)
-│   └── unsubscribed-caller                       Onboarding call flow design
+│   ├── PROTOTYPE_PILOT_BACKLOG.md               Current pilot backlog
+│   ├── 2026-05-05-engineering-remediation-plan.md Current remediation plan
+│   └── archive/                                  Historical dated plans and old bug tracker
 └── decisions/
     ├── DONNA_ON_PIPECAT.md       Pipecat migration architecture (reference)
     └── VOICE_AI_FRAMEWORK_ANALYSIS.md  Framework comparison (reference)
@@ -362,26 +362,21 @@ docs/
 
 ---
 
-## Large Files (Context Budget Warning)
+## High-Context Files
 
 Only load these when your task specifically requires them.
 
-| File | LOC | Why it's big |
-|---|---|---|
-| `pipecat/processors/patterns.py` | 503 | 250+ regex patterns, 19 categories (pure data) |
-| `pipecat/services/scheduler.py` | 638 | Pipecat-side scheduler helpers/context handoff; Node scheduler is active |
-| `pipecat/services/memory.py` | 526 | pgvector + HNSW + circuit breaker + mid-call refresh |
-| `pipecat/processors/quick_observer.py` | 404 | Analysis logic + goodbye detection + model recs |
-| `pipecat/services/director_llm.py` | 598 | Groq/Gemini Director prompts + response parsing |
-| `pipecat/bot.py` | 652 | Pipeline assembly + audio profile + sentiment greetings |
-| `pipecat/services/greetings.py` | 352 | Sentiment-aware greeting templates + rotation |
-| `pipecat/flows/nodes.py` | 565 | Subscriber + onboarding flow config and context builders |
-| `pipecat/services/context_cache.py` | 471 | Pre-cache senior context at 5 AM |
-| `pipecat/flows/tools.py` | 409 | 2 active Claude tool schemas + closure-based handlers |
-| `pipecat/main.py` | 438 | FastAPI + graceful shutdown + enhanced /health |
-| `services/scheduler.js` | 925 | Active Node.js reminder polling and call triggering |
-| `services/context-cache.js` | 370 | Node.js context pre-caching |
-| `routes/observability.js` | 582 | Call monitoring + metrics aggregation |
+| File | Why it needs focus |
+|---|---|
+| `pipecat/processors/patterns.py` | Large Quick Observer regex pattern data |
+| `pipecat/services/scheduler.py` | Pipecat-side scheduler helpers/context handoff; Node scheduler is active |
+| `pipecat/services/memory.py` | pgvector, HNSW, circuit breaker, and mid-call refresh |
+| `pipecat/processors/quick_observer.py` | Analysis logic, goodbye detection, and model recommendations |
+| `pipecat/services/director_llm.py` | Groq/Gemini Director prompts and response parsing |
+| `pipecat/bot.py` | Pipeline assembly, audio profile, and sentiment greetings |
+| `pipecat/flows/nodes.py` | Subscriber/onboarding flow config and context builders |
+| `services/scheduler.js` | Active Node reminder polling and call triggering |
+| `routes/observability.js` | Call monitoring and metrics aggregation |
 
 ---
 
@@ -391,7 +386,7 @@ Only load these when your task specifically requires them.
 # All tests (Python + Node.js)
 make test
 
-# Pipecat only (61 test files)
+# Pipecat only
 make test-python
 
 # Regression scenario tests
@@ -400,7 +395,7 @@ make test-regression
 # Node.js
 npm test
 
-# Frontend E2E tests (Playwright — all 3 apps, 31 tests)
+# Frontend E2E tests (Playwright — all 3 apps)
 npm run test:e2e                  # Full suite (~15s)
 npm run test:e2e:admin            # Admin dashboard only
 npm run test:e2e:consumer         # Consumer public + authenticated
@@ -441,4 +436,4 @@ Workflow: `edit → make deploy-dev-pipecat → call dev number → repeat`
 
 ---
 
-*Source of truth for codebase navigation. Update when directories or responsibilities change. Last updated: April 2026 — v5.3 (HIPAA compliance)*
+*Source of truth for codebase navigation. Update when directories or responsibilities change. Last updated: May 2026.*

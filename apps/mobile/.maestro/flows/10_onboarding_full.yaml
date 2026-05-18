@@ -286,13 +286,13 @@ appId: com.donna.caregiver
 
 # ── Success Screen ──
 - extendedWaitUntil:
-    visible: "Congratulations.*"
+    visible: "You're all set!"
     timeout: 15000
 
 - takeScreenshot: 10_onboarding_success
 
 # Navigate to dashboard
-- tapOn: "Continue to Homepage"
+- tapOn: "Go to Dashboard"
 
 - extendedWaitUntil:
     visible: "Hello.*|Dashboard"
