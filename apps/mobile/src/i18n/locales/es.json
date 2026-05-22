@@ -89,6 +89,7 @@
     "signUp": "Registrarse",
     "signInFailed": "Error al iniciar sesión",
     "oauthError": "Error de OAuth",
+    "oauthIncomplete": "No pudimos terminar este inicio de sesión. Inténtalo de nuevo o continúa con correo.",
     "signUpFailed": "Error al registrarse",
     "accountAlreadyExists": "Este correo ya tiene una cuenta de Donna. Inicia sesión en su lugar.",
     "accountAlreadyExistsTitle": "La cuenta ya existe",

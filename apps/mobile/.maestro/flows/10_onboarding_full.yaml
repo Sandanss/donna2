@@ -136,6 +136,9 @@ appId: com.donna.caregiver
 - extendedWaitUntil:
     visible: ${output.onboardingSeniorPhone}
     timeout: 3000
+- scrollUntilVisible:
+    element: "Select Relationship"
+    direction: DOWN
 
 # Relationship picker
 - tapOn:
@@ -145,9 +148,10 @@ appId: com.donna.caregiver
       notVisible: "Daughter"
     commands:
       # Maestro can match/tap the picker Pressable without delivering the
-      # native press. This taps the center of the visible relationship control.
+      # native press. Tap the unobscured upper portion of the visible control;
+      # the keyboard-aware footer can overlap the control's center on iOS.
       - tapOn:
-          point: "50%,54%"
+          point: "50%,53%"
 - extendedWaitUntil:
     visible: "Daughter"
     timeout: 5000

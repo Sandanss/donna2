@@ -1,4 +1,4 @@
-import { useAuth, useOAuth, useSignUp } from "@clerk/clerk-expo";
+import { useAuth, useOAuth, useSignInWithApple, useSignUp } from "@clerk/clerk-expo";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
@@ -20,7 +20,6 @@ import { Button } from "@/src/components/ui/Button";
 import { Input } from "@/src/components/ui/Input";
 import { COLORS } from "@/src/constants/theme";
 import { api, getErrorMessage } from "@/src/lib/api";
-import { useAppleAuthenticationWithoutProfileScopes } from "@/src/lib/appleAuth";
 import { getClerkErrorMessage, getClerkFieldErrors } from "@/src/lib/clerkErrors";
 import {
   clearPendingOnboardingSession,
@@ -100,8 +99,7 @@ export default function CreateAccountScreen() {
   const { startOAuthFlow: startGoogleOAuth } = useOAuth({
     strategy: "oauth_google",
   });
-  const { startAppleAuthenticationFlow } =
-    useAppleAuthenticationWithoutProfileScopes();
+  const { startAppleAuthenticationFlow } = useSignInWithApple();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -294,6 +292,14 @@ export default function CreateAccountScreen() {
           await navigateAfterAuth();
           return;
         }
+      }
+
+      const oauthStatus = oauthSignIn?.status ?? (result.signUp as any)?.status;
+      if (oauthStatus) {
+        Alert.alert(
+          t("auth.oauthError"),
+          t("auth.oauthIncomplete"),
+        );
       }
     } catch (err: unknown) {
       if (isExistingAccountError(err)) {

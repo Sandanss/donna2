@@ -9,8 +9,11 @@ appId: com.donna.caregiver
     optional: true
 - runFlow:
     when:
-      visible: "Apple Account|Apple Account Verification"
+      visible: "Apple Account|Apple Account Verification|Sign in to your Apple.*Account"
     commands:
+      - tapOn:
+          text: "Close"
+          optional: true
       - tapOn:
           text: "Not Now"
           optional: true
@@ -21,5 +24,5 @@ appId: com.donna.caregiver
           point: "10%,6%"
           optional: true
       - extendedWaitUntil:
-          notVisible: "Apple Account|Apple Account Verification"
+          notVisible: "Apple Account|Apple Account Verification|Sign in to your Apple.*Account"
           timeout: 5000

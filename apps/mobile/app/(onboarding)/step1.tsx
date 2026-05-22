@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Keyboard,
   KeyboardAvoidingView,
@@ -10,7 +10,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { useAuth } from "@clerk/clerk-expo";
+import { useAuth, useUser } from "@clerk/clerk-expo";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft } from "lucide-react-native";
@@ -23,6 +23,7 @@ import { clearOnboardingDraft, useOnboardingStore } from "@/src/stores/onboardin
 export default function Step1Screen() {
   const router = useRouter();
   const { getToken, signOut } = useAuth();
+  const { user } = useUser();
   const queryClient = useQueryClient();
   const { t } = useTranslation();
   const { firstName, lastName, phone, setField } =
@@ -30,6 +31,20 @@ export default function Step1Screen() {
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [exiting, setExiting] = useState(false);
+
+  useEffect(() => {
+    const nameParts = user?.fullName?.trim().split(/\s+/).filter(Boolean) ?? [];
+    const clerkFirstName = user?.firstName || nameParts[0] || "";
+    const clerkLastName = user?.lastName || nameParts.slice(1).join(" ");
+
+    if (!firstName.trim() && clerkFirstName) {
+      setField("firstName", clerkFirstName);
+    }
+
+    if (!lastName.trim() && clerkLastName) {
+      setField("lastName", clerkLastName);
+    }
+  }, [firstName, lastName, setField, user?.firstName, user?.fullName, user?.lastName]);
 
   function validate(): boolean {
     const next: Record<string, string> = {};

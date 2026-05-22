@@ -89,6 +89,7 @@
     "signUp": "Sign Up",
     "signInFailed": "Sign In Failed",
     "oauthError": "OAuth Error",
+    "oauthIncomplete": "We could not finish this sign-in. Please try again or continue with email.",
     "signUpFailed": "Sign Up Failed",
     "accountAlreadyExists": "This email already has a Donna account. Sign in instead.",
     "accountAlreadyExistsTitle": "Account already exists",

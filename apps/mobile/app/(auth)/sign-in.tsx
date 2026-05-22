@@ -1,4 +1,4 @@
-import { useAuth, useOAuth, useSignIn } from "@clerk/clerk-expo";
+import { useAuth, useOAuth, useSignIn, useSignInWithApple } from "@clerk/clerk-expo";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
@@ -20,9 +20,11 @@ import { Button } from "@/src/components/ui/Button";
 import { Input } from "@/src/components/ui/Input";
 import { COLORS } from "@/src/constants/theme";
 import { api, getErrorMessage } from "@/src/lib/api";
-import { useAppleAuthenticationWithoutProfileScopes } from "@/src/lib/appleAuth";
 import { getClerkErrorMessage, getClerkFieldErrors } from "@/src/lib/clerkErrors";
-import { clearPendingOnboardingSession } from "@/src/lib/pendingOnboardingSession";
+import {
+  clearPendingOnboardingSession,
+  markPendingOnboardingSession,
+} from "@/src/lib/pendingOnboardingSession";
 import { resolvePostAuthRoute } from "@/src/lib/profileSession";
 import { clearOnboardingDraft } from "@/src/stores/onboarding";
 
@@ -115,8 +117,7 @@ export default function SignInScreen() {
   const { startOAuthFlow: startGoogleOAuth } = useOAuth({
     strategy: "oauth_google",
   });
-  const { startAppleAuthenticationFlow } =
-    useAppleAuthenticationWithoutProfileScopes();
+  const { startAppleAuthenticationFlow } = useSignInWithApple();
 
   const [authStep, setAuthStep] = useState<AuthStep>({ type: "credentials" });
   const [email, setEmail] = useState("");
@@ -140,7 +141,7 @@ export default function SignInScreen() {
     useState<AuthFactor | null>(null);
   const passwordRef = useRef<TextInput>(null);
 
-  async function navigateAfterAuth() {
+  async function navigateAfterAuth({ allowOnboarding = false } = {}) {
     const token = await getToken();
     if (!token) {
       Alert.alert("Sign In Complete", "Please sign in again to continue.");
@@ -158,6 +159,11 @@ export default function SignInScreen() {
     } catch (error) {
       const nextRoute = resolvePostAuthRoute({ error });
       if (nextRoute) {
+        if (allowOnboarding) {
+          router.replace(nextRoute as any);
+          return;
+        }
+
         clearPendingOnboardingSession();
         try {
           await api.account.cancelIncompleteOnboarding(token);
@@ -608,10 +614,16 @@ export default function SignInScreen() {
         (result.signIn as any)?.createdSessionId ??
         (result.signUp as any)?.createdSessionId;
       const activateFn = result.setActive;
+      const createdViaOAuthSignUp = Boolean(
+        (result.signUp as any)?.createdSessionId,
+      );
 
       if (sessionId && activateFn) {
+        if (createdViaOAuthSignUp) {
+          markPendingOnboardingSession();
+        }
         await activateFn({ session: sessionId });
-        await navigateAfterAuth();
+        await navigateAfterAuth({ allowOnboarding: createdViaOAuthSignUp });
         return;
       }
 
@@ -632,6 +644,14 @@ export default function SignInScreen() {
           await navigateAfterAuth();
           return;
         }
+      }
+
+      const oauthStatus = oauthSignIn?.status ?? (result.signUp as any)?.status;
+      if (oauthStatus) {
+        Alert.alert(
+          t("auth.oauthError"),
+          t("auth.oauthIncomplete"),
+        );
       }
     } catch (err: unknown) {
       const message = getClerkErrorMessage(err, "");
