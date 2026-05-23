@@ -419,6 +419,56 @@ When the telephony client disconnects, `run_post_call()` in `services/post_call.
 7. **Cache clearing** — Clears senior context cache and reminder context
 8. **Snapshot rebuild** — Rebuilds `seniors.call_context_snapshot` JSONB (analysis, summaries, turns, daily context) so next call reads a single column instead of 6 queries
 
+## Multi-Instance Runtime State (Phase 3 of scale-2000 rollout)
+
+When more than one Pipecat replica is running, three pieces of state must be globally consistent:
+
+1. **Active-call capacity** — The Node dispatcher needs to know which replica has slots before issuing a lease.
+2. **Telnyx stream-start / websocket-token dedupe** — A signed Telnyx event can race itself; a `ws_token` must consume exactly once.
+3. **Rate-limit counters** — Per-IP and per-key limits must reflect requests across replicas, not per-replica.
+
+### Shared-state backend (`pipecat/lib/redis_client.py`)
+
+Three modes, picked at startup:
+
+| Backend | Trigger | `is_shared` |
+|---|---|---|
+| Redis TCP | `REDIS_URL` set | `True` |
+| Upstash REST | `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` set, no `REDIS_URL` | `True` while healthy (60 s circuit-breaker on failure) |
+| In-memory | no shared backend configured | `False` |
+
+`require_shared_state()` runs at startup and aborts when `PIPECAT_REQUIRE_REDIS=true` but no shared backend is available. `check_shared_state_health()` exposes the live result on `/health`.
+
+**Fail-closed semantics:** SlowAPI rate limiting uses `swallow_errors=False` when configured to use Redis storage — a Redis outage causes 429 rather than silent in-memory fallback. Telnyx stream-start dedupe and websocket-token consumption only fall back to in-memory when `shared_state_required()` is false.
+
+### Capacity heartbeat (`pipecat/services/capacity.py`)
+
+```
+publish_capacity_heartbeat() every 5 s ──► pipecat:instance:{id} hash (TTL 15 s)
+   includes: instance_id, active_calls, max_calls, inbound_active_calls,
+             pending_start_count, draining, healthy, db_pool_idle,
+             circuit_breakers_open
+
+list_capacity_instances() (Node side via services/pipecat-capacity.js):
+   scans pipecat:instance:* keys
+   drops entries older than 15 s
+   sums available slots per instance, subject to lane-reserve policy
+```
+
+The heartbeat publisher is started by `start_capacity_heartbeat()` in `main.py`. The drain flag (`_is_draining()`) flows directly into the heartbeat so the dispatcher excludes a draining replica within one publish cycle.
+
+### Drain semantics (`main.py`)
+
+- `_is_draining()` returns true on SIGTERM or when `PIPECAT_DRAINING=true`.
+- `/ws` closes new connections with 1001 when draining.
+- `/health` returns 503 with `status: "draining"` so load balancers stop sending HTTP traffic.
+- Active calls run to completion; capacity heartbeat continues advertising the replica as `draining=true`.
+- Inbound active calls are tracked separately (`_inbound_active_calls`) so the dispatcher can apply the inbound lane reserve.
+
+### Dual-path call seeding (`pipecat/api/routes/telnyx.py`)
+
+`TelnyxOutboundCallRequest` accepts optional `queue_id` and `reservation_id` from the dispatcher. Both flow into call metadata so post-call processing and audit trails can attribute the call to the queue path. When the legacy scheduler dials, those fields are absent and the metadata records `architecture=legacy`.
+
 ## Directory Structure
 
 ```

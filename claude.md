@@ -17,6 +17,8 @@ Do NOT confuse the Node.js `services/` with `pipecat/services/` — they are sep
 
 **Donna** is an AI-powered companion that makes friendly phone calls to elderly individuals (70+): daily check-ins, medication reminders, companionship, and summaries/alerts for caregivers.
 
+
+
 ---
 
 ## Architecture Decision: Two Backends
@@ -46,6 +48,23 @@ Telnyx → Deepgram STT → Quick Observer (regex, 0ms) → Conversation Directo
 - **Claude tools in main flow:** `web_search` (Tavily → OpenAI fallback) and `mark_reminder_acknowledged` (fire-and-forget). Everything else is Director/post-call.
 - **Post-call:** analysis (Gemini), memory extraction (OpenAI), interest discovery, daily-context save, JSONB snapshot rebuild.
 
+### Outbound Dispatch — Dual-Path Rollout (Phases 0–3 shipped on `zuludev`)
+
+Outbound dialing is mid-migration from the legacy in-process scheduler to a durable queue dispatcher. Both paths run side-by-side during rollout, gated by `CALL_ARCHITECTURE_MODE`. A shared dial-authority guard (`outbound_call_guards.guard_key`, unique) ensures only one path dials per call.
+
+| `CALL_ARCHITECTURE_MODE` | Legacy dials? | Queue does | Real queue dial? |
+|---|---|---|---|
+| `legacy_only` | yes (no guard) | nothing | no |
+| `shadow_materialize` | yes (guarded) | inserts queue rows for comparison | no |
+| `shadow_dispatch` | yes (guarded) | dry-run leases + shadow comparisons | no |
+| `canary_queue` | yes (non-canary, guarded) | leases canary cohort | yes (gated by `CALL_QUEUE_ALLOW_REAL_DIAL=true` + cohort selector) |
+| `queue_primary` | no | leases everything | yes |
+| `legacy_rollback` | yes (guarded) | off | no |
+
+**Load-bearing primitives.** Postgres decides *what* (queue rows, leases, guards, attempts); Redis decides *what is running right now* (capacity heartbeats, dedupe). `services/call-queue.js` leases via `FOR UPDATE SKIP LOCKED`. `pipecat/services/capacity.py` publishes heartbeats at `pipecat:instance:{id}` (5 s publish, 15 s TTL). `PIPECAT_REQUIRE_REDIS=true` fails closed at startup; `REDIS_RATE_LIMITS_ENABLED=true` makes SlowAPI fail closed under Redis outage. Materializer is canary-blind by design — cohort selection happens at dispatch, not at insert.
+
+Plan and runbooks: [`docs/plans/2026-05-18-scale-to-2000-users-technical-plan.md`](docs/plans/2026-05-18-scale-to-2000-users-technical-plan.md), [`docs/operations/scale-2000-*.md`](docs/operations/).
+
 ---
 
 ## When Making Changes — File Lookup
@@ -66,6 +85,11 @@ Telnyx → Deepgram STT → Quick Observer (regex, 0ms) → Conversation Directo
 | Context pre-cache (5 AM local) | `pipecat/services/context_cache.py` |
 | Cross-call daily context | `pipecat/services/daily_context.py` |
 | Reminder scheduling | `pipecat/services/scheduler.py` + `pipecat/services/reminder_delivery.py` |
+| Outbound dispatcher / queue / lane policy | `services/call-queue.js` (Node; lease, dispatch, modes) + `services/call-schedules.js` (materializer) |
+| Cross-replica capacity reporting | `pipecat/services/capacity.py` (publisher, 5s/15s TTL) + `services/pipecat-capacity.js` (Node reader) |
+| Dial-authority guard | `services/call-queue.js` (`acquireOutboundCallGuard` + `markOutboundCallGuardInitiatingIfCallable`) — table `outbound_call_guards` |
+| Shared-state / Redis fail-closed | `pipecat/lib/redis_client.py` (`require_shared_state`, Upstash circuit-breaker) |
+| Scale-2000 drills + runbooks | `scripts/run-live-telnyx-drill.js`, `pipecat/scripts/redis_shared_state_drill.py`; `docs/operations/scale-2000-*.md` |
 | Per-senior call settings | `pipecat/services/seniors.py` (`get_call_settings()`) |
 | Caregiver notes | `pipecat/services/caregivers.py` + `pipecat/flows/tools.py` |
 | Circuit breakers | `pipecat/lib/circuit_breaker.py` |

@@ -90,7 +90,7 @@ Telnyx media stream WebSockets are gated separately:
 
 **File**: `pipecat/api/middleware/rate_limit.py`
 
-Five rate limit tiers using `slowapi` (backed by in-memory storage, keyed by remote address):
+Five rate limit tiers using `slowapi`, keyed by remote address:
 
 | Tier | Limit | Applies To |
 |------|-------|-----------|
@@ -99,6 +99,10 @@ Five rate limit tiers using `slowapi` (backed by in-memory storage, keyed by rem
 | Write Operations | 30/minute | POST/PUT/DELETE |
 | Auth Endpoints | 10/minute | Login/token endpoints |
 | Webhooks | 500/minute | Telnyx callbacks |
+
+**Storage backend (multi-instance):** When `REDIS_RATE_LIMITS_ENABLED=true`, SlowAPI uses `REDIS_URL` so counters are global across replicas, with `swallow_errors=False` — a Redis outage in scaled mode fails closed (429) rather than silently degrading to per-replica in-memory limits. The Node side uses the equivalent `services/redis-rate-limit-store.js` SlowAPI-compatible store. Without `REDIS_RATE_LIMITS_ENABLED`, both fall back to in-memory storage (each replica counts independently — acceptable for single-instance dev/staging).
+
+**Service-to-service carve-out (Phase 4 work item):** Requests authenticated with the labeled `dispatcher` API key are rate-limited separately from public traffic, far more loosely. Without this carve-out, the dispatcher would throttle itself at the 5/minute call-initiation limit once it crosses 600 dials in 15 minutes from a single replica. This is configured in `pipecat/api/middleware/api_auth.py` and gated by Phase 4 of the scaling rollout (see [plan §3 Phase 4](../plans/2026-05-18-scale-to-2000-users-technical-plan.md)).
 
 ---
 
@@ -220,8 +224,18 @@ Global exception handlers prevent internal details from leaking:
 - `JWT_SECRET`, `DONNA_API_KEYS`, `FIELD_ENCRYPTION_KEY`, `PIPECAT_PUBLIC_URL`, `TELNYX_API_KEY`, `TELNYX_PUBLIC_KEY`, `TELNYX_PHONE_NUMBER`, and `TELNYX_CONNECTION_ID` are required in production
 - Node also requires `CLERK_SECRET_KEY` for Clerk-authenticated routes in production
 - `PIPECAT_REQUIRE_REDIS=true` requires `REDIS_URL` before horizontal scaling
+- `REDIS_RATE_LIMITS_ENABLED=true` requires `REDIS_URL` and makes rate limiting fail-closed in scaled mode (Node + Pipecat)
 - API keys stored as env vars, never committed to code
 - Sentry configured with `send_default_pii=False`
+
+### Shared-state fail-closed (multi-instance Pipecat)
+
+When more than one Pipecat replica runs, in-process state diverges (rate-limit counters, dedupe locks, capacity registry, telnyx stream-start locks). To prevent silent drift:
+
+- `pipecat/lib/redis_client.py:require_shared_state()` raises during startup if `PIPECAT_REQUIRE_REDIS=true` and neither `REDIS_URL` nor a working Upstash REST endpoint is available.
+- Upstash REST has a 60 s circuit-breaker: a failed request flips `is_shared=False` until the cooldown elapses, so callers can detect they are running in degraded single-instance mode.
+- Telnyx stream-start dedupe, websocket token consumption, and call-metadata writes use Redis when configured; the local-memory fallback is gated by `shared_state_required()` returning false.
+- `/health` reports `shared_state.ok` and `shared_state.degraded`; readiness is 503 when `ok=False`.
 
 ### Mobile Public Build Environment
 

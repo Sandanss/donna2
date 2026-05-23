@@ -37,7 +37,9 @@ This document describes Donna's current system architecture with the **Pipecat v
 │   ┌──────────────────────────────────────────────────────────────┐          │
 │   │                  Node.js API (Railway)                        │          │
 │   │    routes/ — frontend APIs, health, waitlist                 │          │
-│   │    services/scheduler.js — active reminder polling           │          │
+│   │    services/scheduler.js — legacy plan + dual-write to queue │          │
+│   │    services/call-queue.js — durable dispatcher (Phase 2+)    │          │
+│   │    services/pipecat-capacity.js — cross-replica capacity read│          │
 │   └──────────────────────────────────────────────────────────────┘          │
 │                                                                              │
 │   ┌──────────────┐                                                          │
@@ -130,6 +132,9 @@ This document describes Donna's current system architecture with the **Pipecat v
 │   │  seniors | conversations | memories | reminders | reminder_deliveries │  │
 │   │  caregivers | caregiver_notes | call_analyses | daily_call_context    │  │
 │   │  notifications | audit_logs | waitlist | admin_users                  │  │
+│   │  Queue layer (Phase 1): senior_call_schedules | call_queue            │  │
+│   │  call_attempts | post_call_jobs | outbound_call_guards                │  │
+│   │  scheduler_shadow_comparisons                                         │  │
 │   └──────────────────────────────────────────────────────────────────────┘  │
 │                                                                              │
 └──────────────────────────────────────────────────────────────────────────────┘
@@ -340,9 +345,33 @@ pipecat/
 |---------|---------------|---------|
 | **Circuit Breakers** | `lib/circuit_breaker.py` | Groq, Gemini, OpenAI embedding/news, Tavily |
 | **Feature Flags** | `lib/growthbook.py` | GrowthBook SDK wrapper with defaults when unavailable |
-| **Graceful Shutdown** | `main.py` | Tracks active calls, 7s drain on SIGTERM |
-| **Enhanced /health** | `main.py` | Database connectivity + circuit breaker states |
+| **Graceful Shutdown (Pipecat)** | `main.py` | Tracks active calls, drain flag in capacity heartbeat, websocket rejects new connections when draining |
+| **Graceful Shutdown (Node)** | `index.js` | `setQueueDispatcherDraining(true)` + drain reservations up to `NODE_DISPATCHER_DRAIN_TIMEOUT_MS` |
+| **Cross-Replica Capacity** | `pipecat/services/capacity.py` + `services/pipecat-capacity.js` | Heartbeats at `pipecat:instance:{id}`, 5s publish, 15s TTL |
+| **Shared-State Fail-Closed** | `pipecat/lib/redis_client.py` | `PIPECAT_REQUIRE_REDIS=true` aborts startup if Redis missing; Upstash REST has 60s circuit-breaker on failure |
+| **Distributed Rate Limit** | `pipecat/api/middleware/rate_limit.py` | SlowAPI uses Redis storage with `swallow_errors=False` when `REDIS_RATE_LIMITS_ENABLED=true` |
+| **Enhanced /health** | `main.py` | Database + circuit breakers + shared-state status + draining flag |
 | **Per-Senior Settings** | `seniors.call_settings` | JSONB column for time limits, greeting style, etc. |
+
+---
+
+## Outbound Dispatch — Dual-Path Rollout
+
+The outbound call path is mid-migration from the legacy in-process Node scheduler to a durable Postgres-backed queue dispatcher. Both paths run simultaneously during rollout, gated by `CALL_ARCHITECTURE_MODE`, mediated by a shared dial-authority guard.
+
+```
+Scheduler tick (every 60s):
+  legacy plan ─┬─► acquire outbound_call_guards row ─► Telnyx dial ─► record call_attempt (architecture=legacy)
+               │
+               └─► materialize each due call into call_queue (shadow_materialize and above)
+
+Dispatcher tick (every N seconds, in same Node process):
+  call_queue ──► FOR UPDATE SKIP LOCKED lease ──► acquire same guard ──► Telnyx dial ──► record call_attempt (architecture=queue)
+                                                          │
+                                                          └─► loses the race when legacy already holds the guard → suppress
+```
+
+Mode progression: `legacy_only` → `shadow_materialize` → `shadow_dispatch` → `canary_queue` → `queue_primary`. `legacy_rollback` is the emergency exit. See [`ARCHITECTURE.md`](ARCHITECTURE.md#outbound-call-dispatch--dual-path-rollout) for the full mode matrix and the consistency-model rule (Postgres decides *what*, Redis decides *what is running right now*).
 
 ---
 

@@ -150,6 +150,53 @@ Step 4: Daily context (depends on Step 2)        ── sequential
 
 ---
 
+## Outbound Call Dispatch — Dual-Path Rollout
+
+Donna is rolling the outbound dialer off the in-process Node scheduler onto a durable Postgres-backed queue. The two paths run side-by-side, gated by `CALL_ARCHITECTURE_MODE`, until the queue is dial authority (`queue_primary`). See [`docs/plans/2026-05-18-scale-to-2000-users-technical-plan.md`](../plans/2026-05-18-scale-to-2000-users-technical-plan.md) for the full plan.
+
+```
+                       ┌── Legacy plan ────┐
+                       │ services/         │ acquires guard, dials Telnyx,
+  scheduler.js tick ──►│ scheduler.js      │ records call_attempt (architecture=legacy)
+                       │ (in-process)      │
+                       └─────────┬─────────┘
+                                 │ (in shadow_materialize / shadow_dispatch / canary_queue / queue_primary)
+                                 ▼ materialize each due call into call_queue
+                       ┌── Queue path ─────┐
+                       │ services/         │ FOR UPDATE SKIP LOCKED leases,
+  dispatcher tick ────►│ call-queue.js     │ acquires guard, dials Telnyx,
+                       │ (in-process)      │ records call_attempt (architecture=queue)
+                       └─────────┬─────────┘
+                                 │
+                  outbound_call_guards (guard_key UNIQUE) ◄── one path wins per call
+                                 │
+                                 ▼
+                  POST /telnyx/outbound on Pipecat with {queue_id?, reservation_id?}
+```
+
+**Consistency model.** Postgres decides *what* runs (queue rows, leases, guards, attempts, jobs); Redis decides *what is running right now* (capacity heartbeats, dedupe TTLs, rate limits). The dispatcher reads capacity from Redis but only commits dial authority by acquiring a Postgres row.
+
+**Modes (`CALL_ARCHITECTURE_MODE`):**
+
+| Mode | Legacy dials | Queue inserts | Queue dispatches | Real queue dial |
+|---|---|---|---|---|
+| `legacy_only` | yes (no guard) | no | no | no |
+| `shadow_materialize` | yes (guarded) | yes | no | no |
+| `shadow_dispatch` | yes (guarded) | yes | dry-run lease + comparison | no |
+| `canary_queue` | yes (non-canary, guarded) | yes | leases canary cohort | yes (requires `CALL_QUEUE_ALLOW_REAL_DIAL=true` + cohort selector) |
+| `queue_primary` | no | yes | leases everything | yes |
+| `legacy_rollback` | yes (guarded) | yes (for visibility) | no | no |
+
+**Dial-authority guard.** `outbound_call_guards.guard_key` is `INSERT ... ON CONFLICT DO NOTHING`-protected. Both paths build the same guard key from `(callType, seniorId, scheduleOrReminderId, targetAt)` and race for it; the loser suppresses its dial. The transition `active → initiating` happens inside the transaction that issues the Telnyx call, after rechecking senior `is_active` and `deleted_at` (closes the senior-delete race).
+
+**Materializer is canary-blind by design.** All due schedules materialize into `call_queue` regardless of cohort. Canary selection happens at dispatch time via `canaryPercent` + `canarySeniorIds`; the legacy scheduler removes canary seniors from its own plan in `canary_queue` mode so the guard mediates only between cohorts that should converge.
+
+**Capacity coordination.** `pipecat/services/capacity.py` publishes per-replica heartbeats every 5s to `pipecat:instance:{id}` with a 15s TTL. `services/pipecat-capacity.js` reads via Redis → Upstash REST → local fallback. The dispatcher computes available slots per instance and respects lane reserves (`reminders`, `manual`, `scheduled`, `inbound`) before issuing leases.
+
+**Reconciler.** `reconcileQueueLeases` recovers expired `call_queue` leases and expires overdue queued rows past `latest_at`. `outbound_call_guards` rows store `expires_at` but the queue-side reconciler does not yet release stale guards on its own — that is a tracked Phase 4 follow-up (see [plan §3 Phase 4](../plans/2026-05-18-scale-to-2000-users-technical-plan.md) work item 6).
+
+---
+
 ## Database Schema
 
 **Engine**: Neon PostgreSQL with pgvector extension
@@ -160,7 +207,7 @@ Step 4: Daily context (depends on Step 2)        ── sequential
 | `conversations` | Call records with encrypted transcripts and summaries | call_sid, senior_id + started_at DESC |
 | `memories` | Semantic memory store (pgvector embeddings) | senior_id, HNSW on embedding |
 | `reminders` | Scheduled reminders (one-time + recurring) | scheduled_time WHERE active, is_recurring |
-| `reminder_deliveries` | Delivery tracking per call attempt | reminder_id + scheduled_for, status |
+| `reminder_deliveries` | Delivery tracking per call attempt | reminder_id + scheduled_for, status; `delivery_key` (unique) for idempotency |
 | `caregivers` | Family member relationships | senior_id |
 | `call_analyses` | Post-call analysis results | senior_id + created_at DESC |
 | `daily_call_context` | Cross-call same-day memory | senior_id + call_date |
@@ -169,6 +216,12 @@ Step 4: Daily context (depends on Step 2)        ── sequential
 | `waitlist` | Public waitlist signups | name, email, phone, who_for |
 | `audit_logs` | HIPAA audit events | user_id, action, resource_type, created_at |
 | `prospects` | Onboarding callers (not yet seniors) | phone |
+| `senior_call_schedules` | Normalized recurring/one-time call schedules (Phase 1 of queue rollout) | senior_id, next_run_at |
+| `call_queue` | Durable outbound dispatch queue with `FOR UPDATE SKIP LOCKED` leasing | unique `dedupe_key`, `(status, priority DESC, run_after)` |
+| `call_attempts` | Per-dispatch attempt audit trail with architecture/cohort/test_run_id | `(queue_id, attempt_number)` unique, `call_control_id` unique where not null |
+| `post_call_jobs` | Queued post-call work with attempt counts and leases | `dedupe_key` unique, `(status, priority DESC, run_after)` |
+| `outbound_call_guards` | **Dial-authority guard** shared by legacy + queue paths; only one path may dial per `guard_key` | unique `guard_key`, status `active → initiating → completed/cancelled` |
+| `scheduler_shadow_comparisons` | Side-by-side legacy/queue decision audit during shadow rollout | senior_id, decided_at |
 
 ---
 

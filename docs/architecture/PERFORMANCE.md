@@ -58,6 +58,33 @@ Result: scheduled reminder calls usually spend ring time on Telnyx setup and con
 
 ---
 
+## Outbound Dispatch & Cross-Replica Capacity
+
+**Active files**: `services/call-queue.js`, `services/pipecat-capacity.js`, `pipecat/services/capacity.py`
+
+The dispatcher reads available capacity from a cross-replica registry before issuing a queue lease, so a hot replica is not handed more calls than it can run. Heartbeat shape:
+
+| Field | Source | Used for |
+|---|---|---|
+| `instance_id` | Pipecat env (`HOSTNAME` / `RAILWAY_REPLICA_ID`) | dedupe heartbeats |
+| `active_calls` | Pipecat in-process counter | per-instance occupancy |
+| `inbound_active_calls` | Pipecat counter (calls without `is_outbound=true`) | inbound-lane reserve |
+| `max_calls` | Pipecat `MAX_CALLS` config | per-instance ceiling |
+| `pending_start_count` | active reservations not yet attached to a call | overbook protection |
+| `draining` | `_is_draining()` global | dispatcher excludes the replica |
+| `db_pool_idle` | `asyncpg` pool stats | back-pressure signal |
+| `circuit_breakers_open` | breaker registry | back-pressure signal |
+
+Publisher: `pipecat/services/capacity.py` writes to `pipecat:instance:{id}` every 5 s with a 15 s TTL. Reader: `services/pipecat-capacity.js` lists all `pipecat:instance:*` heartbeats via Redis (TCP) → Upstash REST → local fallback, drops stale entries, and exposes available slots per instance to the dispatcher.
+
+**Lease mechanics**: `services/call-queue.js:leaseQueuedCalls` uses `FOR UPDATE SKIP LOCKED` over `call_queue` and writes `(lease_owner, lease_expires_at)`. `reconcileQueueLeases` recovers expired leases and expires overdue queued rows past `latest_at`.
+
+**Lane policy**: `DEFAULT_LANE_RESERVE_POLICY` reserves capacity for `reminders`, `manual`, `scheduled`, and `inbound` lanes so a flood of one lane cannot starve another. Lane reserves are computed against the *summed available slots across replicas*, not a single replica's slack.
+
+**Rate-limit at the edge**: `pipecat/api/middleware/rate_limit.py` uses Redis storage when `REDIS_RATE_LIMITS_ENABLED=true` (fail-closed via `swallow_errors=False`). Service-to-service traffic from the labeled dispatcher API key bypasses the per-IP public limit — see [SECURITY.md](SECURITY.md) for the carve-out shape.
+
+---
+
 ## Predictive Context Engine
 
 **File**: `pipecat/services/prefetch.py`
@@ -216,7 +243,23 @@ When a circuit breaker opens, the call continues in degraded mode:
 
 ---
 
-## Graceful Shutdown
+## Graceful Shutdown (Multi-Instance Aware)
+
+Two coordinated drain sequences run on shutdown:
+
+**Pipecat** (`pipecat/main.py`):
+- `_is_draining()` returns true on SIGTERM or when `PIPECAT_DRAINING=true`.
+- New websocket connections are rejected (`/ws` closes with 1001).
+- Capacity heartbeat reports `draining=true` so the dispatcher excludes the replica from new dial decisions within one heartbeat (≤ 5 s).
+- Existing calls continue to completion under the in-process active-call counter.
+- `/health` returns `status: "draining"` with 503 so load balancers stop sending new HTTP traffic.
+
+**Node** (`index.js`):
+- `setQueueDispatcherDraining(true)` stops new lease cycles.
+- `drainQueueDispatcherReservations()` waits up to `NODE_DISPATCHER_DRAIN_TIMEOUT_MS` (default 30 s) for in-flight reservations to release.
+- Reservations not released within the deadline are forcibly cleaned up; their associated `call_queue` rows are still recoverable by the next replica's reconciler via expired lease recovery.
+
+
 
 **File**: `pipecat/main.py` (lines 278-299)
 

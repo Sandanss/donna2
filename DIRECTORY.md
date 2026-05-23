@@ -22,6 +22,11 @@
 | Change greeting templates | `pipecat/services/greetings.py` |
 | Change context pre-caching | `pipecat/services/context_cache.py` |
 | Change reminder scheduling | `services/scheduler.js` (active polling/calls) + `routes/reminders.js`; touch `pipecat/services/reminder_delivery.py` only for in-call delivery acknowledgment |
+| Change outbound call queue / dispatcher | `services/call-queue.js` (dispatch, lease, lane policy, dual-path modes) + `services/call-schedules.js` (materializer) |
+| Change cross-replica Pipecat capacity reporting | `pipecat/services/capacity.py` (publisher) + `services/pipecat-capacity.js` (Node reader) |
+| Change shared-state / Redis fallback behavior | `pipecat/lib/redis_client.py` (Redis + Upstash fail-closed) + `services/redis-rate-limit-store.js` (Node SlowAPI store) |
+| Change call dial-authority guard | `services/call-queue.js` (`acquireOutboundCallGuard`, `markOutboundCallGuardInitiatingIfCallable`) — guards live in `outbound_call_guards` |
+| Run scale-2000 drills / Phase 0 baseline / live Telnyx drill | `scripts/collect-phase0-scaling-baseline.js`, `scripts/run-live-telnyx-drill.js`, `pipecat/scripts/redis_shared_state_drill.py`; runbooks under `docs/operations/scale-2000-*.md` |
 | Change per-senior call settings | `pipecat/services/seniors.py` (`get_call_settings()`) |
 | Change caregiver notes delivery | `pipecat/services/caregivers.py` + `pipecat/flows/tools.py` |
 | Change circuit breaker behavior | `pipecat/lib/circuit_breaker.py` |
@@ -128,7 +133,9 @@ pipecat/
 │   ├── caregivers.py        Caregiver relationships + notes delivery
 │   ├── data_retention.py    HIPAA data retention: batched purge of 7 tables
 │   ├── audit.py             Fire-and-forget HIPAA audit logging
-│   └── token_revocation.py  JWT token revocation: per-token + per-admin + expired cleanup
+│   ├── token_revocation.py  JWT token revocation: per-token + per-admin + expired cleanup
+│   ├── capacity.py          Per-replica capacity heartbeat published to Redis (5s publish, 15s TTL) for Node dispatcher
+│   └── hard_delete.py       Right-to-delete cascade purge (child→parent order, post_call_jobs first)
 │
 ├── lib/                 Shared utilities
 │   ├── circuit_breaker.py   Async circuit breaker for external services
@@ -240,8 +247,16 @@ Config: `playwright.config.ts` (root). Guide: [`docs/guides/FRONTEND_TESTING.md`
 /
 ├── Makefile                     Deploy commands: make deploy-dev, make test, etc.
 ├── scripts/
-│   ├── setup-environments.sh    One-time setup: Neon branches + Railway dev env
-│   └── create-admin.js          Admin user creation
+│   ├── setup-environments.sh             One-time setup: Neon branches + Railway dev env
+│   ├── create-admin.js                   Admin user creation
+│   ├── collect-phase0-scaling-baseline.js  Phase 0 baseline aggregator (PHI-free, percentile-only)
+│   ├── generate-phase0-cost-model.js     Phase 0 cost projection from baseline + assumptions JSON
+│   ├── phi-sentinel-scan.js              Daily PHI sentinel scan (counts only, no matched lines)
+│   ├── phase1-idempotency-preflight.js   Phase 1 schema/idempotency guard readiness check
+│   ├── backfill-reminder-delivery-keys.js  Race-safe delivery_key backfill with collision detection
+│   ├── backfill-call-schedules.js        preferredCallTimes → senior_call_schedules migration
+│   ├── run-live-telnyx-drill.js          Phase 0/5 staging live-call drill (consenting test phones only)
+│   └── validate-call-rollout-config.js   Validate CALL_ARCHITECTURE_MODE + queue flags before flip
 ├── .github/workflows/
 │   ├── ci.yml                   PR pipeline: tests → staging deploy → smoke tests
 │   └── deploy.yml               Production deploy on push to main
@@ -273,7 +288,11 @@ Serves all API endpoints that frontends consume. Also runs the reminder schedule
 │   └── health.js, helpers.js, index.js
 │
 ├── services/            Dual implementation with pipecat/services/
-│   ├── scheduler.js     Active reminder polling + outbound calls
+│   ├── scheduler.js     Active reminder polling + outbound calls; dual-writes to call_queue and acquires outbound guard when CALL_ARCHITECTURE_MODE != legacy_only
+│   ├── call-queue.js    Outbound dispatcher: FOR UPDATE SKIP LOCKED leasing, lane policy, dual-path modes (shadow_materialize → shadow_dispatch → canary_queue → queue_primary), reconciler
+│   ├── call-schedules.js Materializer: normalizes preferredCallTimes → senior_call_schedules → call_queue rows
+│   ├── pipecat-capacity.js Node reader of pipecat:instance:* heartbeats (Redis/Upstash/local fallback)
+│   ├── redis-rate-limit-store.js Distributed rate-limit store for Node SlowAPI equivalent
 │   ├── context-cache.js Pre-cache senior context
 │   ├── memory.js        Semantic memory, pgvector
 │   ├── call-analyses.js Post-call analysis API queries
@@ -300,7 +319,8 @@ Serves all API endpoints that frontends consume. Also runs the reminder schedule
 ├── db/
 │   ├── schema.js        Drizzle tables for seniors, reminders, notifications, waitlist, audit logs, etc.
 │   ├── client.js        Neon PostgreSQL + Drizzle ORM init
-│   └── setup-pgvector.js
+│   ├── setup-pgvector.js
+│   └── migrations/      009_call_queue_foundation.sql (6 queue tables: senior_call_schedules, call_queue, call_attempts, post_call_jobs, outbound_call_guards, scheduler_shadow_comparisons) + 010_call_queue_concurrent_indexes.sql (CREATE INDEX CONCURRENTLY — run outside transactions)
 │
 ├── validators/schemas.js  Zod validation schemas
 ├── lib/                   logger.js, sanitize.js, encryption.js (AES-256-GCM PHI encryption)
@@ -313,6 +333,11 @@ Serves all API endpoints that frontends consume. Also runs the reminder schedule
 
 ```
 docs/
+├── operations/                   Operational runbooks (active rollouts)
+│   ├── scale-2000-phase0-readiness.md   Phase 0 baseline + decision-log gate
+│   ├── scale-2000-phase1-migration-runbook.md  Queue/idempotency migration order + safety
+│   ├── scale-2000-live-drills.md        Staging dual-path scheduler + live Telnyx drill
+│   └── templates/                       phase0-cost-assumptions JSON templates
 ├── architecture/                 Architecture suite (current, authoritative)
 │   (see also: pipecat/docs/LEARNINGS.md for engineering learnings)
 │   ├── OVERVIEW.md               High-level architecture
@@ -375,7 +400,9 @@ Only load these when your task specifically requires them.
 | `pipecat/services/director_llm.py` | Groq/Gemini Director prompts and response parsing |
 | `pipecat/bot.py` | Pipeline assembly, audio profile, and sentiment greetings |
 | `pipecat/flows/nodes.py` | Subscriber/onboarding flow config and context builders |
-| `services/scheduler.js` | Active Node reminder polling and call triggering |
+| `services/scheduler.js` | Active Node.js reminder polling + outbound dispatch + dual-path coexistence (legacy plan, queue shadow materialize, shadow dispatch, queue dispatch) |
+| `services/call-queue.js` | Dispatcher core: enqueue, lease, lane policy, reconciler, modes |
+| `services/pipecat-capacity.js` | Cross-replica capacity registry reader with Redis/Upstash/local fallback |
 | `routes/observability.js` | Call monitoring and metrics aggregation |
 
 ---
