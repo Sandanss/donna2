@@ -320,7 +320,7 @@ Serves all API endpoints that frontends consume. Also runs the reminder schedule
 │   ├── schema.js        Drizzle tables for seniors, reminders, notifications, waitlist, audit logs, etc.
 │   ├── client.js        Neon PostgreSQL + Drizzle ORM init
 │   ├── setup-pgvector.js
-│   └── migrations/      009_call_queue_foundation.sql (6 queue tables: senior_call_schedules, call_queue, call_attempts, post_call_jobs, outbound_call_guards, scheduler_shadow_comparisons) + 010_call_queue_concurrent_indexes.sql (CREATE INDEX CONCURRENTLY — run outside transactions)
+│   └── migrations/      010_call_queue_foundation.sql (6 queue tables: senior_call_schedules, call_queue, call_attempts, post_call_jobs, outbound_call_guards, scheduler_shadow_comparisons) + 011_call_queue_concurrent_indexes.sql (CREATE INDEX CONCURRENTLY — run outside transactions) + 012_post_call_job_state_machine.sql
 │
 ├── validators/schemas.js  Zod validation schemas
 ├── lib/                   logger.js, sanitize.js, encryption.js (AES-256-GCM PHI encryption)
