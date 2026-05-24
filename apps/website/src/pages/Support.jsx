@@ -16,6 +16,18 @@ export default function Support() {
           <h2>Privacy-Safe Support</h2>
           <p>Please avoid sending medical details, full transcripts, medication lists, or other sensitive information by email unless we specifically ask for the minimum details needed to resolve your request.</p>
 
+          <h2>Account and App Help</h2>
+          <p>For sign-in, setup, schedule, reminder, or call summary issues, email us with your account email and a short description of the problem. Do not include medical details in support messages unless we specifically ask for them.</p>
+
+          <h2>Stop or Pause Calls</h2>
+          <p>You can stop scheduled calls in the Donna app. If you cannot access the app, email us from the caregiver account email and we will help verify the account before making changes.</p>
+
+          <h2>Account Deletion</h2>
+          <p>You can request account deletion from the Donna app. If you cannot access the app, email us from the caregiver account email and we will help verify and process the request.</p>
+
+          <h2>Billing and Cancellation</h2>
+          <p>For billing, subscription, cancellation, or refund questions, email us from the account email used for Donna.</p>
+
           <h2>Urgent Situations</h2>
           <p>Donna is not an emergency response service. If someone may be in immediate danger, call 911 or local emergency services.</p>
         </div>
