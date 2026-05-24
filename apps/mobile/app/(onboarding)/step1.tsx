@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+  ActivityIndicator,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
@@ -20,17 +21,43 @@ import { api } from "@/src/lib/api";
 import { clearPendingOnboardingSession } from "@/src/lib/pendingOnboardingSession";
 import { clearOnboardingDraft, useOnboardingStore } from "@/src/stores/onboarding";
 
+function hasAppleExternalAccount(user: unknown) {
+  const externalAccounts = (user as {
+    externalAccounts?: Array<{ provider?: string; strategy?: string }>;
+  } | null)?.externalAccounts;
+
+  return (
+    Array.isArray(externalAccounts) &&
+    externalAccounts.some((account) =>
+      [account.provider, account.strategy].some((value) =>
+        typeof value === "string" && value.toLowerCase().includes("apple"),
+      ),
+    )
+  );
+}
+
 export default function Step1Screen() {
   const router = useRouter();
   const { getToken, signOut } = useAuth();
   const { user } = useUser();
   const queryClient = useQueryClient();
   const { t } = useTranslation();
-  const { firstName, lastName, phone, setField } =
+  const { authProvider, firstName, lastName, phone, setField } =
     useOnboardingStore();
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [exiting, setExiting] = useState(false);
+  const isAppleOnboarding =
+    authProvider === "apple" || hasAppleExternalAccount(user);
+
+  useEffect(() => {
+    if (isAppleOnboarding) {
+      if (authProvider !== "apple") {
+        setField("authProvider", "apple");
+      }
+      router.replace("/(onboarding)/step2" as any);
+    }
+  }, [authProvider, isAppleOnboarding, router, setField]);
 
   useEffect(() => {
     const nameParts = user?.fullName?.trim().split(/\s+/).filter(Boolean) ?? [];
@@ -48,8 +75,10 @@ export default function Step1Screen() {
 
   function validate(): boolean {
     const next: Record<string, string> = {};
-    if (!firstName.trim()) next.firstName = t("onboarding.step1.firstNameRequired");
-    if (!lastName.trim()) next.lastName = t("onboarding.step1.lastNameRequired");
+    if (!isAppleOnboarding) {
+      if (!firstName.trim()) next.firstName = t("onboarding.step1.firstNameRequired");
+      if (!lastName.trim()) next.lastName = t("onboarding.step1.lastNameRequired");
+    }
     if (!phone.trim()) next.phone = t("onboarding.step1.phoneRequired");
     setErrors(next);
     return Object.keys(next).length === 0;
@@ -89,6 +118,14 @@ export default function Step1Screen() {
       router.replace("/");
       setExiting(false);
     }
+  }
+
+  if (isAppleOnboarding) {
+    return (
+      <SafeAreaView className="flex-1 bg-cream items-center justify-center">
+        <ActivityIndicator color={COLORS.sage} />
+      </SafeAreaView>
+    );
   }
 
   return (

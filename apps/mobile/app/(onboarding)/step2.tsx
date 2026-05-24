@@ -11,12 +11,14 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useAuth } from "@clerk/clerk-expo";
+import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ChevronDown, Check } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
 import { Button, Input, KeyboardAwareFooter, Modal, ProgressBar } from "@/src/components/ui";
 import { COLORS, RELATIONSHIP_OPTIONS } from "@/src/constants/theme";
 import { ApiError, api } from "@/src/lib/api";
-import { useOnboardingStore } from "@/src/stores/onboarding";
+import { clearPendingOnboardingSession } from "@/src/lib/pendingOnboardingSession";
+import { clearOnboardingDraft, useOnboardingStore } from "@/src/stores/onboarding";
 
 function sanitizePhoneInput(value: string): string {
   return value.replace(/[^\d+\-\s()]/g, "").slice(0, 20);
@@ -65,9 +67,11 @@ function isCaregiverPhoneMatchError(error: unknown): boolean {
 
 export default function Step2Screen() {
   const router = useRouter();
-  const { getToken } = useAuth();
+  const { getToken, signOut } = useAuth();
+  const queryClient = useQueryClient();
   const { t } = useTranslation();
   const {
+    authProvider,
     phone,
     lovedOneName,
     lovedOnePhone,
@@ -80,7 +84,9 @@ export default function Step2Screen() {
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [checkingPhone, setCheckingPhone] = useState(false);
+  const [exiting, setExiting] = useState(false);
   const [showRelationshipPicker, setShowRelationshipPicker] = useState(false);
+  const isAppleOnboarding = authProvider === "apple";
 
   function validate(): boolean {
     const next: Record<string, string> = {};
@@ -151,6 +157,40 @@ export default function Step2Screen() {
     }
   }
 
+  async function handleBack() {
+    if (!isAppleOnboarding) {
+      router.back();
+      return;
+    }
+
+    Keyboard.dismiss();
+    setExiting(true);
+
+    try {
+      const token = await getToken();
+      if (token) {
+        await api.account.cancelIncompleteOnboarding(token);
+      }
+    } catch {
+      // Continue with local cleanup. The pending Clerk account may already be gone.
+    } finally {
+      clearPendingOnboardingSession();
+      try {
+        await clearOnboardingDraft();
+      } catch {
+        // Continue; leaving setup must not be blocked by draft cleanup failure.
+      }
+      queryClient.removeQueries({ queryKey: ["profile"] });
+      try {
+        await signOut();
+      } catch {
+        // The Clerk user may already be deleted server-side.
+      }
+      router.replace("/");
+      setExiting(false);
+    }
+  }
+
   return (
     <SafeAreaView className="flex-1 bg-cream">
       <KeyboardAvoidingView
@@ -169,7 +209,8 @@ export default function Step2Screen() {
 
           {/* Back */}
           <Pressable
-            onPress={() => router.back()}
+            onPress={handleBack}
+            disabled={exiting}
             className="flex-row items-center mb-6 min-h-[48px] self-start"
             accessibilityRole="button"
             accessibilityLabel={t("common.back")}
