@@ -2,6 +2,8 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { secureDraftStorage } from "@/src/lib/secureDraftStorage";
 
+export type OnboardingAuthProvider = "email" | "google" | "apple" | null;
+
 export interface OnboardingCall {
   title: string;
   frequency: "daily" | "recurring" | "one-time";
@@ -12,6 +14,8 @@ export interface OnboardingCall {
 }
 
 interface OnboardingState {
+  // How the caregiver entered setup. Apple skips duplicate identity prompts.
+  authProvider: OnboardingAuthProvider;
   // Donna language (for calls with senior)
   donnaLanguage: "en" | "es";
   // Caregiver
@@ -70,6 +74,7 @@ const DEFAULT_CALL: OnboardingCall = {
 const ONBOARDING_DRAFT_KEY = "donna-onboarding-draft-v1";
 
 const INITIAL_STATE = {
+  authProvider: null as OnboardingAuthProvider,
   donnaLanguage: "en" as "en" | "es",
   firstName: "",
   lastName: "",
@@ -88,6 +93,7 @@ const INITIAL_STATE = {
 };
 
 const draftFields = (state: OnboardingState) => ({
+  authProvider: state.authProvider,
   donnaLanguage: state.donnaLanguage,
   firstName: state.firstName,
   lastName: state.lastName,

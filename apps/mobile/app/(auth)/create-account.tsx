@@ -1,4 +1,4 @@
-import { useAuth, useOAuth, useSignInWithApple, useSignUp } from "@clerk/clerk-expo";
+import { useAuth, useOAuth, useSignIn, useSignUp } from "@clerk/clerk-expo";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
@@ -20,13 +20,14 @@ import { Button } from "@/src/components/ui/Button";
 import { Input } from "@/src/components/ui/Input";
 import { COLORS } from "@/src/constants/theme";
 import { api, getErrorMessage } from "@/src/lib/api";
+import { startAppleAuthenticationWithoutProfileScopes } from "@/src/lib/appleAuth";
 import { getClerkErrorMessage, getClerkFieldErrors } from "@/src/lib/clerkErrors";
 import {
   clearPendingOnboardingSession,
   markPendingOnboardingSession,
 } from "@/src/lib/pendingOnboardingSession";
 import { resolvePostAuthRoute } from "@/src/lib/profileSession";
-import { clearOnboardingDraft } from "@/src/stores/onboarding";
+import { clearOnboardingDraft, useOnboardingStore } from "@/src/stores/onboarding";
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -93,13 +94,13 @@ function isExistingAccountError(error: unknown): boolean {
 export default function CreateAccountScreen() {
   const { t } = useTranslation();
   const router = useRouter();
-  const { signUp, setActive, isLoaded } = useSignUp();
+  const { signUp, setActive, isLoaded: isSignUpLoaded } = useSignUp();
+  const { signIn: appleSignIn, isLoaded: isSignInLoaded } = useSignIn();
   const { getToken, signOut } = useAuth();
   const queryClient = useQueryClient();
   const { startOAuthFlow: startGoogleOAuth } = useOAuth({
     strategy: "oauth_google",
   });
-  const { startAppleAuthenticationFlow } = useSignInWithApple();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -115,7 +116,11 @@ export default function CreateAccountScreen() {
     null,
   );
 
-  async function navigateAfterAuth() {
+  function onboardingStartRoute(provider?: "email" | "google" | "apple") {
+    return provider === "apple" ? "/(onboarding)/step2" : "/(onboarding)/step1";
+  }
+
+  async function navigateAfterAuth(provider?: "email" | "google" | "apple") {
     const token = await getToken();
     if (!token) {
       Alert.alert("Sign Up Complete", "Please sign in again to continue.");
@@ -127,13 +132,21 @@ export default function CreateAccountScreen() {
         profile: await api.caregivers.me(token),
       });
       if (nextRoute) {
-        router.replace(nextRoute as any);
+        router.replace(
+          nextRoute === "/(onboarding)/step1"
+            ? (onboardingStartRoute(provider) as any)
+            : (nextRoute as any),
+        );
         return;
       }
     } catch (error) {
       const nextRoute = resolvePostAuthRoute({ error });
       if (nextRoute) {
-        router.replace(nextRoute as any);
+        router.replace(
+          nextRoute === "/(onboarding)/step1"
+            ? (onboardingStartRoute(provider) as any)
+            : (nextRoute as any),
+        );
         return;
       }
       Alert.alert(
@@ -166,7 +179,7 @@ export default function CreateAccountScreen() {
       return;
     }
 
-    router.replace("/(onboarding)/step1" as any);
+    router.replace(onboardingStartRoute(provider) as any);
   }
 
   function handleBack() {
@@ -185,7 +198,7 @@ export default function CreateAccountScreen() {
 
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
-    if (!isLoaded) return;
+    if (!isSignUpLoaded) return;
 
     setLoading(true);
 
@@ -196,9 +209,10 @@ export default function CreateAccountScreen() {
       });
 
       if (result.createdSessionId) {
+        useOnboardingStore.getState().setField("authProvider", "email");
         markPendingOnboardingSession();
         await setActive({ session: result.createdSessionId });
-        await navigateAfterAuth();
+        await navigateAfterAuth("email");
         return;
       }
 
@@ -257,7 +271,13 @@ export default function CreateAccountScreen() {
 
       if (provider === "apple") {
         if (Platform.OS !== "ios") return;
-        result = await startAppleAuthenticationFlow();
+        result = await startAppleAuthenticationWithoutProfileScopes({
+          signIn: appleSignIn,
+          signUp,
+          setActive,
+          isSignInLoaded,
+          isSignUpLoaded,
+        });
       } else {
         result = await startGoogleOAuth();
       }
@@ -269,9 +289,10 @@ export default function CreateAccountScreen() {
       const activateFn = result.setActive;
 
       if (sessionId && activateFn) {
+        useOnboardingStore.getState().setField("authProvider", provider);
         markPendingOnboardingSession();
         await activateFn({ session: sessionId });
-        await navigateAfterAuth();
+        await navigateAfterAuth(provider);
         return;
       }
 
@@ -287,9 +308,10 @@ export default function CreateAccountScreen() {
 
         const finalSessionId = resetResult?.createdSessionId;
         if (finalSessionId && result.setActive) {
+          useOnboardingStore.getState().setField("authProvider", provider);
           markPendingOnboardingSession();
           await result.setActive({ session: finalSessionId });
-          await navigateAfterAuth();
+          await navigateAfterAuth(provider);
           return;
         }
       }

@@ -312,16 +312,27 @@ export const api = {
       phone: string,
       token: string,
       options?: { caregiverPhone?: string; relationship?: string },
-    ) =>
-      fetchJson<{ available: boolean }>("/api/onboarding/validate-phone", {
+    ) => {
+      const caregiverPhone = options?.caregiverPhone?.trim();
+      const body: {
+        phone: string;
+        caregiverPhone?: string;
+        relation?: string;
+      } = {
+        phone,
+        relation: options?.relationship,
+      };
+
+      if (caregiverPhone) {
+        body.caregiverPhone = caregiverPhone;
+      }
+
+      return fetchJson<{ available: boolean }>("/api/onboarding/validate-phone", {
         method: "POST",
-        body: JSON.stringify({
-          phone,
-          caregiverPhone: options?.caregiverPhone,
-          relation: options?.relationship,
-        }),
+        body: JSON.stringify(body),
         token,
-      }),
+      });
+    },
 
     /** POST /api/onboarding -- creates senior + links to Clerk user + creates reminders */
     complete: (data: OnboardingInput, token: string, options?: WriteOptions) =>

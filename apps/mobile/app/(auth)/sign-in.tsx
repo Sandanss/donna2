@@ -1,4 +1,4 @@
-import { useAuth, useOAuth, useSignIn, useSignInWithApple } from "@clerk/clerk-expo";
+import { useAuth, useOAuth, useSignIn, useSignUp } from "@clerk/clerk-expo";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
@@ -20,13 +20,14 @@ import { Button } from "@/src/components/ui/Button";
 import { Input } from "@/src/components/ui/Input";
 import { COLORS } from "@/src/constants/theme";
 import { api, getErrorMessage } from "@/src/lib/api";
+import { startAppleAuthenticationWithoutProfileScopes } from "@/src/lib/appleAuth";
 import { getClerkErrorMessage, getClerkFieldErrors } from "@/src/lib/clerkErrors";
 import {
   clearPendingOnboardingSession,
   markPendingOnboardingSession,
 } from "@/src/lib/pendingOnboardingSession";
 import { resolvePostAuthRoute } from "@/src/lib/profileSession";
-import { clearOnboardingDraft } from "@/src/stores/onboarding";
+import { clearOnboardingDraft, useOnboardingStore } from "@/src/stores/onboarding";
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -117,7 +118,7 @@ export default function SignInScreen() {
   const { startOAuthFlow: startGoogleOAuth } = useOAuth({
     strategy: "oauth_google",
   });
-  const { startAppleAuthenticationFlow } = useSignInWithApple();
+  const { signUp: appleSignUp, isLoaded: isSignUpLoaded } = useSignUp();
 
   const [authStep, setAuthStep] = useState<AuthStep>({ type: "credentials" });
   const [email, setEmail] = useState("");
@@ -141,7 +142,17 @@ export default function SignInScreen() {
     useState<AuthFactor | null>(null);
   const passwordRef = useRef<TextInput>(null);
 
-  async function navigateAfterAuth({ allowOnboarding = false } = {}) {
+  function onboardingStartRoute(provider?: "google" | "apple") {
+    return provider === "apple" ? "/(onboarding)/step2" : "/(onboarding)/step1";
+  }
+
+  async function navigateAfterAuth({
+    allowOnboarding = false,
+    provider,
+  }: {
+    allowOnboarding?: boolean;
+    provider?: "google" | "apple";
+  } = {}) {
     const token = await getToken();
     if (!token) {
       Alert.alert("Sign In Complete", "Please sign in again to continue.");
@@ -153,14 +164,22 @@ export default function SignInScreen() {
         profile: await api.caregivers.me(token),
       });
       if (nextRoute) {
-        router.replace(nextRoute as any);
+        router.replace(
+          nextRoute === "/(onboarding)/step1"
+            ? (onboardingStartRoute(provider) as any)
+            : (nextRoute as any),
+        );
         return;
       }
     } catch (error) {
       const nextRoute = resolvePostAuthRoute({ error });
       if (nextRoute) {
         if (allowOnboarding) {
-          router.replace(nextRoute as any);
+          router.replace(
+            nextRoute === "/(onboarding)/step1"
+              ? (onboardingStartRoute(provider) as any)
+              : (nextRoute as any),
+          );
           return;
         }
 
@@ -200,7 +219,7 @@ export default function SignInScreen() {
       return;
     }
 
-    router.replace("/(onboarding)/step1" as any);
+    router.replace(onboardingStartRoute(provider) as any);
   }
 
   function clearVerificationUi() {
@@ -602,7 +621,13 @@ export default function SignInScreen() {
 
       if (provider === "apple") {
         if (Platform.OS !== "ios") return;
-        result = await startAppleAuthenticationFlow();
+        result = await startAppleAuthenticationWithoutProfileScopes({
+          signIn,
+          signUp: appleSignUp,
+          setActive,
+          isSignInLoaded: isLoaded,
+          isSignUpLoaded,
+        });
       } else {
         result = await startGoogleOAuth();
       }
@@ -620,10 +645,14 @@ export default function SignInScreen() {
 
       if (sessionId && activateFn) {
         if (createdViaOAuthSignUp) {
+          useOnboardingStore.getState().setField("authProvider", provider);
           markPendingOnboardingSession();
         }
         await activateFn({ session: sessionId });
-        await navigateAfterAuth({ allowOnboarding: createdViaOAuthSignUp });
+        await navigateAfterAuth({
+          allowOnboarding: createdViaOAuthSignUp,
+          provider,
+        });
         return;
       }
 
@@ -641,7 +670,7 @@ export default function SignInScreen() {
         const finalSessionId = resetResult?.createdSessionId;
         if (finalSessionId && result.setActive) {
           await result.setActive({ session: finalSessionId });
-          await navigateAfterAuth();
+          await navigateAfterAuth({ provider });
           return;
         }
       }
@@ -832,17 +861,17 @@ export default function SignInScreen() {
                 />
               </View>
 
-              <View className="flex-row justify-center mb-8">
-                <Text className="text-muted text-[15px]">
+              <View className="flex-row items-center justify-center mb-8">
+                <Text className="text-muted text-[15px] text-center">
                   {t("auth.noAccount")}{" "}
                 </Text>
                 <Pressable
                   onPress={() => router.replace("/(auth)/create-account")}
-                  className="min-h-[48px] justify-center"
+                  className="min-h-[48px] px-1 items-center justify-center"
                   accessibilityRole="link"
                   accessibilityLabel={t("auth.signUp")}
                 >
-                  <Text className="text-sage text-[15px] font-semibold">
+                  <Text className="text-sage text-[15px] font-semibold text-center">
                     {t("auth.signUp")}
                   </Text>
                 </Pressable>
