@@ -5,8 +5,27 @@ import { createLogger } from '../lib/logger.js';
 import { maskName, maskPhone } from '../lib/sanitize.js';
 import { resolveTimezoneFromProfile } from '../lib/timezone.js';
 import { decryptSeniorPhi, encryptSeniorPhi } from '../lib/phi.js';
+import { resolveCallArchitectureConfig } from './call-queue.js';
+import { syncSeniorCallSchedulesFromPreferredCallTimes } from './call-schedules.js';
 
 const log = createLogger('Senior');
+
+function shouldSyncCallSchedules() {
+  const config = resolveCallArchitectureConfig();
+  return process.env.CALL_QUEUE_DUAL_WRITE_SCHEDULES === 'true' || config.shadowMaterialize;
+}
+
+async function syncCallSchedulesIfEnabled(senior) {
+  if (!senior?.id || !shouldSyncCallSchedules()) return;
+  try {
+    await syncSeniorCallSchedulesFromPreferredCallTimes(senior);
+  } catch (error) {
+    log.warn('Call schedule dual-write failed; legacy schedule remains source of truth', {
+      seniorId: senior.id,
+      error: error.message,
+    });
+  }
+}
 
 async function assertNoActiveSeniorLegalHold(tx, seniorId) {
   const result = await tx.execute(sql`
@@ -59,6 +78,47 @@ async function assertNoActiveSeniorLegalHold(tx, seniorId) {
             AND lh.resource_id = n.id::text
         )
         OR EXISTS (
+          SELECT 1 FROM senior_call_schedules scs
+          WHERE scs.senior_id = ${seniorId}
+            AND lh.resource_type = 'senior_call_schedule'
+            AND lh.resource_id = scs.id::text
+        )
+        OR EXISTS (
+          SELECT 1 FROM call_queue cq
+          WHERE cq.senior_id = ${seniorId}
+            AND lh.resource_type = 'call_queue'
+            AND lh.resource_id = cq.id::text
+        )
+        OR EXISTS (
+          SELECT 1 FROM call_attempts cat
+          WHERE cat.senior_id = ${seniorId}
+            AND lh.resource_type = 'call_attempt'
+            AND lh.resource_id = cat.id::text
+        )
+        OR EXISTS (
+          SELECT 1 FROM post_call_jobs pcj
+          WHERE (
+              pcj.senior_id = ${seniorId}
+              OR pcj.conversation_id IN (
+                SELECT c.id FROM conversations c WHERE c.senior_id = ${seniorId}
+              )
+            )
+            AND lh.resource_type = 'post_call_job'
+            AND lh.resource_id = pcj.id::text
+        )
+        OR EXISTS (
+          SELECT 1 FROM outbound_call_guards ocg
+          WHERE ocg.senior_id = ${seniorId}
+            AND lh.resource_type = 'outbound_call_guard'
+            AND lh.resource_id = ocg.id::text
+        )
+        OR EXISTS (
+          SELECT 1 FROM scheduler_shadow_comparisons ssc
+          WHERE ssc.senior_id = ${seniorId}
+            AND lh.resource_type = 'scheduler_shadow_comparison'
+            AND lh.resource_id = ssc.id::text
+        )
+        OR EXISTS (
           SELECT 1 FROM caregiver_notes cn
           WHERE cn.senior_id = ${seniorId}
             AND lh.resource_type = 'caregiver_note'
@@ -97,7 +157,9 @@ export const seniorService = {
       }).returning();
 
       log.info('Created senior', { name: maskName(senior.name), phone: maskPhone(senior.phone) });
-      return decryptSeniorPhi(senior);
+      const decrypted = decryptSeniorPhi(senior);
+      await syncCallSchedulesIfEnabled(decrypted);
+      return decrypted;
     } catch (error) {
       if (error.code === '23505' && error.constraint?.includes('phone')) {
         const err = new Error('This phone number is already registered for another senior');
@@ -141,7 +203,9 @@ export const seniorService = {
         .where(eq(seniors.id, id))
         .returning();
 
-      return senior ? decryptSeniorPhi(senior) : null;
+      const decrypted = senior ? decryptSeniorPhi(senior) : null;
+      await syncCallSchedulesIfEnabled(decrypted);
+      return decrypted;
     } catch (error) {
       if (error.code === '23505' && error.constraint?.includes('phone')) {
         const err = new Error('This phone number is already registered for another senior');
@@ -245,7 +309,40 @@ export const seniorService = {
       `)).rows;
       counts.idempotency_keys = idemCount?.count || 0;
 
+      const [scheduleCount] = (await tx.execute(sql`SELECT COUNT(*)::int AS count FROM senior_call_schedules WHERE senior_id = ${id}`)).rows;
+      counts.senior_call_schedules = scheduleCount?.count || 0;
+
+      const [queueCount] = (await tx.execute(sql`SELECT COUNT(*)::int AS count FROM call_queue WHERE senior_id = ${id}`)).rows;
+      counts.call_queue = queueCount?.count || 0;
+
+      const [attemptCount] = (await tx.execute(sql`SELECT COUNT(*)::int AS count FROM call_attempts WHERE senior_id = ${id}`)).rows;
+      counts.call_attempts = attemptCount?.count || 0;
+
+      const [jobCount] = (await tx.execute(sql`
+        SELECT COUNT(*)::int AS count
+        FROM post_call_jobs
+        WHERE senior_id = ${id}
+           OR conversation_id IN (SELECT id FROM conversations WHERE senior_id = ${id})
+      `)).rows;
+      counts.post_call_jobs = jobCount?.count || 0;
+
+      const [guardCount] = (await tx.execute(sql`SELECT COUNT(*)::int AS count FROM outbound_call_guards WHERE senior_id = ${id}`)).rows;
+      counts.outbound_call_guards = guardCount?.count || 0;
+
+      const [shadowCount] = (await tx.execute(sql`SELECT COUNT(*)::int AS count FROM scheduler_shadow_comparisons WHERE senior_id = ${id}`)).rows;
+      counts.scheduler_shadow_comparisons = shadowCount?.count || 0;
+
       // 2. DELETE in dependency order (deepest children first)
+      await tx.execute(sql`
+        DELETE FROM post_call_jobs
+        WHERE senior_id = ${id}
+           OR conversation_id IN (SELECT id FROM conversations WHERE senior_id = ${id})
+      `);
+      await tx.execute(sql`DELETE FROM scheduler_shadow_comparisons WHERE senior_id = ${id}`);
+      await tx.execute(sql`DELETE FROM outbound_call_guards WHERE senior_id = ${id}`);
+      await tx.execute(sql`DELETE FROM call_attempts WHERE senior_id = ${id}`);
+      await tx.execute(sql`DELETE FROM call_queue WHERE senior_id = ${id}`);
+      await tx.execute(sql`DELETE FROM senior_call_schedules WHERE senior_id = ${id}`);
       await tx.delete(notificationPreferences)
         .where(inArray(notificationPreferences.caregiverId,
           tx.select({ id: caregivers.id }).from(caregivers).where(eq(caregivers.seniorId, id))

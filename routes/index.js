@@ -20,6 +20,9 @@ import dailyContextRoutes from './daily-context.js';
 import notificationRoutes from './notifications.js';
 import waitlistRoutes from './waitlist.js';
 import chatRoutes from './chat.js';
+import postCallJobRoutes from './post-call-jobs.js';
+import scaleOperationRoutes from './scale-operations.js';
+import canaryRoutes from './canary.js';
 
 export function mountRoutes(app) {
   app.use(healthRoutes);
@@ -38,4 +41,7 @@ export function mountRoutes(app) {
   app.use(dailyContextRoutes);
   app.use(notificationRoutes);
   app.use(chatRoutes);
+  app.use(postCallJobRoutes);
+  app.use(scaleOperationRoutes);
+  app.use(canaryRoutes);
 }

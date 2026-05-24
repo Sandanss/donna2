@@ -7,6 +7,23 @@ import { createLogger } from '../lib/logger.js';
 import { decryptReminderPhi, decryptSeniorPhi, encryptReminderDeliveryPhi } from '../lib/phi.js';
 import { resolveFlags, getValue } from '../lib/growthbook.js';
 import {
+  CALL_ARCHITECTURE_MODES,
+  acquireOutboundCallGuard,
+  reconcileOutboundCallGuards,
+  buildQueueInputFromLegacyCallSpec,
+  dispatchQueuedCalls,
+  dryRunDispatchQueuedCalls,
+  isSeniorInQueueCanaryCohort,
+  markOutboundCallGuardInitiated,
+  materializeLegacyCallPlan,
+  reconcileQueueLeases,
+  releaseOutboundCallGuard,
+  resolveCallArchitectureConfig,
+} from './call-queue.js';
+import { materializeDueNormalizedSchedules } from './call-schedules.js';
+import { readPipecatCapacityRegistry } from './pipecat-capacity.js';
+import { resolveMergedCanarySeniorIds } from './canary-cohort.js';
+import {
   DEFAULT_TIMEZONE,
   getDatePartsInTimezone,
   parseDailyCronExpression,
@@ -83,6 +100,34 @@ function datesWithinTolerance(a, b, toleranceMs = REMINDER_PREWARM_SCHEDULE_TOLE
   const right = coerceDate(b);
   if (!left || !right) return false;
   return Math.abs(left.getTime() - right.getTime()) <= toleranceMs;
+}
+
+function shouldAcquireLegacyOutboundGuard(callArchitecture) {
+  return Boolean(callArchitecture?.requireDialGuard) &&
+    callArchitecture.mode !== CALL_ARCHITECTURE_MODES.LEGACY_ONLY &&
+    callArchitecture.mode !== CALL_ARCHITECTURE_MODES.LEGACY_ROLLBACK;
+}
+
+export function filterLegacyExecutableCallPlan(callPlan, callArchitecture) {
+  if (
+    callArchitecture?.mode !== CALL_ARCHITECTURE_MODES.CANARY_QUEUE ||
+    callArchitecture?.allowRealDial !== true
+  ) {
+    return callPlan;
+  }
+
+  return callPlan.filter(spec => !isSeniorInQueueCanaryCohort(spec?.senior?.id, {
+    canaryPercent: callArchitecture.canaryPercent,
+    canarySeniorIds: callArchitecture.canarySeniorIds,
+  }));
+}
+
+function guardIdFromRow(guard) {
+  return guard?.id || null;
+}
+
+function guardKeyFromRow(guard) {
+  return guard?.guardKey || guard?.guard_key || null;
 }
 
 function isReminderPrewarmUsable(spec, prewarmedContext, now = new Date()) {
@@ -552,6 +597,8 @@ export const schedulerService = {
    */
   async triggerOutboundCall(spec, baseUrl) {
     const { type, senior } = spec;
+    const callArchitecture = resolveCallArchitectureConfig();
+    let outboundGuard = null;
 
     // Scheduled calls bypass the call window — the caregiver explicitly chose that time.
     // Reminder calls can use the early 5–9 AM window if the caregiver scheduled them there.
@@ -565,16 +612,102 @@ export const schedulerService = {
     }
 
     try {
-      if (type === 'schedule') {
-        return await this._triggerSchedulePath(spec, baseUrl);
-      } else if (type === 'reminder') {
-        return await this._triggerReminderPath(spec, baseUrl);
-      } else {
-        return await this._triggerWelfarePath(spec, baseUrl);
+      outboundGuard = await this._acquireLegacyOutboundGuard(spec, callArchitecture);
+      if (outboundGuard?.suppressed) {
+        return null;
       }
+
+      let call;
+      if (type === 'schedule') {
+        call = await this._triggerSchedulePath(spec, baseUrl);
+      } else if (type === 'reminder') {
+        call = await this._triggerReminderPath(spec, baseUrl);
+      } else {
+        call = await this._triggerWelfarePath(spec, baseUrl);
+      }
+
+      if (call && outboundGuard?.guard) {
+        await this._markLegacyOutboundGuardInitiated(outboundGuard.guard, call);
+      } else if (!call && outboundGuard?.guard) {
+        await this._releaseLegacyOutboundGuard(outboundGuard.guard);
+      }
+
+      return call;
     } catch (error) {
+      if (outboundGuard?.guard) {
+        await this._releaseLegacyOutboundGuard(outboundGuard.guard);
+      }
       log.error('Failed to initiate call', { type, seniorId: senior.id, error: error.message });
       return null;
+    }
+  },
+
+  async _acquireLegacyOutboundGuard(spec, callArchitecture) {
+    if (!shouldAcquireLegacyOutboundGuard(callArchitecture)) {
+      return null;
+    }
+
+    try {
+      const queueInput = buildQueueInputFromLegacyCallSpec(spec, {
+        now: new Date(),
+        architecture: 'legacy',
+      });
+      const result = await acquireOutboundCallGuard({
+        ...queueInput,
+        guardKey: queueInput.dedupeKey,
+        architecture: 'legacy',
+        legacyDedupKey: spec?.dedupKey || null,
+        leaseSeconds: callArchitecture?.dispatchLeaseSeconds,
+      });
+
+      if (!result.acquired) {
+        log.info('Outbound call suppressed by durable guard', {
+          type: spec.type,
+          seniorId: spec.senior.id,
+        });
+        return { suppressed: true, guard: result.guard || null };
+      }
+
+      return { suppressed: false, guard: result.guard };
+    } catch (error) {
+      if (callArchitecture.allowRealDial) {
+        throw error;
+      }
+      log.warn('Outbound guard unavailable; legacy scheduler remains dial authority', {
+        type: spec.type,
+        seniorId: spec.senior.id,
+        error: error.message,
+      });
+      return null;
+    }
+  },
+
+  async _markLegacyOutboundGuardInitiated(guard, call) {
+    try {
+      await markOutboundCallGuardInitiated({
+        guardId: guardIdFromRow(guard),
+        guardKey: guardKeyFromRow(guard),
+        callControlId: call.callControlId || call.callSid || call.sid || null,
+      });
+    } catch (error) {
+      log.warn('Failed to mark outbound guard initiated after Telnyx call started', {
+        guardId: guardIdFromRow(guard),
+        error: error.message,
+      });
+    }
+  },
+
+  async _releaseLegacyOutboundGuard(guard) {
+    try {
+      await releaseOutboundCallGuard({
+        guardId: guardIdFromRow(guard),
+        guardKey: guardKeyFromRow(guard),
+      });
+    } catch (error) {
+      log.warn('Failed to release outbound guard after call initiation failure', {
+        guardId: guardIdFromRow(guard),
+        error: error.message,
+      });
     }
   },
 
@@ -1000,6 +1133,179 @@ export function startScheduler(baseUrl, intervalMs = 60000) {
 
       // Merge and deduplicate into a single call plan
       const callPlan = schedulerService.buildCallPlan(dueScheduledCalls, welfareSeniors, dueReminders);
+      const callArchitecture = resolveCallArchitectureConfig();
+
+      // In canary_queue mode, the source of truth for canary membership is
+      // `canary_cohort_membership` (set via /api/canary/members). The env
+      // var allowlist stays as an emergency-override path. Merge them once
+      // per tick so the legacy filter AND the queue dispatcher see the
+      // same cohort set. Failures fall back to env-only behavior.
+      if (callArchitecture.mode === CALL_ARCHITECTURE_MODES.CANARY_QUEUE) {
+        try {
+          const merged = await resolveMergedCanarySeniorIds(callArchitecture.canarySeniorIds);
+          if (merged.length !== callArchitecture.canarySeniorIds.length) {
+            log.info('Canary cohort merged from DB + env', {
+              envOnly: callArchitecture.canarySeniorIds.length,
+              merged: merged.length,
+            });
+          }
+          callArchitecture.canarySeniorIds = merged;
+        } catch (canaryErr) {
+          log.warn('Canary cohort DB lookup failed; using env-only allowlist for this cycle', {
+            error: canaryErr?.message,
+          });
+        }
+      }
+
+      if (
+        callArchitecture.mode === CALL_ARCHITECTURE_MODES.SHADOW_MATERIALIZE ||
+        callArchitecture.mode === CALL_ARCHITECTURE_MODES.SHADOW_DISPATCH ||
+        callArchitecture.shadowMaterialize === true
+      ) {
+        try {
+          const normalized = await materializeDueNormalizedSchedules({
+            limit: callArchitecture.materializerLimit,
+          });
+          if (normalized.scanned > 0 || normalized.failed > 0) {
+            log.info('Normalized schedule materialization cycle', normalized);
+          }
+
+          const shadowCallPlan = callPlan.filter(spec =>
+            callArchitecture.enabledCallTypes.includes(spec.type)
+          );
+          const materialized = await materializeLegacyCallPlan(shadowCallPlan, {
+            architecture: 'legacy_shadow',
+            recordComparisons: callArchitecture.compareWithLegacy,
+            testRunId: callArchitecture.testRunId,
+            capacityDecision: 'not_evaluated',
+          });
+          if (materialized.planned > 0 || materialized.failed > 0) {
+            log.info('Queue shadow materialization cycle', materialized);
+          }
+
+          if (callArchitecture.reconcilerEnabled) {
+            const reconciled = await reconcileQueueLeases({
+              limit: callArchitecture.dispatcherBatchSize,
+            });
+            if (reconciled.recovered > 0 || reconciled.expired > 0) {
+              log.info('Queue lease reconciliation cycle', reconciled);
+            }
+
+            // Phase 4 work item 6b: release stuck outbound guards so a
+            // crashed dispatcher cycle can't permanently block a senior.
+            try {
+              const guardCycle = await reconcileOutboundCallGuards({
+                limit: callArchitecture.dispatcherBatchSize,
+              });
+              if (guardCycle.released > 0) {
+                log.info('Outbound guard reconciliation cycle', guardCycle);
+              }
+            } catch (guardErr) {
+              log.warn('Outbound guard reconciliation failed', { error: guardErr?.message });
+            }
+          }
+
+          if (callArchitecture.allowRealDial && callArchitecture.dispatcherEnabled) {
+            const capacityInputs = {};
+            let registrySnapshot = null;
+            if (callArchitecture.shadowCapacitySlots != null) {
+              capacityInputs.capacitySlots = callArchitecture.shadowCapacitySlots;
+            } else if (callArchitecture.useCapacityRegistry) {
+              registrySnapshot = await readPipecatCapacityRegistry();
+              if (registrySnapshot.error) {
+                log.warn('Pipecat capacity registry unavailable for live queue dispatch', {
+                  backend: registrySnapshot.backend,
+                  error: registrySnapshot.error,
+                });
+                if (callArchitecture.requireCapacityRegistry) {
+                  throw new Error('Pipecat capacity registry is required for live queue dispatch');
+                }
+              } else if (registrySnapshot.configured) {
+                capacityInputs.instances = registrySnapshot.instances;
+                if (registrySnapshot.instances.length === 0) {
+                  log.warn('Pipecat capacity registry has no fresh heartbeats for live queue dispatch', {
+                    backend: registrySnapshot.backend,
+                    scanned: registrySnapshot.scanned,
+                  });
+                }
+              }
+            }
+
+            if (!capacityInputs.instances && capacityInputs.capacitySlots == null) {
+              capacityInputs.capacitySlots = callArchitecture.dispatcherBatchSize;
+            }
+            // `callArchitecture.canarySeniorIds` was already merged with the
+            // DB canary_cohort_membership table earlier in this tick, so the
+            // dispatcher sees the same cohort set as filterLegacyExecutableCallPlan.
+            const dispatched = await dispatchQueuedCalls({
+              leaseOwner: `node-queue-dispatcher:${process.pid}`,
+              ...capacityInputs,
+              limit: callArchitecture.dispatcherBatchSize,
+              leaseSeconds: callArchitecture.dispatchLeaseSeconds,
+              baseUrl,
+              testRunId: callArchitecture.testRunId,
+              canaryPercent: callArchitecture.mode === CALL_ARCHITECTURE_MODES.CANARY_QUEUE
+                ? callArchitecture.canaryPercent
+                : 100,
+              canarySeniorIds: callArchitecture.mode === CALL_ARCHITECTURE_MODES.CANARY_QUEUE
+                ? callArchitecture.canarySeniorIds
+                : [],
+              respectLanePolicy: true,
+              overbookFactor: callArchitecture.dispatchOverbookFactor,
+              architecture: 'queue',
+              cohort: callArchitecture.mode,
+            });
+            if (dispatched.dialed > 0 || dispatched.failed > 0 || dispatched.suppressed > 0) {
+              log.info('Queue live dispatch cycle', dispatched);
+            }
+          } else if (callArchitecture.shadowDispatch && callArchitecture.dispatcherEnabled) {
+            const capacityInputs = {};
+            let registrySnapshot = null;
+            if (callArchitecture.shadowCapacitySlots != null) {
+              capacityInputs.capacitySlots = callArchitecture.shadowCapacitySlots;
+            } else if (callArchitecture.useCapacityRegistry) {
+              registrySnapshot = await readPipecatCapacityRegistry();
+              if (registrySnapshot.error) {
+                log.warn('Pipecat capacity registry unavailable for queue dispatch', {
+                  backend: registrySnapshot.backend,
+                  error: registrySnapshot.error,
+                });
+                if (callArchitecture.requireCapacityRegistry) {
+                  throw new Error('Pipecat capacity registry is required for queue dispatch');
+                }
+              } else if (registrySnapshot.configured) {
+                capacityInputs.instances = registrySnapshot.instances;
+                if (registrySnapshot.instances.length === 0) {
+                  log.warn('Pipecat capacity registry has no fresh heartbeats for queue dispatch', {
+                    backend: registrySnapshot.backend,
+                    scanned: registrySnapshot.scanned,
+                  });
+                }
+              }
+            }
+
+            if (!capacityInputs.instances && capacityInputs.capacitySlots == null) {
+              capacityInputs.capacitySlots = callArchitecture.dispatcherBatchSize;
+            }
+            const dispatched = await dryRunDispatchQueuedCalls({
+              leaseOwner: `node-shadow-dispatcher:${process.pid}`,
+              ...capacityInputs,
+              limit: callArchitecture.dispatcherBatchSize,
+              leaseSeconds: callArchitecture.dispatchLeaseSeconds,
+              testRunId: callArchitecture.testRunId,
+              respectLanePolicy: true,
+              overbookFactor: callArchitecture.dispatchOverbookFactor,
+            });
+            if (dispatched.leased > 0 || dispatched.comparisonFailed > 0) {
+              log.info('Queue shadow dispatch cycle', dispatched);
+            }
+          }
+        } catch (error) {
+          log.warn('Queue shadow cycle failed; legacy scheduler remains dial authority', {
+            error: error.message,
+          });
+        }
+      }
 
       if (callPlan.length > 0) {
         const scheduleCount = callPlan.filter(s => s.type === 'schedule').length;
@@ -1013,11 +1319,30 @@ export function startScheduler(baseUrl, intervalMs = 60000) {
         });
       }
 
+      const legacyCallPlan = filterLegacyExecutableCallPlan(callPlan, callArchitecture);
+      if (legacyCallPlan.length !== callPlan.length) {
+        log.info('Canary queue owns part of call plan; legacy execution filtered', {
+          total: callPlan.length,
+          legacy: legacyCallPlan.length,
+          queue: callPlan.length - legacyCallPlan.length,
+        });
+      }
+
+      if (
+        callArchitecture.mode === CALL_ARCHITECTURE_MODES.QUEUE_PRIMARY &&
+        callArchitecture.allowRealDial
+      ) {
+        log.info('Queue primary mode active; legacy call plan execution skipped', {
+          planned: callPlan.length,
+        });
+        return;
+      }
+
       // Resolve flags once per scheduler cycle
       const flags = await resolveFlags({ source: 'scheduler' });
 
       // Execute calls in parallel with concurrency limit of 10
-      attempted = callPlan.length;
+      attempted = legacyCallPlan.length;
       const CONCURRENCY = 10;
       let inFlight = 0;
 
@@ -1069,10 +1394,10 @@ export function startScheduler(baseUrl, intervalMs = 60000) {
         }
       };
 
-      const results = await Promise.allSettled(callPlan.map(triggerOne));
+      const results = await Promise.allSettled(legacyCallPlan.map(triggerOne));
 
       if (succeeded > 0) {
-        log.info('Unified check complete', { succeeded, failed, planned: callPlan.length });
+        log.info('Unified check complete', { succeeded, failed, planned: legacyCallPlan.length });
       }
     } catch (error) {
       log.error('Unified check error', { error: error.message });

@@ -18,7 +18,25 @@
     "test:e2e:website": "playwright test --project=consumer",
     "test:e2e:observability": "playwright test --project=observability",
     "test:e2e:ci:mocked": "playwright test --project=admin --project=consumer --project=observability",
-    "test:e2e:integration": "playwright test --config=playwright.integration.config.ts"
+    "test:e2e:integration": "playwright test --config=playwright.integration.config.ts",
+    "phase0:baseline": "node scripts/collect-phase0-scaling-baseline.js",
+    "phase0:cost": "node scripts/generate-phase0-cost-model.js",
+    "phase0:live-call-drill": "node scripts/run-live-telnyx-drill.js",
+    "phase0:redis-drill": "cd pipecat && uv run python scripts/redis_shared_state_drill.py",
+    "phase1:preflight-idempotency": "node scripts/phase1-idempotency-preflight.js",
+    "phase1:backfill-delivery-keys": "node scripts/backfill-reminder-delivery-keys.js",
+    "phase2:backfill-call-schedules": "node scripts/backfill-call-schedules.js",
+    "phase2:validate-rollout-config": "node scripts/validate-call-rollout-config.js",
+    "phase4:dispatcher-worker": "node --disable-warning=DEP0040 scripts/run-dispatcher-worker.js",
+    "phase5:live-ab-report": "node scripts/phase5-live-ab-report.js",
+    "phase6:post-call-stampede": "node scripts/phase6-post-call-stampede.js",
+    "phase6:post-call-worker-once": "node scripts/run-post-call-worker-once.js",
+    "phase7:canary-report": "node scripts/phase7-canary-report.js",
+    "phase7:canary-daily-report": "node scripts/phase7-canary-daily-report.js",
+    "phase7:canary-rollback-check": "node scripts/phase7-canary-rollback-check.js",
+    "phase8:capacity-plan": "node scripts/phase8-capacity-plan.js",
+    "phase8:autoscaler-once": "node scripts/run-phase8-autoscaler-once.js",
+    "phi:sentinel": "node scripts/phi-sentinel-scan.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
@@ -47,7 +65,9 @@
     "@playwright/test": "^1.50.0",
     "@vitest/coverage-v8": "^3.0.0",
     "drizzle-kit": "^0.31.10",
+    "ioredis-mock": "^8.13.1",
     "msw": "^2.0.0",
+    "pg": "^8.21.0",
     "vitest": "^3.0.0"
   },
   "overrides": {

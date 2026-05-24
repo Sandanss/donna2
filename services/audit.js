@@ -15,7 +15,7 @@ import { auditLogs } from '../db/schema.js';
  * @param {Object} params
  * @param {string} params.userId - admin ID, clerk user ID, or 'cofounder'
  * @param {string} params.userRole - 'admin', 'caregiver', 'cofounder', or 'unknown'
- * @param {string} params.action - 'read', 'create', 'update', 'delete', 'auth_failure'
+ * @param {string} params.action - 'read', 'create', 'update', 'delete', 'auth_failure', 'shadow_decision'
  * @param {string} params.resourceType - 'senior', 'conversation', 'memory', 'reminder', 'call_analysis', 'auth'
  * @param {string|null} [params.resourceId] - UUID of the accessed resource (nullable for list endpoints)
  * @param {string|null} [params.ipAddress]

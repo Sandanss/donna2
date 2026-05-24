@@ -33,6 +33,12 @@ import { apiLimiter } from './middleware/rate-limit.js';
 import { clerkMiddleware } from './middleware/auth.js';
 import { mountRoutes } from './routes/index.js';
 import { startScheduler } from './services/scheduler.js';
+import {
+  drainQueueDispatcherReservations,
+  getQueueDispatcherDrainState,
+  setQueueDispatcherDraining,
+} from './services/call-queue.js';
+import { startPhase8AutoscalerWorker } from './services/phase8-autoscaler.js';
 import { initGrowthBook, closeGrowthBook } from './lib/growthbook.js';
 import { assertNodeSecurityConfig, getPipecatPublicUrl, isProductionEnv } from './lib/security-config.js';
 import { getSchedulerStartupDecision } from './lib/scheduler-config.js';
@@ -87,6 +93,10 @@ app.use('/api', requireApiKey, apiLimiter);
 app.use(clerkMiddleware());
 
 const PORT = process.env.PORT || 3001;
+const NODE_DISPATCHER_DRAIN_TIMEOUT_MS = Math.max(
+  1000,
+  Number.parseInt(process.env.NODE_DISPATCHER_DRAIN_TIMEOUT_MS || '30000', 10) || 30000,
+);
 
 // Pipecat handles all voice calls — webhook URLs must point there
 assertNodeSecurityConfig();
@@ -112,6 +122,7 @@ app.use(errorHandler);
 
 // Create HTTP server
 const server = createServer(app);
+let phase8Autoscaler = { enabled: false, stop: () => {} };
 
 server.listen(PORT, async () => {
   console.log(`Donna v4.0 listening on port ${PORT}`);
@@ -130,11 +141,73 @@ server.listen(PORT, async () => {
     console.log(`Scheduler enabled (${schedulerDecision.reason})`);
     startScheduler(PIPECAT_BASE_URL, 60000);
   }
+
+  phase8Autoscaler = startPhase8AutoscalerWorker();
+  if (phase8Autoscaler.enabled) {
+    console.log(`Phase 8 autoscaler enabled (${phase8Autoscaler.tickMs}ms tick)`);
+  }
 });
+
+let shutdownStarted = false;
+
+function closeHttpServer() {
+  return new Promise((resolve, reject) => {
+    server.close(error => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+async function shutdown(signal) {
+  if (shutdownStarted) return;
+  shutdownStarted = true;
+
+  console.log(`${signal} received, draining Node dispatcher...`);
+  setQueueDispatcherDraining(true);
+
+  const forceExit = setTimeout(() => {
+    console.error('Node graceful shutdown timed out', getQueueDispatcherDrainState());
+    process.exit(1);
+  }, NODE_DISPATCHER_DRAIN_TIMEOUT_MS + 5000);
+  forceExit.unref?.();
+
+  try {
+    const serverClosed = closeHttpServer().then(
+      () => null,
+      error => error,
+    );
+    const drainResult = await drainQueueDispatcherReservations({
+      timeoutMs: NODE_DISPATCHER_DRAIN_TIMEOUT_MS,
+    });
+    const closeError = await serverClosed;
+    if (closeError) throw closeError;
+    phase8Autoscaler.stop();
+    closeGrowthBook();
+    clearTimeout(forceExit);
+    console.log('Node graceful shutdown complete', {
+      dispatcherDrain: drainResult,
+      dispatcherState: getQueueDispatcherDrainState(),
+    });
+    process.exit(0);
+  } catch (error) {
+    clearTimeout(forceExit);
+    console.error('Node graceful shutdown failed', {
+      error: error.message,
+      dispatcherState: getQueueDispatcherDrainState(),
+    });
+    process.exit(1);
+  }
+}
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
-  console.log('SIGTERM received, shutting down...');
-  closeGrowthBook();
-  server.close(() => process.exit(0));
+  void shutdown('SIGTERM');
+});
+
+process.on('SIGINT', () => {
+  void shutdown('SIGINT');
 });

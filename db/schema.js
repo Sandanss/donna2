@@ -1,4 +1,4 @@
-import { pgTable, uuid, varchar, text, timestamp, boolean, json, jsonb, integer, vector } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, text, timestamp, boolean, json, jsonb, integer, vector, time, date } from 'drizzle-orm/pg-core';
 
 // Senior profiles
 export const seniors = pgTable('seniors', {
@@ -94,6 +94,7 @@ export const reminderDeliveries = pgTable('reminder_deliveries', {
   acknowledgedAt: timestamp('acknowledged_at'),       // When user acknowledged
   userResponse: text('user_response'),                // What user said
   userResponseEncrypted: text('user_response_encrypted'),
+  deliveryKey: text('delivery_key'),
   // Status: pending, delivered, acknowledged, confirmed, retry_pending, max_attempts
   status: varchar('status', { length: 50 }).default('pending'),
   attemptCount: integer('attempt_count').default(0),  // Number of delivery attempts
@@ -264,4 +265,140 @@ export const idempotencyKeys = pgTable('idempotency_keys', {
   requestId: text('request_id'),
   createdAt: timestamp('created_at').defaultNow(),
   expiresAt: timestamp('expires_at').notNull(),
+});
+
+// Normalized runtime schedules for the queue-based call architecture.
+// PHI-bearing context notes must be stored encrypted only.
+export const seniorCallSchedules = pgTable('senior_call_schedules', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  seniorId: uuid('senior_id').references(() => seniors.id).notNull(),
+  sourceProfileHash: text('source_profile_hash'),
+  callType: varchar('call_type', { length: 50 }).default('schedule').notNull(),
+  timezone: varchar('timezone', { length: 100 }).notNull(),
+  targetLocalTime: time('target_local_time').notNull(),
+  windowMinutes: integer('window_minutes').default(15).notNull(),
+  frequency: varchar('frequency', { length: 50 }).notNull(),
+  daysOfWeek: integer('days_of_week').array(),
+  oneTimeDate: date('one_time_date'),
+  priorityLane: varchar('priority_lane', { length: 50 }).default('scheduled_checkin').notNull(),
+  reminderIds: uuid('reminder_ids').array(),
+  contextNotesEncrypted: text('context_notes_encrypted'),
+  nextRunAt: timestamp('next_run_at').notNull(),
+  lastMaterializedFor: timestamp('last_materialized_for'),
+  isActive: boolean('is_active').default(true).notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+// Durable outbound work queue. Store IDs, lane, status, and timestamps only.
+export const callQueue = pgTable('call_queue', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  seniorId: uuid('senior_id').references(() => seniors.id).notNull(),
+  scheduleId: uuid('schedule_id').references(() => seniorCallSchedules.id),
+  reminderId: uuid('reminder_id').references(() => reminders.id),
+  callType: varchar('call_type', { length: 50 }).notNull(),
+  priorityLane: varchar('priority_lane', { length: 50 }).notNull(),
+  priorityScore: integer('priority_score').default(0).notNull(),
+  targetAt: timestamp('target_at').notNull(),
+  earliestAt: timestamp('earliest_at').notNull(),
+  latestAt: timestamp('latest_at').notNull(),
+  status: varchar('status', { length: 50 }).notNull(),
+  dedupeKey: text('dedupe_key').notNull(),
+  leaseOwner: text('lease_owner'),
+  leaseExpiresAt: timestamp('lease_expires_at'),
+  attemptCount: integer('attempt_count').default(0).notNull(),
+  lastAttemptId: uuid('last_attempt_id'),
+  lastErrorCode: text('last_error_code'),
+  lastErrorAt: timestamp('last_error_at'),
+  cancelReason: text('cancel_reason'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+// One row per provider dial attempt. No senior names, phones, transcripts, or reminder text.
+export const callAttempts = pgTable('call_attempts', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  queueId: uuid('queue_id').references(() => callQueue.id).notNull(),
+  seniorId: uuid('senior_id').references(() => seniors.id).notNull(),
+  attemptNumber: integer('attempt_number').notNull(),
+  provider: varchar('provider', { length: 50 }).default('telnyx').notNull(),
+  callControlId: text('call_control_id'),
+  status: varchar('status', { length: 50 }).notNull(),
+  reservationId: text('reservation_id'),
+  reservedCapacity: integer('reserved_capacity').default(1).notNull(),
+  architecture: varchar('architecture', { length: 50 }).notNull(),
+  cohort: varchar('cohort', { length: 50 }),
+  testRunId: text('test_run_id'),
+  dispatchDecisionId: uuid('dispatch_decision_id'),
+  dialStartedAt: timestamp('dial_started_at'),
+  answeredAt: timestamp('answered_at'),
+  mediaStartedAt: timestamp('media_started_at'),
+  endedAt: timestamp('ended_at'),
+  providerErrorCode: text('provider_error_code'),
+  providerErrorClass: text('provider_error_class'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+// Heavy post-call work queue. Payloads can contain PHI only when encrypted.
+export const postCallJobs = pgTable('post_call_jobs', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  conversationId: uuid('conversation_id').references(() => conversations.id),
+  callSid: text('call_sid').notNull(),
+  seniorId: uuid('senior_id').references(() => seniors.id),
+  jobType: varchar('job_type', { length: 100 }).notNull(),
+  status: varchar('status', { length: 50 }).notNull(),
+  priority: integer('priority').default(0).notNull(),
+  dedupeKey: text('dedupe_key').notNull(),
+  payloadEncrypted: text('payload_encrypted'),
+  dependsOn: uuid('depends_on').array().default([]).notNull(),
+  attemptCount: integer('attempt_count').default(0).notNull(),
+  maxAttempts: integer('max_attempts').default(5).notNull(),
+  leaseOwner: text('lease_owner'),
+  leaseExpiresAt: timestamp('lease_expires_at'),
+  startedAt: timestamp('started_at'),
+  completedAt: timestamp('completed_at'),
+  deadLetteredAt: timestamp('dead_lettered_at'),
+  deadLetterReason: text('dead_letter_reason'),
+  lastErrorCode: text('last_error_code'),
+  lastErrorAt: timestamp('last_error_at'),
+  runAfter: timestamp('run_after').defaultNow().notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+// Durable double-call guard shared by legacy and queue dialers.
+export const outboundCallGuards = pgTable('outbound_call_guards', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  seniorId: uuid('senior_id').references(() => seniors.id).notNull(),
+  guardKey: text('guard_key').notNull(),
+  callType: varchar('call_type', { length: 50 }).notNull(),
+  architecture: varchar('architecture', { length: 50 }).notNull(),
+  queueId: uuid('queue_id').references(() => callQueue.id),
+  legacyDedupKey: text('legacy_dedup_key'),
+  targetAt: timestamp('target_at').notNull(),
+  expiresAt: timestamp('expires_at').notNull(),
+  callControlId: text('call_control_id'),
+  status: varchar('status', { length: 50 }).notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+// Shadow comparison rows for proving queue decisions before queue dialing.
+export const schedulerShadowComparisons = pgTable('scheduler_shadow_comparisons', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  testRunId: text('test_run_id'),
+  seniorId: uuid('senior_id').references(() => seniors.id),
+  queueId: uuid('queue_id').references(() => callQueue.id),
+  callType: varchar('call_type', { length: 50 }).notNull(),
+  priorityLane: varchar('priority_lane', { length: 50 }),
+  legacyDedupKey: text('legacy_dedup_key'),
+  queueDedupeKey: text('queue_dedupe_key'),
+  targetAt: timestamp('target_at'),
+  legacyDecision: varchar('legacy_decision', { length: 100 }),
+  queueDecision: varchar('queue_decision', { length: 100 }),
+  skipReason: text('skip_reason'),
+  capacityDecision: varchar('capacity_decision', { length: 100 }),
+  estimatedQueueLagSeconds: integer('estimated_queue_lag_seconds'),
+  createdAt: timestamp('created_at').defaultNow(),
 });
