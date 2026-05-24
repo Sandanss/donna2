@@ -20,30 +20,96 @@ env:
 - assertVisible: "Last Name"
 - assertVisible: "Email"
 - assertVisible: "Phone Number"
+- assertVisible: "City"
+- assertVisible: "State"
+- assertVisible: "Zip Code"
+
+# Select relationship before opening numeric keyboards. The ZIP keypad can
+# leave XCTest's tap target offset stale after scrolling this long form.
+- scrollUntilVisible:
+    element: "Relationship"
+    direction: DOWN
+    centerElement: true
+- tapOn:
+    id: "caregiver-relationship-input"
+- extendedWaitUntil:
+    visible: "Myself"
+    timeout: 5000
+- tapOn: "Son"
+- scrollUntilVisible:
+    element: "First Name"
+    direction: UP
 
 # Edit first name
-- tapOn: "First Name"
+- tapOn:
+    id: "caregiver-first-name-input"
 - eraseText: 50
 - inputText: "E2E"
+- extendedWaitUntil:
+    visible: "E2E"
+    timeout: 3000
 
 # Edit last name
-- tapOn: "Last Name"
+- tapOn:
+    id: "caregiver-last-name-input"
 - eraseText: 50
 - inputText: "Tester"
+- extendedWaitUntil:
+    visible: "Tester"
+    timeout: 3000
 
 # Edit phone
-- tapOn: "Phone Number"
+- tapOn:
+    id: "caregiver-phone-input"
 - eraseText: 50
 - runFlow:
     file: ../subflows/tap_digits.yaml
     env:
       DIGITS: "5559876543"
+- extendedWaitUntil:
+    visible: "555.*987.*6543|5559876543"
+    timeout: 3000
+- tapOn: "Done"
 
-# Select relationship
+# Edit caregiver locality
+- scrollUntilVisible:
+    element: "Enter city"
+    direction: DOWN
+    centerElement: true
+- tapOn: "Enter city"
+- eraseText: 50
+- inputText: "Dallas"
+- extendedWaitUntil:
+    visible: "Dallas"
+    timeout: 3000
+- pressKey: enter
+- scrollUntilVisible:
+    element: "State"
+    direction: DOWN
+    centerElement: true
 - tapOn:
-    id: "caregiver-relationship-input"
+    id: "caregiver-state-input"
+- eraseText: 2
+- inputText: "TX"
+- extendedWaitUntil:
+    visible: "TX"
+    timeout: 3000
+- pressKey: enter
+- scrollUntilVisible:
+    element: "Enter zip code"
+    direction: DOWN
+    centerElement: true
 - tapOn:
-    id: "caregiver-relationship-option-Son"
+    id: "caregiver-zip-input"
+- eraseText: 5
+- runFlow:
+    file: ../subflows/tap_digits.yaml
+    env:
+      DIGITS: "75201"
+- extendedWaitUntil:
+    visible: "75201"
+    timeout: 3000
+- tapOn: "Done"
 
 # Change Password button visible
 - scrollUntilVisible:
@@ -57,17 +123,8 @@ env:
     direction: DOWN
 - tapOn: "Save Changes"
 
-# Wait for save confirmation (OK button triggers router.back())
-- extendedWaitUntil:
-    visible: "Saved|Profile updated|OK"
-    timeout: 10000
-- tapOn:
-    text: "OK"
-    optional: true
-
-# Tapping OK auto-navigates back via router.back(), verify we're on settings root
 - extendedWaitUntil:
     visible: "Manage your account and preferences"
-    timeout: 5000
+    timeout: 10000
 
 - takeScreenshot: 07_caregiver

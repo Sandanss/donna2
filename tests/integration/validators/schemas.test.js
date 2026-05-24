@@ -714,6 +714,21 @@ describe('onboardingSchema', () => {
     expect(result.data.caregiver).not.toHaveProperty('email');
   });
 
+  it('accepts caregiver locality without legacy caregiver identity fields', () => {
+    const result = onboardingSchema.safeParse({
+      ...validPayload,
+      caregiverProfile: {
+        phone: '(555) 123-4567',
+        city: 'Dallas',
+        state: 'TX',
+        zipCode: '75201',
+        timezone: 'America/Chicago',
+      },
+    });
+    expect(result.success).toBe(true);
+    expect(result.data.caregiverProfile.phone).toBe('+15551234567');
+  });
+
   it('rejects missing senior name', () => {
     const result = onboardingSchema.safeParse({
       senior: { phone: '5551234567' },
@@ -943,9 +958,14 @@ describe('createCaregiverSchema', () => {
     const result = createCaregiverSchema.safeParse({
       name: 'Susan Smith',
       email: 'SUSAN@Example.com',
+      phone: '(555) 123-4567',
+      city: 'Dallas',
+      state: 'TX',
+      zipCode: '75201',
     });
     expect(result.success).toBe(true);
     expect(result.data.email).toBe('susan@example.com'); // lowercased
+    expect(result.data.phone).toBe('+15551234567');
   });
 
   it('rejects invalid email', () => {
@@ -959,7 +979,12 @@ describe('createCaregiverSchema', () => {
 
 describe('updateCaregiverSchema', () => {
   it('accepts partial update', () => {
-    const result = updateCaregiverSchema.safeParse({ name: 'New Name' });
+    const result = updateCaregiverSchema.safeParse({
+      city: 'Dallas',
+      state: 'TX',
+      zipCode: '75201',
+      timezone: 'America/Chicago',
+    });
     expect(result.success).toBe(true);
   });
 

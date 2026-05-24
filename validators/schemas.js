@@ -246,11 +246,21 @@ export const createCaregiverSchema = z.object({
     .max(255)
     .transform(email => email.toLowerCase()),
   clerkUserId: z.string().max(255).optional(),
+  phone: phoneSchema.optional(),
+  timezone: timezoneSchema.optional(),
+  city: z.string().trim().max(100).optional(),
+  state: z.string().trim().max(50).optional(),
+  zipCode: z.string().trim().max(20).optional(),
 });
 
 export const updateCaregiverSchema = z.object({
   name: z.string().min(1).max(255).trim().optional(),
   email: z.string().email().max(255).transform(email => email.toLowerCase()).optional(),
+  phone: phoneSchema.optional(),
+  timezone: timezoneSchema.optional(),
+  city: z.string().trim().max(100).optional(),
+  state: z.string().trim().max(50).optional(),
+  zipCode: z.string().trim().max(20).optional(),
 }).refine(data => Object.keys(data).length > 0, {
   message: 'At least one field must be provided for update',
 });
@@ -292,9 +302,21 @@ export const onboardingSchema = z.object({
   // Caregiver identity comes from Clerk auth. Keep this legacy client object
   // permissive so social signups never need to collect an extra email.
   caregiver: z.object({
-    name: z.string().min(1).max(255).trim(),
+    name: z.string().min(1).max(255).trim().optional(),
     email: z.string().email().max(255).optional(),
     clerkUserId: z.string().max(255).optional(),
+    phone: phoneSchema.optional(),
+    timezone: timezoneSchema.optional(),
+    city: z.string().trim().max(100).optional(),
+    state: z.string().trim().max(50).optional(),
+    zipCode: z.string().trim().max(20).optional(),
+  }).optional(),
+  caregiverProfile: z.object({
+    phone: phoneSchema.optional(),
+    timezone: timezoneSchema.optional(),
+    city: z.string().trim().max(100).optional(),
+    state: z.string().trim().max(50).optional(),
+    zipCode: z.string().trim().max(20).optional(),
   }).optional(),
   caregiverPhone: phoneSchema.optional(),
   senior: z.object({

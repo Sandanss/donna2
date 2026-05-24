@@ -95,4 +95,37 @@ describe("mobile API client", () => {
       relation: "Myself",
     });
   });
+
+  it("updates caregiver location through the profile endpoint", async () => {
+    const { api } = await loadApi();
+
+    await api.caregivers.updateProfile(
+      {
+        phone: "+15551234567",
+        city: "Dallas",
+        state: "TX",
+        zipCode: "75201",
+        timezone: "America/Chicago",
+      },
+      "token-1",
+      { idempotencyKey: "caregiver-profile-key" },
+    );
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const [url, options] = vi.mocked(fetch).mock.calls[0];
+    expect(url).toBe("https://api.example.test/api/caregivers/me");
+    expect(options?.method).toBe("PATCH");
+    expect(options?.headers).toMatchObject({
+      Authorization: "Bearer token-1",
+      "Content-Type": "application/json",
+      "Idempotency-Key": "caregiver-profile-key",
+    });
+    expect(JSON.parse(String(options?.body))).toEqual({
+      phone: "+15551234567",
+      city: "Dallas",
+      state: "TX",
+      zipCode: "75201",
+      timezone: "America/Chicago",
+    });
+  });
 });

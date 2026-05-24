@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
@@ -42,7 +41,16 @@ export default function Step1Screen() {
   const { user } = useUser();
   const queryClient = useQueryClient();
   const { t } = useTranslation();
-  const { authProvider, firstName, lastName, phone, setField } =
+  const {
+    authProvider,
+    firstName,
+    lastName,
+    phone,
+    caregiverCity,
+    caregiverState,
+    caregiverZipcode,
+    setField,
+  } =
     useOnboardingStore();
 
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -55,9 +63,8 @@ export default function Step1Screen() {
       if (authProvider !== "apple") {
         setField("authProvider", "apple");
       }
-      router.replace("/(onboarding)/step2" as any);
     }
-  }, [authProvider, isAppleOnboarding, router, setField]);
+  }, [authProvider, isAppleOnboarding, setField]);
 
   useEffect(() => {
     const nameParts = user?.fullName?.trim().split(/\s+/).filter(Boolean) ?? [];
@@ -80,6 +87,17 @@ export default function Step1Screen() {
       if (!lastName.trim()) next.lastName = t("onboarding.step1.lastNameRequired");
     }
     if (!phone.trim()) next.phone = t("onboarding.step1.phoneRequired");
+    if (!caregiverCity.trim()) next.caregiverCity = t("onboarding.step1.cityRequired");
+    if (!caregiverState.trim()) {
+      next.caregiverState = t("onboarding.step1.stateRequired");
+    } else if (!/^[A-Za-z]{2}$/.test(caregiverState.trim())) {
+      next.caregiverState = t("onboarding.step1.stateFormat");
+    }
+    if (!caregiverZipcode.trim()) {
+      next.caregiverZipcode = t("onboarding.step1.zipRequired");
+    } else if (!/^\d{5}$/.test(caregiverZipcode.trim())) {
+      next.caregiverZipcode = t("onboarding.step1.zipFormat");
+    }
     setErrors(next);
     return Object.keys(next).length === 0;
   }
@@ -120,14 +138,6 @@ export default function Step1Screen() {
     }
   }
 
-  if (isAppleOnboarding) {
-    return (
-      <SafeAreaView className="flex-1 bg-cream items-center justify-center">
-        <ActivityIndicator color={COLORS.sage} />
-      </SafeAreaView>
-    );
-  }
-
   return (
     <SafeAreaView className="flex-1 bg-cream">
       <KeyboardAvoidingView
@@ -160,36 +170,40 @@ export default function Step1Screen() {
 
           {/* Header */}
           <Text className="text-[28px] font-semibold text-charcoal mb-2">
-            {t("onboarding.step1.title")}
+            {t(isAppleOnboarding ? "onboarding.step1.appleTitle" : "onboarding.step1.title")}
           </Text>
           <Text className="text-[15px] text-muted mb-8">
-            {t("onboarding.step1.subtitle")}
+            {t(isAppleOnboarding ? "onboarding.step1.appleSubtitle" : "onboarding.step1.subtitle")}
           </Text>
 
           {/* Form */}
           <View className="gap-4">
-            <Input
-              label={t("onboarding.step1.firstName")}
-              placeholder="Jane"
-              value={firstName}
-              onChangeText={(v) => setField("firstName", v)}
-              error={errors.firstName}
-              autoCapitalize="words"
-              textContentType="givenName"
-              autoComplete="given-name"
-              testID="input-first-name"
-            />
-            <Input
-              label={t("onboarding.step1.lastName")}
-              placeholder="Doe"
-              value={lastName}
-              onChangeText={(v) => setField("lastName", v)}
-              error={errors.lastName}
-              autoCapitalize="words"
-              textContentType="familyName"
-              autoComplete="family-name"
-              testID="input-last-name"
-            />
+            {!isAppleOnboarding && (
+              <>
+                <Input
+                  label={t("onboarding.step1.firstName")}
+                  placeholder="Jane"
+                  value={firstName}
+                  onChangeText={(v) => setField("firstName", v)}
+                  error={errors.firstName}
+                  autoCapitalize="words"
+                  textContentType="givenName"
+                  autoComplete="given-name"
+                  testID="input-first-name"
+                />
+                <Input
+                  label={t("onboarding.step1.lastName")}
+                  placeholder="Doe"
+                  value={lastName}
+                  onChangeText={(v) => setField("lastName", v)}
+                  error={errors.lastName}
+                  autoCapitalize="words"
+                  textContentType="familyName"
+                  autoComplete="family-name"
+                  testID="input-last-name"
+                />
+              </>
+            )}
             <Input
               label={t("onboarding.step1.phone")}
               placeholder="(555) 123-4567"
@@ -201,6 +215,48 @@ export default function Step1Screen() {
               autoComplete="tel"
               testID="input-phone"
             />
+            <Input
+              label={t("onboarding.step1.city")}
+              placeholder={t("onboarding.step1.cityPlaceholder")}
+              value={caregiverCity}
+              onChangeText={(v) => setField("caregiverCity", v)}
+              error={errors.caregiverCity}
+              autoCapitalize="words"
+              textContentType="addressCity"
+              testID="input-caregiver-city"
+            />
+            <View className="flex-row gap-3">
+              <View className="flex-1">
+                <Input
+                  label={t("onboarding.step1.state")}
+                  placeholder={t("onboarding.step1.statePlaceholder")}
+                  value={caregiverState}
+                  onChangeText={(v) =>
+                    setField("caregiverState", v.toUpperCase().slice(0, 2))
+                  }
+                  error={errors.caregiverState}
+                  autoCapitalize="characters"
+                  maxLength={2}
+                  textContentType="addressState"
+                  testID="input-caregiver-state"
+                />
+              </View>
+              <View className="flex-1">
+                <Input
+                  label={t("onboarding.step1.zipCode")}
+                  placeholder={t("onboarding.step1.zipPlaceholder")}
+                  value={caregiverZipcode}
+                  onChangeText={(v) =>
+                    setField("caregiverZipcode", v.replace(/\D/g, "").slice(0, 5))
+                  }
+                  error={errors.caregiverZipcode}
+                  keyboardType="number-pad"
+                  maxLength={5}
+                  textContentType="postalCode"
+                  testID="input-caregiver-zipcode"
+                />
+              </View>
+            </View>
           </View>
         </ScrollView>
 

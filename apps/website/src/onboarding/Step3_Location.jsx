@@ -184,7 +184,7 @@ export default function Step3_Location({ data, update }) {
           type="text"
           value={data.zipcode}
           onChange={(e) => update({ zipcode: e.target.value })}
-          placeholder="12345"
+          placeholder="Enter zip code"
           maxLength={5}
           inputMode="numeric"
         />

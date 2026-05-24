@@ -117,7 +117,7 @@ export default function CreateAccountScreen() {
   );
 
   function onboardingStartRoute(provider?: "email" | "google" | "apple") {
-    return provider === "apple" ? "/(onboarding)/step2" : "/(onboarding)/step1";
+    return "/(onboarding)/step1";
   }
 
   async function navigateAfterAuth(provider?: "email" | "google" | "apple") {

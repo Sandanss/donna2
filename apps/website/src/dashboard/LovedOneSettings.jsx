@@ -381,7 +381,7 @@ export default function LovedOneSettings() {
                   className="db-input"
                   value={zipcode}
                   onChange={(e) => setZipcode(e.target.value)}
-                  placeholder="12345"
+                  placeholder="Enter zip code"
                   maxLength={5}
                   inputMode="numeric"
                 />

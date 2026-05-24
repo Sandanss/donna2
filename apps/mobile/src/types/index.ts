@@ -91,6 +91,13 @@ export interface NotificationPreferences {
  */
 export interface OnboardingInput {
   caregiverPhone?: string;
+  caregiverProfile?: {
+    phone?: string;
+    timezone?: string;
+    city?: string;
+    state?: string;
+    zipCode?: string;
+  };
   senior: {
     name: string;
     phone: string;
@@ -118,7 +125,22 @@ export interface OnboardingInput {
   };
 }
 
+export interface CaregiverDetails {
+  id?: string;
+  phone?: string | null;
+  timezone?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zipCode?: string | null;
+  role?: string | null;
+}
+
+export type CaregiverProfileUpdate = Partial<
+  Pick<CaregiverDetails, "phone" | "timezone" | "city" | "state" | "zipCode">
+>;
+
 export interface CaregiverProfile {
   clerkUserId: string;
+  caregiver?: CaregiverDetails | null;
   seniors: Senior[];
 }

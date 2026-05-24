@@ -92,6 +92,34 @@ appId: com.donna.caregiver
 - extendedWaitUntil:
     visible: "2145550199"
     timeout: 3000
+- tapOn: "Done"
+- tapOn:
+    id: "input-caregiver-city"
+- eraseText: 50
+- inputText: "Dallas"
+- extendedWaitUntil:
+    visible: "Dallas"
+    timeout: 3000
+- pressKey: enter
+- tapOn:
+    id: "input-caregiver-state"
+- eraseText: 2
+- inputText: "TX"
+- extendedWaitUntil:
+    visible: "TX"
+    timeout: 3000
+- pressKey: enter
+- tapOn:
+    id: "input-caregiver-zipcode"
+- eraseText: 5
+- runFlow:
+    file: ../subflows/tap_digits.yaml
+    env:
+      DIGITS: "75201"
+- extendedWaitUntil:
+    visible: "75201"
+    timeout: 3000
+- tapOn: "Done"
 - tapOn: "Next"
 
 # ── Step 2: About Your Loved One ──
@@ -136,6 +164,7 @@ appId: com.donna.caregiver
 - extendedWaitUntil:
     visible: ${output.onboardingSeniorPhone}
     timeout: 3000
+- tapOn: "Done"
 - scrollUntilVisible:
     element: "Select Relationship"
     direction: DOWN
@@ -211,6 +240,7 @@ appId: com.donna.caregiver
 - extendedWaitUntil:
     visible: "94105"
     timeout: 3000
+- tapOn: "Done"
 - tapOn: "Next"
 
 # ── Step 3: Language ──

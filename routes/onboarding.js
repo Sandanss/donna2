@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { caregivers, reminders, seniors } from '../db/schema.js';
+import { caregivers, notificationPreferences, reminders, seniors } from '../db/schema.js';
 import { requireAuth } from '../middleware/auth.js';
 import { writeLimiter } from '../middleware/rate-limit.js';
 import { idempotencyMiddleware } from '../middleware/idempotency.js';
@@ -73,6 +73,7 @@ router.post('/api/onboarding', requireAuth, validateBody(onboardingSchema), idem
 
   try {
     const { senior: seniorData, relation, interests, additionalInfo, reminders: reminderStrings, topicsToAvoid, callSchedule, caregiverPhone } = req.body;
+    const caregiverData = req.body.caregiverProfile || req.body.caregiver || {};
 
     // Get Clerk user ID from auth
     clerkUserId = req.auth.userId;
@@ -124,16 +125,30 @@ router.post('/api/onboarding', requireAuth, validateBody(onboardingSchema), idem
     };
 
     const { senior, createdReminders } = await db.transaction(async (tx) => {
+      const caregiverCreateData = {
+        phone: caregiverData.phone || caregiverPhone,
+        city: caregiverData.city,
+        state: caregiverData.state,
+        zipCode: caregiverData.zipCode,
+        timezone: resolveTimezoneFromProfile(caregiverData),
+      };
+
       const [senior] = await tx.insert(seniors).values({
         ...encryptSeniorPhi(seniorCreateData),
         phone: normalizePhone(seniorCreateData.phone),
         timezone: resolveTimezoneFromProfile(seniorCreateData),
       }).returning();
 
-      await tx.insert(caregivers).values({
+      const [caregiver] = await tx.insert(caregivers).values({
         clerkUserId,
         seniorId: senior.id,
         role: 'caregiver',
+        ...caregiverCreateData,
+      }).returning();
+
+      await tx.insert(notificationPreferences).values({
+        caregiverId: caregiver.id,
+        timezone: caregiverCreateData.timezone,
       });
 
       // Create reminders from strings at the senior's local wall-clock time.

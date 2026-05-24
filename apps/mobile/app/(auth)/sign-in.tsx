@@ -143,7 +143,7 @@ export default function SignInScreen() {
   const passwordRef = useRef<TextInput>(null);
 
   function onboardingStartRoute(provider?: "google" | "apple") {
-    return provider === "apple" ? "/(onboarding)/step2" : "/(onboarding)/step1";
+    return "/(onboarding)/step1";
   }
 
   async function navigateAfterAuth({

@@ -5,6 +5,19 @@ import { createLogger } from '../lib/logger.js';
 
 const log = createLogger('Caregiver');
 
+function publicCaregiverProfile(assignment) {
+  if (!assignment) return null;
+  return {
+    id: assignment.id,
+    phone: assignment.phone,
+    timezone: assignment.timezone,
+    city: assignment.city,
+    state: assignment.state,
+    zipCode: assignment.zipCode,
+    role: assignment.role,
+  };
+}
+
 export const caregiverService = {
   // Link a Clerk user to a senior (creates caregiver assignment, skips if already linked)
   async linkUserToSenior(clerkUserId, seniorId, role = 'caregiver') {
@@ -42,6 +55,27 @@ export const caregiverService = {
       ...a.senior,
       role: a.assignment.role,
     }));
+  },
+
+  async getProfileForUser(clerkUserId) {
+    const assignments = await db.select({
+      assignment: caregivers,
+      senior: seniors,
+    })
+      .from(caregivers)
+      .innerJoin(seniors, eq(caregivers.seniorId, seniors.id))
+      .where(and(
+        eq(caregivers.clerkUserId, clerkUserId),
+        eq(seniors.isActive, true)
+      ));
+
+    return {
+      caregiver: publicCaregiverProfile(assignments[0]?.assignment),
+      seniors: assignments.map(a => ({
+        ...a.senior,
+        role: a.assignment.role,
+      })),
+    };
   },
 
   // Check if a Clerk user can access a senior

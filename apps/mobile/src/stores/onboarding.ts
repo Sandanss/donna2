@@ -22,6 +22,9 @@ interface OnboardingState {
   firstName: string;
   lastName: string;
   phone: string;
+  caregiverCity: string;
+  caregiverState: string;
+  caregiverZipcode: string;
   // Loved one
   lovedOneName: string;
   lovedOnePhone: string;
@@ -79,6 +82,9 @@ const INITIAL_STATE = {
   firstName: "",
   lastName: "",
   phone: "",
+  caregiverCity: "",
+  caregiverState: "",
+  caregiverZipcode: "",
   lovedOneName: "",
   lovedOnePhone: "",
   relationship: "",
@@ -98,6 +104,9 @@ const draftFields = (state: OnboardingState) => ({
   firstName: state.firstName,
   lastName: state.lastName,
   phone: state.phone,
+  caregiverCity: state.caregiverCity,
+  caregiverState: state.caregiverState,
+  caregiverZipcode: state.caregiverZipcode,
   lovedOneName: state.lovedOneName,
   lovedOnePhone: state.lovedOnePhone,
   relationship: state.relationship,

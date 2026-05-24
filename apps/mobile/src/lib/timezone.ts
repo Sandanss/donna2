@@ -207,11 +207,11 @@ export function isValidTimezone(timezone?: string) {
   }
 }
 
-export function resolveSeniorTimezone(senior?: Pick<Senior, "timezone" | "city" | "state">) {
-  if (isValidTimezone(senior?.timezone)) return senior!.timezone!;
+export function resolveTimezoneFromLocation(location?: Pick<Senior, "timezone" | "city" | "state">) {
+  if (isValidTimezone(location?.timezone)) return location!.timezone!;
 
-  const state = normalizeState(senior?.state);
-  const city = normalizeCity(senior?.city);
+  const state = normalizeState(location?.state);
+  const city = normalizeCity(location?.city);
 
   if (state && city) {
     const cityTimezone = CITY_TIMEZONE_OVERRIDES[`${state.toLowerCase()}:${city}`];
@@ -221,6 +221,10 @@ export function resolveSeniorTimezone(senior?: Pick<Senior, "timezone" | "city" 
   if (state && STATE_TIMEZONES[state]) return STATE_TIMEZONES[state];
   // Fallback to the device's timezone instead of hardcoded US Eastern
   return getDeviceTimezone();
+}
+
+export function resolveSeniorTimezone(senior?: Pick<Senior, "timezone" | "city" | "state">) {
+  return resolveTimezoneFromLocation(senior);
 }
 
 export function parseTimeString(timeStr: string): TimeParts | null {

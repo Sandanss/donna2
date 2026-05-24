@@ -107,9 +107,15 @@ export const caregivers = pgTable('caregivers', {
   clerkUserId: varchar('clerk_user_id', { length: 255 }).notNull(), // Clerk user ID
   seniorId: uuid('senior_id').references(() => seniors.id).notNull(),
   role: varchar('role', { length: 50 }).default('caregiver'), // caregiver, family, admin
+  phone: varchar('phone', { length: 50 }),
+  timezone: varchar('timezone', { length: 100 }).default('America/New_York'),
+  city: varchar('city', { length: 100 }),
+  state: varchar('state', { length: 50 }),
+  zipCode: varchar('zip_code', { length: 20 }),
   expoPushToken: varchar('expo_push_token', { length: 255 }),
   expoPushTokenUpdatedAt: timestamp('expo_push_token_updated_at'),
   createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
 });
 
 // Call Analyses - post-call analysis results

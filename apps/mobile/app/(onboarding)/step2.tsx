@@ -296,7 +296,7 @@ export default function Step2Screen() {
 
             <Input
               label={t("onboarding.step2.city")}
-              placeholder="Dallas"
+              placeholder={t("onboarding.step2.cityPlaceholder")}
               value={city}
               onChangeText={(v) => setField("city", v)}
               autoCapitalize="words"
@@ -309,7 +309,7 @@ export default function Step2Screen() {
               <View className="flex-1">
                 <Input
                   label={t("onboarding.step2.state")}
-                  placeholder="TX"
+                  placeholder={t("onboarding.step2.statePlaceholder")}
                   value={state}
                   onChangeText={(v) =>
                     setField("state", v.toUpperCase().slice(0, 2))
@@ -324,7 +324,7 @@ export default function Step2Screen() {
               <View className="flex-1">
                 <Input
                   label={t("onboarding.step2.zipCode")}
-                  placeholder="75201"
+                  placeholder={t("onboarding.step2.zipPlaceholder")}
                   value={zipcode}
                   onChangeText={(v) =>
                     setField("zipcode", v.replace(/\D/g, "").slice(0, 5))

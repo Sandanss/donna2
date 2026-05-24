@@ -112,6 +112,24 @@ describe("mobile auth routing", () => {
     expect(onboardingStoreSource).not.toContain("email: state.email");
   });
 
+  it("routes Apple account creation through caregiver phone and location before senior setup", () => {
+    expect(createAccountSource).not.toContain(
+      'provider === "apple" ? "/(onboarding)/step2"',
+    );
+    expect(signInSource).not.toContain(
+      'provider === "apple" ? "/(onboarding)/step2"',
+    );
+    expect(onboardingStep1Source).not.toContain(
+      'router.replace("/(onboarding)/step2" as any)',
+    );
+    expect(onboardingStep1Source).toContain('"onboarding.step1.appleTitle"');
+    expect(onboardingStep1Source).toContain("onboarding.step1.phoneRequired");
+    expect(onboardingStep1Source).toContain("onboarding.step1.cityRequired");
+    expect(onboardingStep1Source).toContain("onboarding.step1.stateRequired");
+    expect(onboardingStep1Source).toContain("onboarding.step1.zipRequired");
+    expect(onboardingStep1Source).toContain('testID="input-caregiver-city"');
+  });
+
   it("keeps email/password Maestro setup on the explicit email fallback", () => {
     expect(authCreateAccountFlowSource).toContain('id: "create-account-show-email"');
     expect(authCreateAccountFlowSource.indexOf('id: "create-account-show-email"')).toBeLessThan(

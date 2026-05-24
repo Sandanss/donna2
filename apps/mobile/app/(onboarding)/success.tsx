@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { useAuth } from "@clerk/clerk-expo";
+import { useAuth, useUser } from "@clerk/clerk-expo";
 import { useQueryClient } from "@tanstack/react-query";
 import { Sparkles } from "lucide-react-native";
 import Animated, {
@@ -26,7 +26,7 @@ import {
   useOnboardingStore,
   type OnboardingCall,
 } from "@/src/stores/onboarding";
-import { getDeviceTimezone } from "@/src/lib/timezone";
+import { getDeviceTimezone, resolveTimezoneFromLocation } from "@/src/lib/timezone";
 
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 const ALL_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
@@ -153,6 +153,7 @@ export default function SuccessScreen() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const { getToken, signOut, userId } = useAuth();
+  const { user } = useUser();
   const store = useOnboardingStore();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -192,6 +193,16 @@ export default function SuccessScreen() {
 
       const payload = {
         caregiverPhone: store.phone || undefined,
+        caregiverProfile: {
+          phone: store.phone || undefined,
+          timezone: resolveTimezoneFromLocation({
+            city: store.caregiverCity || undefined,
+            state: store.caregiverState || undefined,
+          }),
+          city: store.caregiverCity || undefined,
+          state: store.caregiverState || undefined,
+          zipCode: store.caregiverZipcode || undefined,
+        },
         senior: {
           name: store.lovedOneName,
           phone: store.lovedOnePhone,
@@ -219,6 +230,13 @@ export default function SuccessScreen() {
         callSchedule: buildCallSchedule(store.calls[0]),
       };
 
+      if (store.authProvider !== "apple" && user) {
+        await user.update({
+          firstName: store.firstName.trim(),
+          lastName: store.lastName.trim(),
+        });
+      }
+
       const result = await api.onboarding.complete(payload, token!, {
         idempotencyKey: idempotency.getKey(payload),
       });
@@ -226,6 +244,14 @@ export default function SuccessScreen() {
       if (userId) {
         queryClient.setQueryData(getProfileQueryKey(userId), {
           clerkUserId: userId,
+          caregiver: {
+            phone: payload.caregiverProfile.phone ?? null,
+            timezone: payload.caregiverProfile.timezone ?? null,
+            city: payload.caregiverProfile.city ?? null,
+            state: payload.caregiverProfile.state ?? null,
+            zipCode: payload.caregiverProfile.zipCode ?? null,
+            role: "caregiver",
+          },
           seniors: [result.senior],
         });
       } else {

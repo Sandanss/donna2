@@ -292,6 +292,7 @@ describe('core route runtime behavior', () => {
   it('creates onboarding senior, caregiver link, and reminders in one transaction', async () => {
     harness.insertReturningResults.push(
       [{ id: SENIOR_ID, name: 'Test Senior', phone: '5558675309', timezone: 'America/Chicago' }],
+      [{ id: '33333333-3333-4333-8333-333333333333', seniorId: SENIOR_ID, clerkUserId: 'caregiver-test' }],
       [{ id: REMINDER_ID, seniorId: SENIOR_ID, title: 'Morning vitamins' }],
     );
 
@@ -307,7 +308,7 @@ describe('core route runtime behavior', () => {
       { id: REMINDER_ID, seniorId: SENIOR_ID, title: 'Morning vitamins' },
     ]);
     expect(harness.db.transaction).toHaveBeenCalledTimes(1);
-    expect(harness.tx.insert).toHaveBeenCalledTimes(3);
+    expect(harness.tx.insert).toHaveBeenCalledTimes(4);
   });
 
   it('rejects onboarding phone validation when senior and caregiver phones match without Myself relation', async () => {

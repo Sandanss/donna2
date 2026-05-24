@@ -125,6 +125,9 @@ env:
 - extendedWaitUntil:
     visible: "Go back"
     timeout: 5000
+- assertVisible: "City"
+- assertVisible: "State"
+- assertVisible: "Zip Code"
 - takeScreenshot: 00_05_caregiver
 - tapOn: "Go back"
 

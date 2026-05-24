@@ -4,6 +4,7 @@ import { caregiverService } from '../services/caregivers.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { writeLimiter } from '../middleware/rate-limit.js';
 import { idempotencyMiddleware } from '../middleware/idempotency.js';
+import { validateBody } from '../middleware/validate.js';
 import { db } from '../db/client.js';
 import { caregivers, seniors, notificationPreferences, notifications } from '../db/schema.js';
 import { eq, desc, inArray, sql } from 'drizzle-orm';
@@ -11,9 +12,45 @@ import { seniorService } from '../services/seniors.js';
 import { routeError } from './helpers.js';
 import { logAudit, authToRole } from '../services/audit.js';
 import { sendError } from '../lib/http-response.js';
-import { pushTokenSchema } from '../validators/schemas.js';
+import { pushTokenSchema, updateCaregiverSchema } from '../validators/schemas.js';
+import { resolveTimezoneFromProfile } from '../lib/timezone.js';
 
 const router = Router();
+
+function optionalText(value) {
+  if (value === undefined) return undefined;
+  const trimmed = String(value ?? '').trim();
+  return trimmed || null;
+}
+
+function optionalState(value) {
+  const state = optionalText(value);
+  return typeof state === 'string' && state.length === 2 ? state.toUpperCase() : state;
+}
+
+function buildCaregiverUpdate(data) {
+  const update = {};
+
+  if (data.phone !== undefined) update.phone = data.phone || null;
+  if (data.city !== undefined) update.city = optionalText(data.city);
+  if (data.state !== undefined) update.state = optionalState(data.state);
+  if (data.zipCode !== undefined) update.zipCode = optionalText(data.zipCode);
+
+  if (
+    data.timezone !== undefined ||
+    data.city !== undefined ||
+    data.state !== undefined
+  ) {
+    update.timezone = resolveTimezoneFromProfile({
+      timezone: data.timezone,
+      city: update.city ?? data.city,
+      state: update.state ?? data.state,
+    });
+  }
+
+  update.updatedAt = new Date();
+  return update;
+}
 
 // List all caregiver-senior links (admin only)
 router.get('/api/caregivers', requireAdmin, async (req, res) => {
@@ -41,20 +78,70 @@ router.get('/api/caregivers/me', requireAuth, async (req, res) => {
   try {
     const clerkUserId = req.auth.userId;
 
-    // Get all seniors this user can access
-    const seniors = await caregiverService.getSeniorsForUser(clerkUserId);
+    const profile = await caregiverService.getProfileForUser(clerkUserId);
 
-    if (seniors.length === 0) {
+    if (profile.seniors.length === 0) {
       // No seniors linked - they need to complete onboarding
       return sendError(res, 404, { error: 'No seniors found', needsOnboarding: true });
     }
 
     res.json({
       clerkUserId,
-      seniors,
+      caregiver: profile.caregiver,
+      seniors: profile.seniors,
     });
   } catch (error) {
     routeError(res, error, 'GET /api/caregivers/me');
+  }
+});
+
+// Update current caregiver locality used for notification timezone decisions.
+router.patch('/api/caregivers/me', requireAuth, validateBody(updateCaregiverSchema), idempotencyMiddleware, writeLimiter, async (req, res) => {
+  try {
+    const clerkUserId = req.auth.userId;
+    const update = buildCaregiverUpdate(req.body);
+
+    const updatedRows = await db.transaction(async (tx) => {
+      const rows = await tx.update(caregivers)
+        .set(update)
+        .where(eq(caregivers.clerkUserId, clerkUserId))
+        .returning();
+
+      if (update.timezone) {
+        for (const row of rows) {
+          const [existing] = await tx.select({ id: notificationPreferences.id })
+            .from(notificationPreferences)
+            .where(eq(notificationPreferences.caregiverId, row.id))
+            .limit(1);
+
+          if (existing) {
+            await tx.update(notificationPreferences)
+              .set({ timezone: update.timezone, updatedAt: new Date() })
+              .where(eq(notificationPreferences.caregiverId, row.id));
+          } else {
+            await tx.insert(notificationPreferences).values({
+              caregiverId: row.id,
+              timezone: update.timezone,
+            });
+          }
+        }
+      }
+
+      return rows;
+    });
+
+    if (updatedRows.length === 0) {
+      return sendError(res, 404, { error: 'Caregiver not found' });
+    }
+
+    const profile = await caregiverService.getProfileForUser(clerkUserId);
+    res.json({
+      clerkUserId,
+      caregiver: profile.caregiver,
+      seniors: profile.seniors,
+    });
+  } catch (error) {
+    routeError(res, error, 'PATCH /api/caregivers/me');
   }
 });
 

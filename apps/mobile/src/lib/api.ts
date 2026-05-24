@@ -1,4 +1,5 @@
 import type {
+  CaregiverProfileUpdate,
   CaregiverProfile,
   Senior,
   Reminder,
@@ -288,6 +289,14 @@ export const api = {
   caregivers: {
     /** GET /api/caregivers/me -- returns current user's profile + linked seniors */
     me: (token: string) => fetchJson<CaregiverProfile>("/api/caregivers/me", { token }),
+    /** PATCH /api/caregivers/me -- updates current caregiver locality/timezone */
+    updateProfile: (data: CaregiverProfileUpdate, token: string, options?: WriteOptions) =>
+      fetchJson<CaregiverProfile>("/api/caregivers/me", {
+        method: "PATCH",
+        body: JSON.stringify(data),
+        token,
+        idempotencyKey: options?.idempotencyKey,
+      }),
   },
 
   account: {
