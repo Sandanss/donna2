@@ -113,6 +113,15 @@ Plan and runbooks: [`docs/plans/2026-05-18-scale-to-2000-users-technical-plan.md
 
 ## Development Workflow
 
+### Git worktrees
+
+- Prefer a separate `git worktree` for concurrent branch work, risky merges, rebases, release prep, or any task where the current checkout has user changes.
+- One working tree can only have one branch checked out. Do not switch branches in a checkout the user is actively using when a parallel worktree would avoid disrupting them.
+- Keep worktrees as sibling directories under `/Users/davidzuluaga/code/`, using descriptive names like `donna2-mobile-fix` or `donna2-main-merge`.
+- Check existing worktrees first with `git worktree list`; reuse a suitable clean worktree when possible.
+- For Claude Code sessions, prefer `claude --worktree --tmux` when starting isolated branch work.
+- For Codex sessions, create the worktree explicitly, for example `git worktree add ../donna2-mobile-fix -b codex/mobile-fix origin/main`, then start Codex from that directory.
+
 Three environments, fully isolated (own Railway services, own Neon DB branch, own Telnyx number):
 
 | Env | Database | Voice # |
