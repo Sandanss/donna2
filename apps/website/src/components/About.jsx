@@ -22,7 +22,7 @@ export default function About() {
               We&apos;re Nick &amp; David, the founders of Donna. We built Donna because we know
               firsthand how hard it is to make sure nothing slips through the cracks when
               you&apos;re helping take care of an aging loved one. Primary caregivers have so
-              much on their plates — booking and driving their loved one to appointments,
+              much on their plates — coordinating schedules,
               managing their paperwork and finances, decluttering their houses — all while
               trying to keep up their core relationship with their loved one. Not a
               relationship as a chauffeur or accountant or maid or all of the above. But as

@@ -110,7 +110,7 @@ The documented **10,000-user path** is forward work built on the new queue archi
 │   ┌─────────────────────────────────────────────────────────────────────┐   │
 │   │              Post-Call Processing (services/post_call.py)             │   │
 │   │              1. Complete conversation record (DB)                     │   │
-│   │              2. Call analysis — Gemini Flash (summary, concerns)     │   │
+│   │              2. Call analysis — Gemini Flash (summary, engagement)   │   │
 │   │              3. Interest discovery + scores                           │   │
 │   │              4. Memory extraction — OpenAI (facts, preferences)      │   │
 │   │              5. Daily context — cross-call same-day memory            │   │
@@ -156,14 +156,14 @@ The documented **10,000-user path** is forward work built on the new queue archi
 
 | Layer | File | Model | Latency | Purpose |
 |-------|------|-------|---------|---------|
-| **1** | `processors/quick_observer.py` + `processors/patterns.py` | Regex | 0ms | 250+ patterns: health, goodbye, emotion, safety + programmatic call end after configured delay |
+| **1** | `processors/quick_observer.py` + `processors/patterns.py` | Regex | 0ms | Companion-call signals: goodbye, emotion, family, activity + programmatic call end after configured delay |
 | **2** | `processors/conversation_director.py` + `services/director_llm.py` | Groq fast path, Gemini fallback helper | Non-blocking | Same-turn/previous-turn guidance, memory prefetch, news injection |
 
 ### Post-Call Analysis (Async)
 
 | Process | File | Model | Trigger | Output |
 |---------|------|-------|---------|--------|
-| Call Analysis | `services/call_analysis.py` | Gemini 3 Flash Preview | Call ends | Summary, concerns, engagement score, follow-ups |
+| Call Analysis | `services/call_analysis.py` | Gemini 3 Flash Preview | Call ends | Summary, engagement score, mood, caregiver takeaways |
 | Interest Discovery | `services/interest_discovery.py` | Rule/category mapping over analysis output | After call analysis | New interest categories, editable interest details, engagement scores |
 | Memory Extraction | `services/memory.py` | OpenAI GPT-4o-mini | Call ends | Facts, preferences, events stored with embeddings |
 
@@ -221,13 +221,10 @@ Quick Observer pattern categories:
 
 | Category | Patterns | Effect |
 |----------|----------|--------|
-| **Health** | 30+ patterns (pain, falls, medication, symptoms) | Health signals in context |
 | **Emotion** | 25+ patterns with valence/intensity | Emotional tone detection |
 | **Family** | 25+ relationship patterns including pets | Context enrichment |
-| **Safety** | Scams, strangers, emergencies | Safety concern flags |
 | **Goodbye** | Explicit strong goodbye detection ("goodbye", "I gotta go", "talk to you later") | Schedules programmatic EndFrame only after the minimum call-age guard and goodbye audio delay |
 | **Factual/Curiosity** | Question patterns ("what year", "how tall") | Direct-answer guidance |
-| **Cognitive** | Confusion, repetition, time disorientation | Cognitive signals |
 
 ---
 
@@ -254,7 +251,7 @@ Quick Observer pattern categories:
 | **Voice LLM** | Claude Haiku 4.5 (`claude-haiku-4-5-20251001`) | AnthropicLLMService (prompt caching enabled) |
 | **Director** | Groq (`gpt-oss-20b`) | Active fast provider for query/speculative guidance |
 | **Director Fallback Helper** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Regular non-speculative fallback in `director_llm.py` |
-| **Post-Call** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Summary, concerns, engagement |
+| **Post-Call** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Summary, engagement, caregiver takeaways |
 | **STT** | Deepgram Nova 3 (`nova-3-general`) | Real-time, interim results, 16kHz linear PCM; English/Spanish based on senior call language |
 | **TTS** | ElevenLabs (`eleven_flash_v2_5`) by default; Cartesia behind provider flag | Telnyx calls use native 16kHz PCM from TTS; optional Spanish voice IDs for Spanish calls |
 | **VAD** | Silero | confidence=0.68, start_secs=0.3, stop_secs=1.2, min_volume=0.5 |
@@ -321,14 +318,14 @@ pipecat/
 
 | Table | Purpose | Key Fields |
 |-------|---------|------------|
-| **seniors** | User profiles | name, phone, timezone, interests, encrypted familyInfo/additionalInfo/medicalNotes, call_settings (JSONB), call_context_snapshot (JSONB), cached_news (TEXT) |
+| **seniors** | User profiles | name, phone, timezone, interests, encrypted familyInfo/additionalInfo, call_settings (JSONB), call_context_snapshot (JSONB), cached_news (TEXT). Legacy medical-note columns are deprecated and nulled by migration 014/026. |
 | **conversations** | Call records | callSid, encrypted transcript, duration, status, encrypted summary |
 | **memories** | Long-term memory | content, type, importance, embedding (1536d, HNSW index) |
 | **reminders** | Scheduled reminders | title, scheduledTime, isRecurring, type |
 | **reminder_deliveries** | Delivery tracking | status, attemptCount, userResponse, callSid |
 | **caregivers** | User-senior links | clerkUserId, seniorId, role |
 | **caregiver_notes** | Notes from caregivers | content, is_delivered, delivered_at, call_sid |
-| **call_analyses** | Post-call results | summary, engagementScore, concerns, followUps |
+| **call_analyses** | Post-call results | summary, engagementScore, mood, caregiver takeaways; legacy concerns/followUps remain empty for compatibility |
 | **daily_call_context** | Same-day cross-call memory | seniorId, callDate, topicsDiscussed, remindersDelivered |
 | **notifications** | Caregiver notification log | caregiverId, seniorId, eventType, channel |
 | **waitlist** | Public waitlist signups | name, email, phone, whoFor |

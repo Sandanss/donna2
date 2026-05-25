@@ -1,8 +1,8 @@
 """Post-call analysis service.
 
-Port of services/call-analysis.js — runs after each call to generate
-summary, caregiver alerts, engagement metrics, and follow-up suggestions.
-Uses Gemini Flash for cost efficiency.
+Runs after each call to generate a companion-call summary and engagement
+metrics. It intentionally does not classify medical, safety, or other care
+alerts.
 """
 
 from __future__ import annotations
@@ -25,36 +25,28 @@ ANALYSIS_MODEL = os.environ.get("CALL_ANALYSIS_MODEL", "gemini-3-flash-preview")
 # Static instructions — passed as system_instruction
 ANALYSIS_SYSTEM_INSTRUCTION = """You analyze completed phone calls between Donna (an AI companion) and elderly individuals for the senior's caregiver.
 
-Write the summary for a caregiver, not for Donna or an internal operator. It should answer: how did the senior seem, what mattered from the conversation, whether anything may need follow-up, and what a caregiver could do next. Keep it concise, factual, and useful. Do not include raw quotes, private details that are not relevant to care, or unsupported medical/financial conclusions.
+Write the summary for a caregiver, not for Donna or an internal operator. It should answer: how did the senior seem and what mattered from the conversation. Keep it concise, factual, and useful. Do not include raw quotes, private details that are not needed for a companion-call summary, or unsupported medical/financial conclusions.
 
-Be conservative and evidence-based:
-- Prefer omission over speculation. Do not invent risks, care gaps, or interventions.
-- Use the listed medical conditions only as background. Do not turn them into concerns unless the transcript makes them relevant in this call.
-- A casual or conditional remark such as "if my knees behave", "maybe", or "I might" is not by itself a concern or a reason to recommend caregiver intervention.
-- Do not recommend contacting family, arranging transport, monitoring symptoms, or changing care routines unless the transcript directly supports that need.
-- For routine positive calls, or reminder calls where the reminder was acknowledged without difficulty, set `concerns` to [], `recommended_caregiver_action` to "", and `follow_up_suggestions` to [].
-- If `concerns` is empty and the transcript does not contain a concrete caregiver task, `recommended_caregiver_action` must be "" and `follow_up_suggestions` must be [].
-
-Concern threshold:
-- Include a concern only when the transcript contains direct evidence of a meaningful health, cognitive, emotional, or safety issue in this call.
-- Low severity: mild but explicit issue worth awareness.
-- Medium severity: clear wellbeing issue, repeated problem, missed self-care, or upcoming need that reasonably merits caregiver follow-up.
-- High severity: urgent safety risk, acute distress, or major confusion.
-- If the transcript does not cross that threshold, return no concerns.
+Donna is not a healthcare, safety-monitoring, or emergency-response product:
+- Do not classify health, cognitive, emotional, or safety concerns.
+- Do not create alerts, diagnoses, risk assessments, care plans, or urgent recommendations.
+- Do not recommend monitoring symptoms, changing routines, arranging care, or contacting professionals.
+- If the transcript includes health or emergency-like statements, keep the caregiver summary high level and factual without advice.
+- Always set `concerns` to [], `recommended_caregiver_action` to "", and `follow_up_suggestions` to [].
 
 Return JSON with:
-- summary: 2-3 caregiver-facing sentences. Start with the senior's overall sentiment/mood, then include useful context, concerns, reminders, or follow-up needs if present.
-- sentiment: one of positive, neutral, concerned, worried, distressed. Use positive for upbeat/engaged calls; neutral for routine calls with no meaningful issue; concerned for mild wellbeing or engagement issues such as fatigue, poor sleep, missed meals, mild sadness, or mild confusion; worried for material health/cognitive/safety concerns; distressed for acute emotional distress.
+- summary: 2-3 caregiver-facing sentences. Start with the senior's overall sentiment/mood, then include useful non-clinical conversation context and reminders if present.
+- sentiment: one of positive, neutral, concerned, worried, distressed. Use positive for upbeat/engaged calls; neutral for routine calls with no meaningful issue; concerned for low engagement or low mood; worried or distressed only for the senior's clearly expressed emotional state, not for health or safety classification.
 - topics_discussed
 - reminders_delivered
 - engagement_score: 1-10
 - mood: one or two caregiver-friendly words, such as cheerful, calm, content, quiet, tired, worried, sad
 - caregiver_sms: legacy field name for a warm, privacy-respecting caregiver message used by email/in-app notifications. Keep it high-level, never expose vulnerability or repeat sensitive details; if mood seems low, subtly suggest the caregiver give them a call; include call duration naturally; max 280 chars.
 - caregiver_takeaways: 1-4 concise items a caregiver would care about
-- recommended_caregiver_action: short action or empty string if no action is needed
-- concerns: health/cognitive/emotional/safety with severity low/medium/high, description, evidence, recommended_action
+- recommended_caregiver_action: always empty string
+- concerns: always empty array
 - positive_observations
-- follow_up_suggestions: caregiver-actionable suggestions for future calls or family follow-up
+- follow_up_suggestions: always empty array
 - call_quality: rapport strong/moderate/weak, goals_achieved bool, duration_appropriate bool
 
 Temporal grounding:
@@ -63,12 +55,11 @@ Temporal grounding:
 - Do not write a follow-up that implies a future plan already happened unless the transcript says it happened.
 - If a future plan is merely mentioned, describe it as planned or upcoming. Do not upgrade it into a caregiver task unless the transcript says support is needed.
 
-Output ONLY valid JSON: {"summary":"str","sentiment":"positive|neutral|concerned|worried|distressed","topics_discussed":["str"],"reminders_delivered":["str"],"engagement_score":0,"mood":"str","caregiver_sms":"str","caregiver_takeaways":["str"],"recommended_caregiver_action":"str","concerns":[{"type":"health|cognitive|emotional|safety","severity":"low|medium|high","description":"str","evidence":"str","recommended_action":"str"}],"positive_observations":["str"],"follow_up_suggestions":["str"],"call_quality":{"rapport":"strong|moderate|weak","goals_achieved":true,"duration_appropriate":true}}"""
+Output ONLY valid JSON: {"summary":"str","sentiment":"positive|neutral|concerned|worried|distressed","topics_discussed":["str"],"reminders_delivered":["str"],"engagement_score":0,"mood":"str","caregiver_sms":"str","caregiver_takeaways":["str"],"recommended_caregiver_action":"","concerns":[],"positive_observations":["str"],"follow_up_suggestions":[],"call_quality":{"rapport":"strong|moderate|weak","goals_achieved":true,"duration_appropriate":true}}"""
 
 # Dynamic per-call content — passed as contents
 ANALYSIS_TURN_TEMPLATE = """Senior: {{SENIOR_NAME}}
 Call date/time: {{CALL_DATETIME}}
-Conditions: {{HEALTH_CONDITIONS}}
 Family: {{FAMILY_MEMBERS}}
 
 ## TRANSCRIPT
@@ -128,43 +119,12 @@ def _sanitize_analysis_list(values, *, max_len: int = 300) -> list[str]:
     return sanitized
 
 
-def _sanitize_concerns(values) -> list[dict]:
-    concerns = []
-    for concern in _as_list(values):
-        if not isinstance(concern, dict):
-            continue
-        sanitized = dict(concern)
-        for key, max_len in (
-            ("type", 40),
-            ("severity", 40),
-            ("description", 500),
-            ("evidence", 500),
-            ("recommended_action", 500),
-        ):
-            if key in sanitized:
-                sanitized[key] = _sanitize_analysis_text(sanitized[key], max_len=max_len)
-        concerns.append(sanitized)
-    return concerns
-
-
 def _normalize_sentiment(raw, analysis: dict) -> str:
     """Return a stable caregiver-facing sentiment label."""
     if isinstance(raw, str):
         value = raw.strip().lower()
         if value in _SENTIMENT_VALUES:
             return value
-
-    concerns = _as_list(analysis.get("concerns"))
-    severities = {
-        str(c.get("severity", "")).lower()
-        for c in concerns
-        if isinstance(c, dict)
-    }
-    types = {
-        str(c.get("type") or c.get("category") or "").lower()
-        for c in concerns
-        if isinstance(c, dict)
-    }
 
     mood = str(analysis.get("mood") or "").lower()
     engagement = analysis.get("engagement_score")
@@ -175,12 +135,6 @@ def _normalize_sentiment(raw, analysis: dict) -> str:
 
     if any(term in mood for term in ("distress", "hopeless", "panic", "despair")):
         return "distressed"
-    if "high" in severities and ("emotional" in types or "safety" in types):
-        return "distressed"
-    if "high" in severities:
-        return "worried"
-    if "medium" in severities:
-        return "concerned"
     if engagement is not None and engagement <= 3:
         return "concerned"
     if any(term in mood for term in ("worried", "anxious", "sad", "lonely", "tired", "quiet")):
@@ -207,16 +161,11 @@ def _normalize_analysis(analysis: dict | None) -> dict:
         max_len=160,
     )
     merged["reminders_delivered"] = _sanitize_analysis_list(merged.get("reminders_delivered"), max_len=160)
-    merged["concerns"] = _sanitize_concerns(merged.get("concerns"))
+    merged["concerns"] = []
     merged["positive_observations"] = _sanitize_analysis_list(merged.get("positive_observations"))
-    merged["follow_up_suggestions"] = _sanitize_analysis_list(
-        merged.get("follow_up_suggestions") or merged.get("follow_ups")
-    )
+    merged["follow_up_suggestions"] = []
     merged["caregiver_takeaways"] = _sanitize_analysis_list(merged.get("caregiver_takeaways"))
-    merged["recommended_caregiver_action"] = _sanitize_analysis_text(
-        merged.get("recommended_caregiver_action") or "",
-        max_len=500,
-    )
+    merged["recommended_caregiver_action"] = ""
     merged["sentiment"] = _normalize_sentiment(raw_sentiment, merged)
 
     try:
@@ -279,7 +228,7 @@ async def analyze_completed_call(
             family_info = {}
     donna_language = family_info.get("donnaLanguage", "en")
     language_instruction = (
-        "\n\nIMPORTANT: Write ALL text fields (summary, caregiver_sms, caregiver_takeaways, recommended_caregiver_action, follow_up_suggestions, mood, positive_observations, concern descriptions) in Spanish."
+        "\n\nIMPORTANT: Write ALL text fields (summary, caregiver_sms, caregiver_takeaways, recommended_caregiver_action, follow_up_suggestions, mood, positive_observations) in Spanish."
         if donna_language == "es"
         else ""
     )
@@ -288,7 +237,6 @@ async def analyze_completed_call(
         ANALYSIS_TURN_TEMPLATE
         .replace("{{SENIOR_NAME}}", (senior_context or {}).get("name") or "Unknown")
         .replace("{{CALL_DATETIME}}", call_datetime)
-        .replace("{{HEALTH_CONDITIONS}}", (senior_context or {}).get("medical_notes") or "None known")
         .replace(
             "{{FAMILY_MEMBERS}}",
             ", ".join((senior_context or {}).get("family") or []) or "Unknown",
@@ -340,10 +288,10 @@ async def analyze_completed_call(
         analysis = _normalize_analysis(analysis)
 
         logger.info(
-            "Analysis complete: sentiment={sentiment}, engagement={score}/10, concerns={cc}",
+            "Analysis complete: sentiment={sentiment}, engagement={score}/10, observations={observations}",
             sentiment=analysis.get("sentiment"),
             score=analysis.get("engagement_score"),
-            cc=len(analysis.get("concerns", [])),
+            observations=len(analysis.get("positive_observations", [])),
         )
         return analysis
 
@@ -387,9 +335,8 @@ async def save_call_analysis(
 
 
 def get_high_severity_concerns(analysis: dict) -> list[dict]:
-    """Return only high-severity concerns from an analysis."""
-    concerns = analysis.get("concerns") or []
-    return [c for c in concerns if c.get("severity") == "high"]
+    """Legacy compatibility shim. Donna no longer creates care alerts."""
+    return []
 
 
 async def get_latest_analysis(

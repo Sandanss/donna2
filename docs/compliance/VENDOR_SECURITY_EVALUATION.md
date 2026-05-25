@@ -130,7 +130,7 @@ Senior (phone call)
 
 | Criterion | Assessment |
 |-----------|-----------|
-| **PHI Exposure** | CRITICAL -- receives full conversation context including system prompt (with senior name, language setting, age/birthday context, interests and interest details, additional family context, topics to avoid, medical notes, memories, recent call history), all user utterances, and all assistant responses. Every word spoken in a call passes through Claude. |
+| **PHI Exposure** | CRITICAL -- receives full conversation context including system prompt (with senior name, language setting, age/birthday context, interests and interest details, additional family context, topics to avoid, memories, recent call history), all user utterances, and all assistant responses. Medical notes are deprecated and not injected, but users may still disclose health details during calls. Every word spoken in a call passes through Claude. |
 | **BAA Available** | **Yes** -- Anthropic offers BAA on enterprise plans |
 | **Security Certifications** | SOC 2 Type II |
 | **Data Retention** | API inputs/outputs retained for 30 days by default for trust & safety. Enterprise plans can negotiate shorter retention or opt-out. |
@@ -152,7 +152,7 @@ Senior (phone call)
 
 | Criterion | Assessment |
 |-----------|-----------|
-| **PHI Exposure** | HIGH -- receives conversation transcripts for Director analysis and post-call analysis. Post-call analysis includes full conversation for summary, concern detection, and caregiver notification generation. |
+| **PHI Exposure** | HIGH -- receives conversation transcripts for Director analysis and post-call analysis. Post-call analysis includes full conversation for summary, engagement scoring, and caregiver takeaway generation. |
 | **BAA Available** | **Yes** -- Google Cloud offers BAA as part of Google Cloud Healthcare |
 | **Security Certifications** | SOC 2 Type II, ISO 27001, HIPAA, FedRAMP, HITRUST |
 | **Data Retention** | Vertex AI API: no retention for model improvement. Logging configurable. |
@@ -324,7 +324,7 @@ Senior (phone call)
 
 | Criterion | Assessment |
 |-----------|-----------|
-| **PHI Exposure** | CRITICAL -- stores ALL persistent data: senior profiles (name, phone, medical notes), conversation transcripts, semantic memories, medication reminders, call analyses, caregiver relationships |
+| **PHI Exposure** | CRITICAL -- stores ALL persistent data: senior profiles (name, phone), conversation transcripts, semantic memories, reminders, call analyses, caregiver relationships, and deprecated medical-note columns until nulled by migration 014/026 |
 | **BAA Available** | **Yes** -- Neon offers BAA on Pro and Enterprise plans |
 | **Security Certifications** | SOC 2 Type II |
 | **Data Retention** | Customer-controlled; PITR (Point-in-Time Recovery) window configurable by plan |
@@ -459,7 +459,7 @@ These three vendors represent the greatest HIPAA compliance risk and should be a
 
 **Why:** Processes all of Donna's spoken responses as TTS input text. No BAA available. No public compliance program. No certifications documented. Smaller startup with uncertain long-term viability.
 
-**Data exposed:** Every word Donna speaks, which includes medication reminder text ("Remember to take your metformin at 8 PM"), health advice, appointment references, and personal details about the senior.
+**Data exposed:** Every word Donna speaks, which can include user-entered reminder text, health details disclosed during the call, and personal details about the senior. Donna no longer offers medication reminder types or medical advice flows.
 
 **Recommended action:** Disable Cartesia via feature flag and use **ElevenLabs** exclusively (if BAA secured) or migrate to **Google Cloud TTS**.
 - Cartesia is already behind GrowthBook feature flag `tts_provider`

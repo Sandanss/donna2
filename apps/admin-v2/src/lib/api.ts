@@ -163,7 +163,6 @@ export interface Senior {
   phone: string;
   interests: string[];
   familyInfo: { location?: string };
-  medicalNotes: string;
   isActive: boolean;
   memories?: Memory[];
 }
@@ -173,7 +172,6 @@ export interface CreateSeniorInput {
   phone: string;
   interests: string[];
   familyInfo: { location: string };
-  medicalNotes: string;
 }
 
 export interface Memory {

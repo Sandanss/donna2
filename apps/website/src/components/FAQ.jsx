@@ -20,7 +20,7 @@ const faqs = [
   },
   {
     q: 'What does a typical call look like?',
-    a: "Calls typically last 1 to 15 minutes. Donna checks in on how they\u2019re feeling, chats about their interests and daily life, delivers any reminders you\u2019ve set, and wraps up warmly. Afterwards, a summary appears in your app. Some seniors just like to get quick reminders and/or answer Donna so that their family knows they\u2019re doing alright \u2013 others love to chat for hours a week and find it far more fun than watching TV or just sitting around. There\u2019s no right way to use Donna!",
+    a: "Calls typically last 1 to 15 minutes. Donna chats about their interests and daily life, delivers any everyday reminders you\u2019ve set, and wraps up warmly. Afterwards, a summary appears in your app. Some seniors just like quick reminders, while others love to chat for hours a week. There\u2019s no right way to use Donna!",
   },
   {
     q: 'How soon can calls start after I download the app?',
@@ -36,7 +36,7 @@ const faqs = [
   },
   {
     q: 'What\'s the best way to use Donna?',
-    a: "Every family likes to use Donna slightly differently. Some really focus on using it as a tool to give reminders and keep their parent on top of important things. Some treat it like getting a \u2018Siri\u2019 or \u2018Alexa\u2019 their parent can call whenever they like to learn things on the internet. Some seniors like it for companionship. Some seniors enjoy it as entertainment and brain exercise, having fun conversations with an advanced technology made approachable. Some families just want their parent to answer Donna\u2019s call daily to quickly check in and confirm they\u2019re alright. And many early testers have found other exciting ways to get value out of Donna we\u2019d never even conceived of.\n\nThe only right way to use Donna is however it best serves you and your loved one.",
+    a: "Every family likes to use Donna slightly differently. Some focus on simple reminders and routines. Some treat it like getting a \u2018Siri\u2019 or \u2018Alexa\u2019 their parent can call whenever they like to learn things on the internet. Some seniors like it for companionship. Some seniors enjoy it as entertainment and brain exercise, having fun conversations with an advanced technology made approachable. And many early testers have found other useful ways to get value out of Donna.\n\nThe only right way to use Donna is however it best serves you and your loved one.",
   },
   {
     q: 'My parent is \'tech-challenged\', will this be too complicated?',
@@ -44,7 +44,7 @@ const faqs = [
   },
   {
     q: 'How is Donna different from a medical alert system?',
-    a: "Medical alert systems react to emergencies. Donna\u2019s purpose is to proactively improve your loved one\u2019s daily life. Medical alert systems solve for things like falls and chest pains. Donna solves for things like forgetfulness, loneliness, boredom, and unanswered curiosities. Both serve distinct, important roles in the caregiving process.",
+    a: "Donna is not a medical alert system or emergency response service. Donna is for companion calls, everyday conversation, and simple reminders. If someone may be in immediate danger, call emergency services.",
   },
 ];
 

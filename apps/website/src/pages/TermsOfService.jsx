@@ -6,7 +6,7 @@ export default function TermsOfService() {
       <div className="legal-page__container">
         <div className="legal-page__header">
           <h1 className="legal-page__title">Terms of Service</h1>
-          <p className="legal-page__meta">Effective Date: March 28, 2026 &nbsp;·&nbsp; Last Updated: March 28, 2026</p>
+          <p className="legal-page__meta">Effective Date: March 28, 2026 &nbsp;·&nbsp; Last Updated: May 25, 2026</p>
         </div>
 
         <div className="legal-page__body">
@@ -20,7 +20,7 @@ export default function TermsOfService() {
             <li>Scheduled AI-generated phone calls to Call Recipients</li>
             <li>Personalized conversation based on preferences, interests, and reminders configured by the Subscriber</li>
             <li>Post-call summaries and transcripts delivered to the Subscriber</li>
-            <li>Missed call alerts and call history</li>
+            <li>Missed call notifications and call history</li>
             <li>A preview phone line for prospective users to experience a sample call without an account</li>
           </ul>
           <div className="legal-page__notice">

@@ -33,12 +33,11 @@ _POSSESSIVE_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"\bmy\s+(husband|wife|spouse|partner)\b", re.I), "spouse"),
     (re.compile(r"\bmy\s+(brother|sister|sibling)\b", re.I), "sibling"),
     (re.compile(r"\bmy\s+(friend|neighbor|neighbour)\b", re.I), "friend"),
-    (re.compile(r"\bmy\s+(doctor|physician|nurse|therapist)\b", re.I), "doctor"),
     (re.compile(r"\bmy\s+(cat|dog|bird|pet)\b", re.I), "pet"),
 ]
 
 _ACTIVITY_PATTERNS: list[tuple[re.Pattern, str]] = [
-    (re.compile(r"\b(?:went|going|go)\s+(?:to\s+)?(?:the\s+)?(church|store|market|park|hospital|doctor|dentist|library)\b", re.I), None),
+    (re.compile(r"\b(?:went|going|go)\s+(?:to\s+)?(?:the\s+)?(church|store|market|park|library)\b", re.I), None),
     (re.compile(r"\b(?:played|playing|play)\s+(cards|bingo|golf|tennis|bridge)\b", re.I), None),
     (re.compile(r"\b(?:watched|watching|watch)\s+(?:the\s+)?(game|news|movie|show|baseball|football|basketball)\b", re.I), None),
 ]

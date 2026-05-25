@@ -32,13 +32,13 @@ def decrypt_senior_phi(row: dict | None) -> dict | None:
         return None
     clean = dict(row)
     clean["family_info"] = _prefer_json(row, "family_info", "family_info_encrypted")
-    clean["medical_notes"] = _prefer_text(row, "medical_notes", "medical_notes_encrypted")
     clean["preferred_call_times"] = _prefer_json(row, "preferred_call_times", "preferred_call_times_encrypted")
     clean["additional_info"] = _prefer_text(row, "additional_info", "additional_info_encrypted")
     clean["call_context_snapshot"] = _prefer_json(row, "call_context_snapshot", "call_context_snapshot_encrypted")
     return _drop(
         clean,
         "family_info_encrypted",
+        "medical_notes",
         "medical_notes_encrypted",
         "preferred_call_times_encrypted",
         "additional_info_encrypted",
@@ -51,9 +51,7 @@ def encrypt_senior_update(data: dict) -> dict:
     if "familyInfo" in data:
         values["familyInfoEncrypted"] = encrypt_json(data.get("familyInfo"))
         values["familyInfo"] = None
-    if "medicalNotes" in data:
-        values["medicalNotesEncrypted"] = encrypt(data.get("medicalNotes"))
-        values["medicalNotes"] = None
+    values.pop("medicalNotes", None)
     if "preferredCallTimes" in data:
         values["preferredCallTimesEncrypted"] = encrypt_json(data.get("preferredCallTimes"))
         values["preferredCallTimes"] = None

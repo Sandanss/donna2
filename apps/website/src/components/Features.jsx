@@ -3,8 +3,8 @@ import './Features.css';
 
 const features = [
   {
-    title: 'Medication Reminders',
-    description: 'Never miss a dose. Donna weaves gentle reminders into natural conversation — no nagging, just care.',
+    title: 'Helpful Reminders',
+    description: 'Donna weaves everyday reminders into natural conversation, so important routines stay easy to remember.',
     icon: (
       <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
         <path d="M10.5 1.5H8.25A2.25 2.25 0 0 0 6 3.75v16.5a2.25 2.25 0 0 0 2.25 2.25h7.5A2.25 2.25 0 0 0 18 20.25V3.75a2.25 2.25 0 0 0-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-6 18h9" />
@@ -35,8 +35,8 @@ const features = [
     size: 'normal',
   },
   {
-    title: 'Safety Checks',
-    description: "If they don't pick up, Donna retries automatically and alerts you immediately so you're never left wondering.",
+    title: 'Missed Call Updates',
+    description: "If they don't pick up, Donna retries automatically and lets you know so you're not left wondering.",
     icon: (
       <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
         <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
@@ -74,7 +74,7 @@ export default function Features() {
           <span className="section-label">What You Get</span>
           <h2 className="section-title">Everything your family needs</h2>
           <p className="section-subtitle">
-            More than just a phone call — it&apos;s comprehensive care and connection, every single day.
+            More than just a phone call — it&apos;s conversation, consistency, and connection every single day.
           </p>
         </div>
 

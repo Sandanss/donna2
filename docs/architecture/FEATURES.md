@@ -8,7 +8,7 @@
 
 ### Outbound Calls (Donna calls seniors)
 - Scheduled daily check-in calls at configurable times per senior
-- Reminder-triggered calls (medication, appointments, etc.)
+- Reminder-triggered calls for everyday and social reminders
 - Manual outbound calls via admin dashboard or API
 - Time-of-day awareness (greetings adapt to morning/afternoon/evening)
 
@@ -20,7 +20,7 @@
 
 ### Onboarding Calls
 - Unrecognized callers get a warm onboarding conversation
-- Learns caller name, relationship to senior, senior's name, interests, concerns
+- Learns caller name, relationship to senior, senior's name, interests, and useful non-medical context
 - Extracts and saves prospect details after the call to avoid in-call tool latency
 - Return callers recognized and greeted by name with prior context
 
@@ -38,7 +38,7 @@
 - Caregivers can configure Donna's call language per senior through `familyInfo.donnaLanguage`
 - English and Spanish are active call languages
 - Spanish calls set Deepgram STT language to `es`, inject a Spanish-only prompt instruction, and use optional Spanish ElevenLabs/Cartesia voice IDs when configured
-- Gemini post-call analysis writes caregiver-facing summaries and concern text in the configured Donna language
+- Gemini post-call analysis writes caregiver-facing summaries and takeaways in the configured Donna language
 - Mobile onboarding sends `familyInfo.donnaLanguage` and `topicsToAvoid`; the current website onboarding stores language/topics in local state but only submits relation/interest detail payloads to Node, so website parity still needs a small API payload follow-up.
 
 ### Senior Profile Context
@@ -62,11 +62,9 @@
 
 ### 2-Layer Conversation Director
 - **Layer 1: Quick Observer** — regex patterns (0ms), instant guidance injection
-  - Health signal detection (pain, falls, medication, symptoms)
   - Emotion detection with valence/intensity
   - Family/relationship pattern matching
-  - Safety concern flagging (scams, strangers, emergencies)
-  - Cognitive signal detection (confusion, repetition)
+  - Activity and social-context pattern matching
   - Strong-goodbye detection → guarded programmatic call end after minimum call age and configured delay
 - **Layer 2: Conversation Director** — Groq primary, Gemini fallback LLM analysis (non-blocking)
   - Call phase tracking and pacing guidance
@@ -153,7 +151,7 @@
 - Native iOS Sign in with Apple uses `expo-apple-authentication` directly and passes the Apple identity token into Clerk (`oauth_token_apple`); Google remains browser OAuth
 - Fresh mobile onboarding starts from the visible Create Account screen and creates/links the senior through the Node `/api/onboarding` path
 - Mobile sign-in is valid only for Clerk users with an existing Donna profile; no-profile Clerk sessions are treated as incomplete setup and cleaned up through `DELETE /api/caregivers/me/incomplete-account`
-- View call summaries, engagement scores, and concern alerts
+- View call summaries, engagement scores, and completed/missed reminder updates
 - Website/caregiver APIs also support scheduling-assistant chat (`/api/chat`), batch reminder creation, and account deletion. Mobile adds notification history, mark-read, and Expo push-token registration.
 
 ### Caregiver Notes
@@ -164,7 +162,7 @@
 
 ### Post-Call Notifications
 - Automatic notification to Node.js API on call completion
-- Concern detection triggers caregiver alerts
+- Completed-call and missed-reminder updates are recorded; concern alerts are deprecated
 - Call summary available via API
 
 ---
@@ -174,8 +172,8 @@
 Runs automatically after every call disconnect:
 
 1. **Conversation completion** — Duration, status, encrypted transcript saved to DB
-2. **Call analysis** — Gemini Flash generates summary, concerns, engagement score (1-10), follow-up suggestions
-3. **Caregiver notification** — Email/in-app alerts recorded for completed calls and detected concerns; SMS is inactive
+2. **Call analysis** — Gemini Flash generates summary, engagement score (1-10), mood, and caregiver takeaways
+3. **Caregiver notification** — Email/in-app updates recorded for completed calls and missed reminders; SMS is inactive
 4. **Summary persistence** — Encrypted at rest; enables cross-call context and caregiver call summaries
 5. **Interest discovery** — Extracts new interests, computes engagement scores
 6. **Memory extraction** — OpenAI extracts facts/preferences/events, stores with embeddings
@@ -188,11 +186,11 @@ Runs automatically after every call disconnect:
 
 ## Admin Dashboard
 
-- Senior management (CRUD for core profile fields such as name, phone, timezone/location, interests, medical notes, and memory context; richer caregiver settings like language, DOB, interest detail text, and topics to avoid are currently stronger in mobile/web onboarding than in admin)
+- Senior management (CRUD for core profile fields such as name, phone, timezone/location, interests, and memory context; richer caregiver settings like language, DOB, interest detail text, and topics to avoid are currently stronger in mobile/web onboarding than in admin)
 - Call history with transcripts and analysis
 - Reminder management (list/create/delete in current admin client; edit/PATCH is not wired in the admin UI)
 - Caregiver management
-- Call analysis viewer (summaries, concerns, engagement scores)
+- Call analysis viewer (summaries, engagement scores, caregiver takeaways)
 - Manual call initiation
 - JWT authentication
 

@@ -294,7 +294,7 @@ def format_director_guidance(direction: dict) -> str | None:
     """Format Director output into compact guidance string for LLM injection.
 
     Returns a single-line string like:
-        main/medium/warm | REMIND: Take medication | (concerned)
+        main/medium/warm | REMIND: Call Emma | (engaged)
     """
     if not direction:
         return None

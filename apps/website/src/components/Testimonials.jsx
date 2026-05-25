@@ -27,13 +27,13 @@ const testimonials = [
     type: "senior",
   },
   {
-    quote: "The reminders alone are worth it. Mom hasn't missed a medication since we started, and she doesn't feel like I'm nagging her anymore.",
+    quote: "The reminders alone are worth it. Mom remembers the little daily things without feeling like I'm nagging her anymore.",
     name: "Emma H.",
     role: "Maria's Daughter",
     type: "caregiver",
   },
   {
-    quote: "Donna has been helpful for reminding me about my pills. And now my Emma and I don't have to go back and forth about them so much and we chat about more fun things instead.",
+    quote: "Donna has been helpful for remembering the small things. Now Emma and I spend more of our time chatting about fun things instead.",
     name: "Maria H.",
     role: "Senior",
     type: "senior",

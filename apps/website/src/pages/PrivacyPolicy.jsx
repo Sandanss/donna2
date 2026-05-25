@@ -6,7 +6,7 @@ export default function PrivacyPolicy() {
       <div className="legal-page__container">
         <div className="legal-page__header">
           <h1 className="legal-page__title">Privacy Policy</h1>
-          <p className="legal-page__meta">Effective Date: April 7, 2026 &nbsp;·&nbsp; Last Updated: April 22, 2026</p>
+          <p className="legal-page__meta">Effective Date: April 7, 2026 &nbsp;·&nbsp; Last Updated: May 25, 2026</p>
         </div>
 
         <div className="legal-page__body">
@@ -34,8 +34,8 @@ export default function PrivacyPolicy() {
           <ul>
             <li>Name, preferred name, phone number, timezone, language, and call schedule</li>
             <li>Interests, hobbies, family context, topics to avoid, and other details used to personalize calls</li>
-            <li>Reminders you configure, including medication, appointment, daily task, or wellness reminders</li>
-            <li>Health-related or lifestyle notes you voluntarily provide</li>
+            <li>Everyday reminders you configure for conversation, routines, or personal preferences</li>
+            <li>Lifestyle notes you voluntarily provide to personalize calls</li>
           </ul>
 
           <h3>2.2 Information Generated Through Use</h3>
@@ -54,7 +54,7 @@ export default function PrivacyPolicy() {
             <li>Set up caregiver accounts and senior profiles</li>
             <li>Schedule, place, transcribe, and summarize Donna calls</li>
             <li>Personalize calls based on interests, reminders, and conversation history</li>
-            <li>Send service messages, missed-call alerts, reminder updates, and support responses</li>
+            <li>Send service messages, missed-call notifications, reminder updates, and support responses</li>
             <li>Maintain security, prevent abuse, debug issues, and improve reliability</li>
             <li>Comply with legal obligations and enforce our terms</li>
             <li>Send marketing messages only where allowed; you can opt out at any time</li>

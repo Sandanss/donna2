@@ -95,7 +95,6 @@ async function getClerkContact(clerkUserId) {
 // ---------------------------------------------------------------------------
 const EVENT_TO_PREF = {
   call_completed: 'callCompleted',
-  concern_detected: 'concernDetected',
   reminder_missed: 'reminderMissed',
   weekly_summary: 'weeklySummary',
 };
@@ -151,7 +150,7 @@ export const notificationService = {
       return {
         caregiverId,
         callCompleted: true,
-        concernDetected: true,
+        concernDetected: false,
         reminderMissed: true,
         weeklySummary: true,
         callSummaries: true,
@@ -170,7 +169,7 @@ export const notificationService = {
   },
 
   async upsertPreferences(caregiverId, data) {
-    const normalizedData = { ...data, smsEnabled: false };
+    const normalizedData = { ...data, concernDetected: false, smsEnabled: false };
 
     // Try update first
     const [existing] = await db.select({ id: notificationPreferences.id })
@@ -217,33 +216,6 @@ export const notificationService = {
         content,
         data,
         { expoPushToken: cg.expoPushToken },
-      );
-    }
-  },
-
-  async onConcernDetected(seniorId, data) {
-    const caregiverList = await this._getCaregiversForSenior(seniorId);
-    const senior = await this._getSenior(seniorId);
-    const seniorName = senior?.name || 'your loved one';
-
-    const concern = sanitizeNotificationContent(
-      data.concern || 'A concern was detected during the call.',
-      { maxLen: 600, replacement: 'A concern was detected during the call.' }
-    );
-    const content = sanitizeNotificationContent(
-      `Alert: During a call with ${seniorName}, Donna noticed something that may need attention. ${concern}`
-    );
-
-    for (const cg of caregiverList) {
-      // Concern notifications bypass quiet hours
-      await this._sendIfAllowed(
-        cg.id,
-        cg.clerkUserId,
-        seniorId,
-        'concern_detected',
-        content,
-        data,
-        { bypassQuietHours: true, expoPushToken: cg.expoPushToken },
       );
     }
   },
@@ -339,7 +311,6 @@ export const notificationService = {
     const safeContent = sanitizeNotificationContent(content);
     const titles = {
       call_completed: 'Donna call summary',
-      concern_detected: '⚠️ Donna alert',
       reminder_missed: 'Missed reminder',
       weekly_summary: 'Weekly summary',
     };
@@ -413,8 +384,7 @@ export const notificationService = {
     // Build subject from event type
     const subjects = {
       call_completed: 'Donna call summary',
-      concern_detected: '⚠️ Donna concern alert',
-      reminder_missed: 'Missed reminder alert',
+      reminder_missed: 'Missed reminder',
       weekly_summary: 'Weekly summary from Donna',
     };
 

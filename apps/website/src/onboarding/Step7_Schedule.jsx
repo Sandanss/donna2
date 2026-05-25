@@ -1,6 +1,6 @@
 import { PlusIcon, TrashIcon } from './icons';
 
-const CALL_TITLES = ['Daily Check-in', 'Morning Call', 'Evening Chat', 'Medication Reminder'];
+const CALL_TITLES = ['Daily Check-in', 'Morning Call', 'Evening Chat', 'Reminder Call'];
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const FREQUENCIES = [
   { value: 'daily', label: 'Every day' },

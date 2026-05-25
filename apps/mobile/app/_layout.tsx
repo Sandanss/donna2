@@ -196,8 +196,7 @@ function AuthGuard() {
 
       if (
         data.type === "call_completed" ||
-        data.type === "reminder_missed" ||
-        data.type === "concern_detected"
+        data.type === "reminder_missed"
       ) {
         const key = data.seniorId ? [data.seniorId] : [];
         queryClient.invalidateQueries({ queryKey: ["reminders", ...key] });

@@ -4,7 +4,7 @@ import { api, type Senior, type Memory } from '@/lib/api';
 import { useToast } from '@/components/Toast';
 import Modal from '@/components/Modal';
 
-const MEMORY_TYPES = ['fact', 'preference', 'event', 'concern', 'relationship'] as const;
+const MEMORY_TYPES = ['fact', 'preference', 'event', 'relationship'] as const;
 
 export default function Seniors() {
   const { showToast } = useToast();
@@ -18,7 +18,6 @@ export default function Seniors() {
   const [phone, setPhone] = useState('');
   const [location, setLocation] = useState('');
   const [interests, setInterests] = useState('');
-  const [medicalNotes, setMedicalNotes] = useState('');
   const [adding, setAdding] = useState(false);
 
   // Edit modal state
@@ -28,7 +27,6 @@ export default function Seniors() {
   const [editPhone, setEditPhone] = useState('');
   const [editLocation, setEditLocation] = useState('');
   const [editInterests, setEditInterests] = useState('');
-  const [editMedicalNotes, setEditMedicalNotes] = useState('');
   const [editMemories, setEditMemories] = useState<Memory[]>([]);
   const [newMemoryType, setNewMemoryType] = useState<string>('fact');
   const [newMemoryContent, setNewMemoryContent] = useState('');
@@ -70,14 +68,12 @@ export default function Seniors() {
         phone: phone.trim(),
         interests: interests ? interests.split(',').map((s) => s.trim()).filter(Boolean) : [],
         familyInfo: { location: location.trim() },
-        medicalNotes: medicalNotes.trim(),
       });
       showToast('Senior added successfully');
       setName('');
       setPhone('');
       setLocation('');
       setInterests('');
-      setMedicalNotes('');
       await loadSeniors();
     } catch (e: any) {
       showToast(e.message || 'Failed to add senior', 'error');
@@ -113,7 +109,6 @@ export default function Seniors() {
     setEditPhone(senior.phone);
     setEditLocation(senior.familyInfo?.location || '');
     setEditInterests(senior.interests?.join(', ') || '');
-    setEditMedicalNotes(senior.medicalNotes || '');
     setEditMemories(senior.memories || []);
     setNewMemoryType('fact');
     setNewMemoryContent('');
@@ -129,7 +124,6 @@ export default function Seniors() {
         phone: editPhone.trim(),
         interests: editInterests ? editInterests.split(',').map((s) => s.trim()).filter(Boolean) : [],
         familyInfo: { location: editLocation.trim() },
-        medicalNotes: editMedicalNotes.trim(),
       });
       showToast('Senior updated');
       setEditModalOpen(false);
@@ -215,17 +209,6 @@ export default function Seniors() {
                 placeholder="gardening, crosswords, jazz"
               />
             </div>
-          </div>
-          <div className="mt-3.5">
-            <label htmlFor="senior-medical-notes" className="block text-sm font-semibold text-admin-text-light mb-1">Medical Notes</label>
-            <textarea
-              id="senior-medical-notes"
-              className="w-full px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-admin-primary focus:border-admin-primary transition-colors"
-              rows={2}
-              value={medicalNotes}
-              onChange={(e) => setMedicalNotes(e.target.value)}
-              placeholder="Any relevant medical information..."
-            />
           </div>
           <button
             type="submit"
@@ -332,16 +315,6 @@ export default function Seniors() {
                 onChange={(e) => setEditInterests(e.target.value)}
               />
             </div>
-          </div>
-          <div className="mt-3.5">
-            <label htmlFor="edit-senior-medical-notes" className="block text-sm font-semibold text-admin-text-light mb-1">Medical Notes</label>
-            <textarea
-              id="edit-senior-medical-notes"
-              className="w-full px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-admin-primary focus:border-admin-primary transition-colors"
-              rows={2}
-              value={editMedicalNotes}
-              onChange={(e) => setEditMedicalNotes(e.target.value)}
-            />
           </div>
           <button
             onClick={handleEditSave}

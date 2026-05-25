@@ -31,15 +31,14 @@
 
 The Health Insurance Portability and Accountability Act (HIPAA) establishes national standards for protecting individuals' medical records and personal health information. HIPAA applies when an entity creates, receives, maintains, or transmits **Protected Health Information (PHI)** in the course of providing healthcare-related services.
 
-Donna is an AI companion that makes phone calls to elderly individuals. During these calls, Donna:
+Donna is an AI companion that makes phone calls to elderly individuals. Donna no longer offers medical notes, medication reminder types, or concern-alert workflows. During calls and in free-text fields, users may still share health information, so Donna must treat those records conservatively:
 
-- **Delivers medication reminders** -- directly handling prescription and dosage information
-- **Conducts daily check-ins** -- conversations where seniors discuss health conditions, symptoms, doctor visits, and medical concerns
-- **Stores health-related memories** -- semantic memory system retains facts about a senior's medications, health conditions, medical appointments, and related details
-- **Generates call analyses** -- post-call AI analysis evaluates engagement, detects concerns (including health concerns), and generates caregiver-facing summaries
-- **Sends caregiver notifications** -- email/in-app mood summaries and concern alerts that may reference health status. SMS is inactive for now.
+- **Conducts companion calls** -- conversations may include user-disclosed health conditions, symptoms, doctor visits, or medical concerns
+- **Stores user-provided context** -- free-text profile, reminder, memory, and transcript fields can contain health details even when Donna does not request them
+- **Generates call summaries** -- post-call AI analysis summarizes engagement and conversation context without creating health/care alerts
+- **Sends caregiver notifications** -- email/in-app summaries may contain health details if they came from a conversation or user-entered content. SMS is inactive for now.
 
-Even though Donna is not a healthcare provider, the nature of the data it processes -- medication information, health discussions, medical concerns linked to identifiable individuals (name + phone number) -- constitutes PHI under HIPAA.
+Even though Donna is not a healthcare provider, health discussions or user-entered health details linked to identifiable individuals (name + phone number) can constitute PHI or sensitive health data when Donna receives, stores, or transmits them.
 
 **Key legal question:** Whether Donna is a "covered entity" or a "business associate" depends on the business model (see analysis below). Regardless of classification, handling PHI without proper safeguards creates legal and ethical risk.
 
@@ -79,14 +78,14 @@ PHI is any individually identifiable health information. In Donna's system, the 
 | Data Element | Location | PHI? | Sensitivity |
 |-------------|----------|------|-------------|
 | Senior name + phone number | `seniors` table | Yes (identifiers) | High |
-| Medication reminders (drug name, dosage, schedule) | `reminders` table | Yes | High |
+| Reminder text containing health details (for example, legacy medication reminders or user-entered drug names) | `reminders.title_encrypted`, `description_encrypted`; legacy title/description fallback | Yes | High |
 | Conversation transcripts mentioning health | `conversations.transcript_encrypted`, `transcript_text_encrypted`; legacy `conversations.transcript` read fallback | Yes | High |
-| Medical notes | `seniors.medical_notes` / `medical_notes_encrypted` | Yes | High |
+| Legacy medical notes (deprecated; new writes are stripped and migration 014/026 nulls existing values) | `seniors.medical_notes` / `medical_notes_encrypted` | Yes if present | High |
 | Family/profile context (relationship, Donna language, date of birth, interest details, topics to avoid) | `seniors.family_info_encrypted`; legacy `family_info` read fallback | Yes when tied to the senior | High |
 | Additional caregiver context | `seniors.additional_info_encrypted`; legacy `additional_info` read fallback | Yes when it references health, family, or care needs | High |
-| Memories about health conditions | `memories` table | Yes | High |
-| Call analyses mentioning health concerns | `call_analyses.concerns` | Yes | High |
-| Caregiver mood/concern notifications | `notifications.content_encrypted`, `metadata_encrypted`; legacy `notifications.content` fallback | Yes | Medium |
+| User-entered or transcript-derived memories about health conditions | `memories.content_encrypted`; legacy `memories.content` fallback | Yes | High |
+| Call summaries/analyses mentioning health details from the transcript | `call_analyses.analysis_encrypted`; legacy structured columns fallback | Yes | High |
+| Caregiver notifications containing health details | `notifications.content_encrypted`, `metadata_encrypted`; legacy `notifications.content` fallback | Yes | Medium |
 | Daily call context (topics discussed) | `daily_call_context` | Yes (if health topics) | Medium |
 | Call summaries | `conversations.summary_encrypted`; legacy `conversations.summary` read fallback | Yes (if health topics) | Medium |
 | Sentiment/engagement scores | `call_analyses` | Low risk alone | Low |
