@@ -27,6 +27,8 @@ def load_call_analysis_fixture(name: str) -> dict:
 
 
 def install_fake_genai(monkeypatch, response_text: str, captured: dict):
+    """Legacy Gemini mock — preserved for any older tests still using it.
+    Post-call analysis now uses Anthropic; see install_fake_anthropic."""
     class FakeGenerateContentConfig:
         def __init__(self, **kwargs):
             self.system_instruction = kwargs.get("system_instruction")
@@ -54,6 +56,41 @@ def install_fake_genai(monkeypatch, response_text: str, captured: dict):
 
     monkeypatch.setitem(sys.modules, "google", google_module)
     monkeypatch.setitem(sys.modules, "google.genai", genai_module)
+
+
+def install_fake_anthropic(monkeypatch, tool_input: dict, captured: dict):
+    """Mock the AsyncAnthropic client used by analyze_completed_call.
+
+    Returns a response with a single tool_use block whose .input is
+    `tool_input` — matches the structure Claude's forced tool-use produces
+    in production. Captures the call args for assertions.
+    """
+    class FakeMessages:
+        async def create(self, *, model, max_tokens, temperature, system, tools, tool_choice, messages):
+            captured["model"] = model
+            captured["max_tokens"] = max_tokens
+            captured["temperature"] = temperature
+            captured["system"] = system
+            captured["tools"] = tools
+            captured["tool_choice"] = tool_choice
+            captured["messages"] = messages
+            tool_use_block = SimpleNamespace(
+                type="tool_use",
+                name=tools[0]["name"] if tools else "save_call_analysis",
+                input=tool_input,
+            )
+            return SimpleNamespace(content=[tool_use_block])
+
+    class FakeAsyncAnthropic:
+        def __init__(self, *, api_key):
+            captured["api_key"] = api_key
+            self.messages = FakeMessages()
+
+    # Patch the symbol at the import site (analyze_completed_call does
+    # `from anthropic import AsyncAnthropic` inside the function).
+    anthropic_module = ModuleType("anthropic")
+    anthropic_module.AsyncAnthropic = FakeAsyncAnthropic
+    monkeypatch.setitem(sys.modules, "anthropic", anthropic_module)
 
 
 class TestRepairJson:
@@ -262,8 +299,11 @@ class TestAnalyzeCompletedCallGoldenTranscripts:
     ):
         fixture = load_call_analysis_fixture(fixture_name)
         captured = {}
-        install_fake_genai(monkeypatch, json.dumps(fixture["llm_response"]), captured)
-        monkeypatch.setenv("GOOGLE_API_KEY", "test-google-key")
+        # Post-call analysis now uses Anthropic with forced tool-use. The
+        # mock returns Claude-shaped output: a tool_use block whose .input
+        # is the structured analysis dict.
+        install_fake_anthropic(monkeypatch, fixture["llm_response"], captured)
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-anthropic-key")
 
         async def passthrough(coro, fallback=None):
             return await coro
@@ -289,16 +329,30 @@ class TestAnalyzeCompletedCallGoldenTranscripts:
         if "follow_up_suggestions_count" in expected:
             assert len(result["follow_up_suggestions"]) == expected["follow_up_suggestions_count"]
 
-        assert captured["api_key"] == "test-google-key"
+        assert captured["api_key"] == "test-anthropic-key"
         assert captured["model"] == call_analysis.ANALYSIS_MODEL
-        assert "## TRANSCRIPT" in captured["contents"]
-        assert "Test Senior" in captured["contents"]
-        assert "Output ONLY valid JSON" in captured["config"].system_instruction
+        # Transcript content lands in the user message; system prompt
+        # stays in the `system` arg.
+        user_content = captured["messages"][0]["content"]
+        assert "## TRANSCRIPT" in user_content
+        assert "Test Senior" in user_content
+        # Forced tool-use was set up correctly
+        assert captured["tool_choice"]["type"] == "tool"
+        assert captured["tool_choice"]["name"] == "save_call_analysis"
 
     def test_system_instruction_keeps_routine_calls_actionless(self):
+        """Donna does NOT classify medical/safety concerns or recommend
+        caregiver actions. The system instruction must enforce that."""
         instruction = call_analysis.ANALYSIS_SYSTEM_INSTRUCTION
+        assert "Do not classify health, cognitive, emotional, or safety concerns" in instruction
+        assert "Always set `concerns` to []" in instruction
+        assert "`recommended_caregiver_action` to \"\"" in instruction
+        assert "`follow_up_suggestions` to []" in instruction
 
-        assert "For routine positive calls" in instruction
-        assert "set `concerns` to []" in instruction
-        assert "recommended_caregiver_action` must be \"\"" in instruction
-        assert "follow_up_suggestions` must be []" in instruction
+    def test_tool_schema_enforces_concerns_and_follow_ups_empty(self):
+        """The tool-use schema constrains concerns + follow_up_suggestions
+        to maxItems=0 so Claude physically cannot return non-empty arrays."""
+        schema = call_analysis.ANALYSIS_TOOL_SCHEMA["input_schema"]["properties"]
+        assert schema["concerns"]["maxItems"] == 0
+        assert schema["follow_up_suggestions"]["maxItems"] == 0
+        assert schema["recommended_caregiver_action"]["maxLength"] == 1

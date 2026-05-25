@@ -3,6 +3,11 @@
 Runs after each call to generate a companion-call summary and engagement
 metrics. It intentionally does not classify medical, safety, or other care
 alerts.
+
+Uses Claude Haiku 4.5 via forced tool-use for structured output — Claude
+guarantees the response matches the input_schema, so we never see malformed
+JSON or unterminated strings. Reuses the existing ANTHROPIC_API_KEY (same
+provider as the live voice pipeline).
 """
 
 from __future__ import annotations
@@ -17,10 +22,126 @@ from lib.encryption import encrypt, decrypt, encrypt_json, decrypt_json
 from lib.sanitize import sanitize_untrusted_text
 from services.time_context import format_call_time_label, format_local_datetime
 
-_breaker = CircuitBreaker("gemini_analysis", failure_threshold=3, recovery_timeout=60.0, call_timeout=15.0)
+_breaker = CircuitBreaker(
+    "anthropic_analysis", failure_threshold=3, recovery_timeout=60.0, call_timeout=20.0
+)
 
 
-ANALYSIS_MODEL = os.environ.get("CALL_ANALYSIS_MODEL", "gemini-3-flash-preview")
+# Default to the same model used for live calls (config.anthropic_model). Can
+# be overridden via env var for analysis-only experiments.
+ANALYSIS_MODEL = os.environ.get(
+    "CALL_ANALYSIS_MODEL",
+    os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001"),
+)
+ANALYSIS_MAX_TOKENS = int(os.environ.get("CALL_ANALYSIS_MAX_TOKENS", "2048"))
+
+# Schema for Claude's forced tool-use. The "tool" is named save_call_analysis;
+# we force Claude to call it, and the tool's input is our structured output.
+# Per-field maxLength hints discourage verbose outputs (Claude respects them
+# more strictly than free-form length instructions in the prompt).
+_SENTIMENT_ENUM = ["positive", "neutral", "concerned", "worried", "distressed"]
+ANALYSIS_TOOL_SCHEMA = {
+    "name": "save_call_analysis",
+    "description": (
+        "Save the structured analysis of the completed phone call. Fields "
+        "appear on the caregiver's dashboard. ALL string fields have hard "
+        "character limits — be concise; truncated entries are useless."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "summary": {
+                "type": "string",
+                "maxLength": 600,
+                "description": "2-3 caregiver-facing sentences. Start with the senior's overall sentiment/mood. <=600 chars.",
+            },
+            "sentiment": {
+                "type": "string",
+                "enum": _SENTIMENT_ENUM,
+                "description": "Overall call sentiment from the senior's emotional state, not health/safety classification.",
+            },
+            "topics_discussed": {
+                "type": "array",
+                "items": {"type": "string", "maxLength": 80},
+                "maxItems": 8,
+                "description": "Up to 8 short topic phrases. Each <=80 chars.",
+            },
+            "reminders_delivered": {
+                "type": "array",
+                "items": {"type": "string", "maxLength": 120},
+                "maxItems": 6,
+                "description": "Reminders mentioned in the call. Empty array if none. Each <=120 chars.",
+            },
+            "engagement_score": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10,
+                "description": "1-10 scale of how engaged/responsive the senior was.",
+            },
+            "mood": {
+                "type": "string",
+                "maxLength": 40,
+                "description": "One or two caregiver-friendly words (cheerful, calm, content, quiet, tired, worried, sad). <=40 chars.",
+            },
+            "caregiver_sms": {
+                "type": "string",
+                "maxLength": 280,
+                "description": "Warm, privacy-respecting message for the caregiver dashboard/notifications. High-level only; never expose vulnerabilities. Include call duration naturally. <=280 chars.",
+            },
+            "caregiver_takeaways": {
+                "type": "array",
+                "items": {"type": "string", "maxLength": 160},
+                "maxItems": 4,
+                "description": "1-4 concise items a caregiver would care about. Each <=160 chars.",
+            },
+            "recommended_caregiver_action": {
+                "type": "string",
+                "maxLength": 1,
+                "description": "Always empty string. Donna does NOT recommend caregiver actions.",
+            },
+            "concerns": {
+                "type": "array",
+                "maxItems": 0,
+                "description": "Always empty array. Donna does NOT classify concerns.",
+            },
+            "positive_observations": {
+                "type": "array",
+                "items": {"type": "string", "maxLength": 160},
+                "maxItems": 4,
+                "description": "1-4 short positive moments. Each <=160 chars.",
+            },
+            "follow_up_suggestions": {
+                "type": "array",
+                "maxItems": 0,
+                "description": "Always empty array. Donna does NOT recommend follow-ups.",
+            },
+            "call_quality": {
+                "type": "object",
+                "properties": {
+                    "rapport": {"type": "string", "enum": ["strong", "moderate", "weak"]},
+                    "goals_achieved": {"type": "boolean"},
+                    "duration_appropriate": {"type": "boolean"},
+                },
+                "required": ["rapport", "goals_achieved", "duration_appropriate"],
+            },
+        },
+        "required": [
+            "summary",
+            "sentiment",
+            "topics_discussed",
+            "reminders_delivered",
+            "engagement_score",
+            "mood",
+            "caregiver_sms",
+            "caregiver_takeaways",
+            "recommended_caregiver_action",
+            "concerns",
+            "positive_observations",
+            "follow_up_suggestions",
+            "call_quality",
+        ],
+    },
+}
 
 # Static instructions — passed as system_instruction
 ANALYSIS_SYSTEM_INSTRUCTION = """You analyze completed phone calls between Donna (an AI companion) and elderly individuals for the senior's caregiver.
@@ -288,47 +409,73 @@ async def analyze_completed_call(
     ) + language_instruction
 
     try:
-        # Use google-genai for Gemini (async to avoid blocking event loop)
-        from google import genai
+        # Use the Anthropic SDK with forced tool-use. Claude returns the
+        # analysis as a structured tool_use block whose input matches
+        # ANALYSIS_TOOL_SCHEMA exactly — no JSON-parse path, no string
+        # truncation, no _repair_json fallback needed in the happy case.
+        from anthropic import AsyncAnthropic
 
-        api_key = os.environ.get("GOOGLE_API_KEY")
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
         if not api_key:
-            logger.error("GOOGLE_API_KEY not set")
+            logger.error("ANTHROPIC_API_KEY not set")
             return _get_default_analysis()
 
-        client = genai.Client(api_key=api_key)
+        client = AsyncAnthropic(api_key=api_key)
 
-        async def _gemini_call():
-            return await client.aio.models.generate_content(
+        async def _anthropic_call():
+            return await client.messages.create(
                 model=ANALYSIS_MODEL,
-                contents=turn_content,
-                config=genai.types.GenerateContentConfig(
-                    system_instruction=ANALYSIS_SYSTEM_INSTRUCTION,
-                    max_output_tokens=1500,
-                    temperature=0.2,
-                ),
+                max_tokens=ANALYSIS_MAX_TOKENS,
+                temperature=0.2,
+                system=ANALYSIS_SYSTEM_INSTRUCTION,
+                tools=[ANALYSIS_TOOL_SCHEMA],
+                tool_choice={
+                    "type": "tool",
+                    "name": ANALYSIS_TOOL_SCHEMA["name"],
+                },
+                messages=[{"role": "user", "content": turn_content}],
             )
 
-        response = await _breaker.call(_gemini_call(), fallback=None)
+        response = await _breaker.call(_anthropic_call(), fallback=None)
         if response is None:
             return _get_default_analysis()
 
-        json_text = response.text.strip()
-        # Strip markdown fences
-        if "```" in json_text:
-            json_text = re.sub(r"```json?\n?", "", json_text).replace("```", "").strip()
-        # Extract JSON object
-        match = re.search(r"\{[\s\S]*\}", json_text)
-        if match:
-            json_text = match.group(0)
+        # Extract the tool_use block. With tool_choice forced, the response
+        # should contain exactly one tool_use whose input is our schema.
+        analysis_input = None
+        for block in getattr(response, "content", None) or []:
+            block_type = getattr(block, "type", None)
+            if block_type == "tool_use" and getattr(block, "name", None) == ANALYSIS_TOOL_SCHEMA["name"]:
+                analysis_input = getattr(block, "input", None)
+                break
 
-        try:
-            analysis = json.loads(json_text)
-        except json.JSONDecodeError:
-            logger.info("JSON parse failed, attempting repair")
-            analysis = json.loads(_repair_json(json_text))
+        if not analysis_input:
+            # Defensive fallback: extract free-text JSON if Claude somehow
+            # ignored the forced tool_choice. Reuses _repair_json + the
+            # legacy parsing path.
+            text_parts = [
+                getattr(b, "text", "")
+                for b in (getattr(response, "content", None) or [])
+                if getattr(b, "type", None) == "text"
+            ]
+            json_text = "".join(text_parts).strip()
+            if not json_text:
+                logger.warning(
+                    "Anthropic returned no tool_use AND no text content; using default"
+                )
+                return _get_default_analysis()
+            if "```" in json_text:
+                json_text = re.sub(r"```json?\n?", "", json_text).replace("```", "").strip()
+            match = re.search(r"\{[\s\S]*\}", json_text)
+            if match:
+                json_text = match.group(0)
+            try:
+                analysis_input = json.loads(json_text)
+            except json.JSONDecodeError:
+                logger.info("JSON parse failed, attempting repair")
+                analysis_input = json.loads(_repair_json(json_text))
 
-        analysis = _normalize_analysis(analysis)
+        analysis = _normalize_analysis(analysis_input)
 
         logger.info(
             "Analysis complete: sentiment={sentiment}, engagement={score}/10, observations={observations}",
