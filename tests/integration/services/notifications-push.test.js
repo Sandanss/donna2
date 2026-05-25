@@ -25,19 +25,12 @@ describe('services/notifications.js push integration', () => {
   });
 
   it('passes the push token through every event handler', () => {
-    // call_completed, concern_detected, reminder_missed all need to
-    // forward the token to _sendIfAllowed.
+    // Supported push events need to forward the token to _sendIfAllowed.
     const onCallCompleted = serviceSource.slice(
       serviceSource.indexOf('async onCallCompleted'),
-      serviceSource.indexOf('async onConcernDetected'),
-    );
-    expect(onCallCompleted).toContain('expoPushToken: cg.expoPushToken');
-
-    const onConcern = serviceSource.slice(
-      serviceSource.indexOf('async onConcernDetected'),
       serviceSource.indexOf('async onReminderMissed'),
     );
-    expect(onConcern).toContain('expoPushToken: cg.expoPushToken');
+    expect(onCallCompleted).toContain('expoPushToken: cg.expoPushToken');
 
     const onReminderMissed = serviceSource.slice(
       serviceSource.indexOf('async onReminderMissed'),

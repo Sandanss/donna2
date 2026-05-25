@@ -4,7 +4,7 @@ import { api, type Senior, type Memory } from '@/lib/api';
 import { useToast } from '@/components/Toast';
 import Modal from '@/components/Modal';
 
-const MEMORY_TYPES = ['fact', 'preference', 'event', 'concern', 'relationship'] as const;
+const MEMORY_TYPES = ['fact', 'preference', 'event', 'relationship'] as const;
 
 export default function Seniors() {
   const { showToast } = useToast();

@@ -42,10 +42,6 @@ from prompts import (
 from services.context_trace import record_context_event
 
 
-_EMPATHY_KEYWORDS = {"pain", "hurt", "ache", "sore", "discomfort", "bothering", "bother",
-                      "tired", "exhausted", "dizzy", "fell", "fall", "swollen", "stiff"}
-
-
 def _record_prompt_event(
     session_state: dict,
     *,
@@ -80,8 +76,7 @@ def _line_item_count(text: str | None) -> int | None:
 
 
 def _format_analysis_insights(analysis: dict) -> str | None:
-    """Format follow-ups, positive observations, and empathy-relevant concerns
-    from the last call analysis into a prompt section."""
+    """Format non-clinical follow-ups and positive observations from analysis."""
     lines: list[str] = []
 
     # Follow-up suggestions — highest signal for personalization
@@ -104,24 +99,6 @@ def _format_analysis_insights(analysis: dict) -> str | None:
         lines.append("What went well last time:")
         for po in positives[:3]:
             lines.append(f"- {po}")
-
-    # Concerns — only emotional or pain/discomfort (empathetic, not clinical)
-    concerns = analysis.get("concerns") or []
-    empathy_concerns: list[str] = []
-    for c in concerns:
-        if not isinstance(c, dict):
-            continue
-        ctype = (c.get("type") or "").lower()
-        desc = c.get("description") or ""
-        desc_lower = desc.lower()
-        if ctype == "emotional":
-            empathy_concerns.append(desc)
-        elif ctype == "health" and any(kw in desc_lower for kw in _EMPATHY_KEYWORDS):
-            empathy_concerns.append(desc)
-    if empathy_concerns:
-        lines.append("They shared something that might still be on their mind:")
-        for ec in empathy_concerns[:2]:
-            lines.append(f"- {ec}")
 
     return "\n".join(lines) if lines else None
 

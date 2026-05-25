@@ -24,6 +24,7 @@ _openai_client = None
 DECAY_HALF_LIFE_DAYS = 30
 ACCESS_BOOST = 10
 MAX_IMPORTANCE = 100
+ALLOWED_MEMORY_TYPES = {"fact", "preference", "event", "relationship", "family", "interest", "routine"}
 _TEMPORAL_REFERENCE_RE = re.compile(
     r"\b(today|tomorrow|yesterday|tonight|this morning|this afternoon|this evening|"
     r"next (day|week|month|time)|last (night|week|month)|later today|upcoming)\b",
@@ -278,14 +279,14 @@ async def get_important(senior_id: str, limit: int = 5) -> list[dict]:
 
 
 async def get_critical(senior_id: str, limit: int = 3) -> list[dict]:
-    """Tier 1: health concerns + high-importance memories."""
+    """Tier 1: high-importance memories."""
     from db import query_many
 
     rows = await query_many(
         """SELECT id, type, content, content_encrypted, importance, metadata, created_at, last_accessed_at
            FROM memories
            WHERE senior_id = $1
-             AND (type = 'concern' OR importance >= 80)
+             AND importance >= 80
            ORDER BY importance DESC
            LIMIT $2""",
         senior_id,
@@ -311,9 +312,11 @@ def format_grouped_memories(groups: dict[str, list[str]]) -> str:
     """Format grouped memories compactly."""
     type_labels = {
         "relationship": "Family/Friends",
-        "concern": "Concerns",
+        "family": "Family/Friends",
         "preference": "Preferences",
         "event": "Recent events",
+        "interest": "Interests",
+        "routine": "Routines",
         "fact": "Facts",
     }
     lines = []
@@ -482,10 +485,11 @@ async def extract_from_conversation(
     call_datetime = format_local_datetime(call_started_at, timezone_name) or "Unknown"
     prompt = (
         "Analyze this conversation between Donna (AI companion) and an elderly person. "
-        "Extract important memories that will help personalize future calls.\n\n"
+        "Extract important memories that will help personalize future calls. "
+        "Do not extract medical, health, safety, or care concerns; Donna is a companion product, not a medical monitoring product.\n\n"
         f"Call date/time: {call_datetime}\n\n"
         f"Conversation:\n{transcript}\n\n"
-        'Respond with a json object in this format:\n{{"memories": [\n  {{"type": "fact|preference|event|concern|relationship", '
+        'Respond with a json object in this format:\n{{"memories": [\n  {{"type": "fact|preference|event|relationship|family|interest|routine", '
         '"content": "...", "importance": 50-100}}\n]}}\n\n'
         "CRITICAL — write RICH, DETAILED content strings that will match semantic search:\n"
         "- BAD: \"User may enjoy playing padel\" (too vague, won't match searches)\n"
@@ -522,9 +526,12 @@ async def extract_from_conversation(
                 if not content:
                     continue
                 try:
+                    mem_type = mem.get("type", "fact")
+                    if mem_type not in ALLOWED_MEMORY_TYPES:
+                        mem_type = "fact"
                     await store(
                         senior_id,
-                        mem.get("type", "fact"),
+                        mem_type,
                         content,
                         conversation_id,
                         mem.get("importance", 50),

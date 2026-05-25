@@ -28,12 +28,15 @@ describe('PHI encryption helpers', () => {
     expect(encrypted.additionalInfo).toBeNull();
     expect(encrypted.familyInfoEncrypted).toBeTruthy();
     expect(encrypted.profileNotesEncrypted).toBeTruthy();
+    expect(encrypted).not.toHaveProperty('medicalNotes');
+    expect(encrypted).not.toHaveProperty('medicalNotesEncrypted');
     expect(encrypted.preferredCallTimesEncrypted).toBeTruthy();
     expect(encrypted.additionalInfoEncrypted).toBeTruthy();
 
     const decrypted = decryptSeniorPhi(encrypted);
     expect(decrypted.familyInfo).toEqual({ relation: 'mother' });
     expect(decrypted.profileNotes).toBe('Prefers short morning check-ins');
+    expect(decrypted).not.toHaveProperty('medicalNotes');
     expect(decrypted.preferredCallTimes.topicsToAvoid).toEqual(['politics']);
     expect(decrypted.additionalInfo).toBe('Likes reminders after breakfast');
     expect(decrypted).not.toHaveProperty('profileNotesEncrypted');
@@ -41,24 +44,24 @@ describe('PHI encryption helpers', () => {
 
   it('moves reminders and notifications out of plaintext fields', () => {
     const reminder = encryptReminderPhi({
-      title: 'Water porch plants',
-      description: 'After dinner',
+      title: 'Call Emma',
+      description: 'Ask about the weekend trip',
     });
     expect(reminder.title).toBe(ENCRYPTED_PLACEHOLDER);
     expect(reminder.description).toBeNull();
     expect(decryptReminderPhi(reminder)).toMatchObject({
-      title: 'Water porch plants',
-      description: 'After dinner',
+      title: 'Call Emma',
+      description: 'Ask about the weekend trip',
     });
 
     const notification = encryptNotificationPhi({
-      content: 'Donna noticed a missed porch-plant reminder.',
+      content: 'Donna noticed a missed reminder.',
       metadata: { severity: 'medium' },
     });
     expect(notification.content).toBe(ENCRYPTED_PLACEHOLDER);
     expect(notification.metadata).toBeNull();
     expect(decryptNotificationPhi(notification)).toMatchObject({
-      content: 'Donna noticed a missed porch-plant reminder.',
+      content: 'Donna noticed a missed reminder.',
       metadata: { severity: 'medium' },
     });
   });
@@ -66,7 +69,7 @@ describe('PHI encryption helpers', () => {
   it('stores daily context and waitlist payloads as encrypted blobs', () => {
     const daily = encryptDailyContextPhi({
       topicsDiscussed: ['sleep'],
-      remindersDelivered: ['Water porch plants'],
+      remindersDelivered: ['Call Emma'],
       adviceGiven: ['Drink water'],
       keyMoments: [{ type: 'mood', value: 'tired' }],
       summary: 'Senior sounded tired.',
@@ -78,7 +81,7 @@ describe('PHI encryption helpers', () => {
     expect(daily.summary).toBeNull();
     expect(decryptDailyContextPhi(daily)).toMatchObject({
       topicsDiscussed: ['sleep'],
-      remindersDelivered: ['Water porch plants'],
+      remindersDelivered: ['Call Emma'],
       adviceGiven: ['Drink water'],
       keyMoments: [{ type: 'mood', value: 'tired' }],
       summary: 'Senior sounded tired.',

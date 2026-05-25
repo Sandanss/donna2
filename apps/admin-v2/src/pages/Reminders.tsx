@@ -4,10 +4,8 @@ import { formatDate } from '@/lib/utils';
 import { useToast } from '@/components/Toast';
 
 const typeIcons: Record<string, string> = {
-  appointment: '\u{1F4C5}',
-  social: '\u{1F4DE}',
-  wellness: '\u{1F45F}',
   custom: '\u{1F4CC}',
+  social: '\u{1F4DE}',
 };
 
 function getScheduleLabel(r: Reminder): string {
@@ -164,10 +162,8 @@ export default function Reminders() {
                 value={type}
                 onChange={(e) => setType(e.target.value)}
               >
-                <option value="appointment">Appointment</option>
-                <option value="social">Social</option>
-                <option value="wellness">Wellness</option>
                 <option value="custom">Custom</option>
+                <option value="social">Social</option>
               </select>
             </div>
             <div>
@@ -178,7 +174,7 @@ export default function Reminders() {
                 type="text"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                placeholder="e.g. Water porch plants"
+                placeholder="e.g. Call Emma after lunch"
                 required
               />
             </div>

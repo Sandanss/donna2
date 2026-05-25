@@ -26,11 +26,11 @@ def normalize_phone(phone: str) -> str:
 
 
 MEMORY_TYPES = (
-    "fact", "preference", "event", "concern", "relationship",
-    "health", "medication", "family", "interest", "routine",
+    "fact", "preference", "event", "relationship",
+    "family", "interest", "routine",
 )
 
-REMINDER_TYPES = ("medication", "appointment", "custom", "wellness", "social")
+REMINDER_TYPES = ("custom", "social")
 
 
 # ---------------------------------------------------------------------------

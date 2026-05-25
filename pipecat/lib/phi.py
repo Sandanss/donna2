@@ -33,8 +33,6 @@ def decrypt_senior_phi(row: dict | None) -> dict | None:
     clean = dict(row)
     clean["family_info"] = _prefer_json(row, "family_info", "family_info_encrypted")
     clean["profile_notes"] = _prefer_text(row, "profile_notes", "profile_notes_encrypted")
-    if clean["profile_notes"] is None:
-        clean["profile_notes"] = _prefer_text(row, "medical_notes", "medical_notes_encrypted")
     clean["preferred_call_times"] = _prefer_json(row, "preferred_call_times", "preferred_call_times_encrypted")
     clean["additional_info"] = _prefer_text(row, "additional_info", "additional_info_encrypted")
     clean["call_context_snapshot"] = _prefer_json(row, "call_context_snapshot", "call_context_snapshot_encrypted")
@@ -55,21 +53,19 @@ def encrypt_senior_update(data: dict) -> dict:
     if "familyInfo" in data:
         values["familyInfoEncrypted"] = encrypt_json(data.get("familyInfo"))
         values["familyInfo"] = None
-    if "profileNotes" in data or "medicalNotes" in data or "profile_notes" in data or "medical_notes" in data:
+    if "profileNotes" in data or "profile_notes" in data:
         if "profileNotes" in data:
             profile_notes = data.get("profileNotes")
-        elif "profile_notes" in data:
-            profile_notes = data.get("profile_notes")
-        elif "medicalNotes" in data:
-            profile_notes = data.get("medicalNotes")
         else:
-            profile_notes = data.get("medical_notes")
+            profile_notes = data.get("profile_notes")
         values["profileNotesEncrypted"] = encrypt(profile_notes)
         values["profileNotes"] = None
-        values.pop("medicalNotes", None)
-        values.pop("medicalNotesEncrypted", None)
-        values.pop("medical_notes", None)
-        values.pop("medical_notes_encrypted", None)
+        values["profile_notes_encrypted"] = encrypt(profile_notes)
+        values["profile_notes"] = None
+    values.pop("medicalNotes", None)
+    values.pop("medicalNotesEncrypted", None)
+    values.pop("medical_notes", None)
+    values.pop("medical_notes_encrypted", None)
     if "preferredCallTimes" in data:
         values["preferredCallTimesEncrypted"] = encrypt_json(data.get("preferredCallTimes"))
         values["preferredCallTimes"] = None

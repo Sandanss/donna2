@@ -92,7 +92,7 @@ export const memories = pgTable('memories', {
 export const reminders = pgTable('reminders', {
   id: uuid('id').defaultRandom().primaryKey(),
   seniorId: uuid('senior_id').references(() => seniors.id),
-  type: varchar('type', { length: 50 }), // appointment, custom, wellness, social
+  type: varchar('type', { length: 50 }), // custom, social
   title: varchar('title', { length: 255 }).notNull(),
   titleEncrypted: text('title_encrypted'),
   description: text('description'),
@@ -177,9 +177,9 @@ export const dailyCallContext = pgTable('daily_call_context', {
 export const notificationPreferences = pgTable('notification_preferences', {
   id: uuid('id').defaultRandom().primaryKey(),
   caregiverId: uuid('caregiver_id').references(() => caregivers.id).notNull().unique(),
-  // Event toggles (default all on)
+  // Event toggles
   callCompleted: boolean('call_completed').default(true),
-  concernDetected: boolean('concern_detected').default(true),
+  concernDetected: boolean('concern_detected').default(false), // Legacy deprecated field.
   reminderMissed: boolean('reminder_missed').default(true),
   weeklySummary: boolean('weekly_summary').default(true),
   // Call summaries & pause
@@ -204,7 +204,7 @@ export const notifications = pgTable('notifications', {
   id: uuid('id').defaultRandom().primaryKey(),
   caregiverId: uuid('caregiver_id').references(() => caregivers.id).notNull(),
   seniorId: uuid('senior_id').references(() => seniors.id),
-  eventType: varchar('event_type', { length: 50 }).notNull(), // call_completed, concern_detected, reminder_missed, weekly_summary
+  eventType: varchar('event_type', { length: 50 }).notNull(), // call_completed, reminder_missed, weekly_summary
   channel: varchar('channel', { length: 20 }).notNull(),      // email; legacy rows may be sms
   content: text('content').notNull(),
   contentEncrypted: text('content_encrypted'),

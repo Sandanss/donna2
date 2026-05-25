@@ -97,8 +97,8 @@ HIPAA requires a risk assessment to determine whether a breach must be reported.
 
 | Question | Considerations for Donna |
 |----------|-------------------------|
-| What types of PHI were involved? | Conversation transcripts, medication info, medical notes, senior names/phones, call analyses, caregiver notifications |
-| Does the PHI include clinical data? | Yes -- medication reminders, health discussions, medical concerns |
+| What types of PHI were involved? | Conversation transcripts, user-entered health details, legacy medical notes if any remain, senior names/phones, call analyses, caregiver notifications |
+| Does the PHI include clinical data? | Possibly -- health discussions or user-entered reminder/profile text can include clinical details |
 | Does it include financial identifiers? | No (Donna does not process SSNs, financial data) |
 | Does it include direct identifiers? | Yes -- names, phone numbers, addresses |
 | How many data elements were exposed? | Count specific fields and records affected |
@@ -107,8 +107,8 @@ HIPAA requires a risk assessment to determine whether a breach must be reported.
 
 | Tier | Data | Risk if Exposed |
 |------|------|-----------------|
-| CRITICAL | `conversations.transcript`, `seniors.medical_notes`, `memories.content` (health-related) | Full health conversation history with identifiers |
-| HIGH | `reminders` (medication type/schedule), `call_analyses.concerns`, `notifications.content` | Medication regimen, health concerns |
+| CRITICAL | `conversations.transcript`, deprecated `seniors.medical_notes` if legacy values remain, `memories.content` (health-related) | Health conversation history with identifiers |
+| HIGH | `reminders` containing user-entered health details, `call_analyses.analysis_encrypted`, `notifications.content` | Health details tied to an identified senior |
 | MEDIUM | `seniors` (name, phone, city/state), `call_analyses.summary` | Personal identifiers + general health status |
 | LOW | `daily_call_context`, `conversations.sentiment`, engagement scores | Behavioral data without specific health detail |
 
@@ -346,9 +346,9 @@ PHI types affected (check all that apply):
   [ ] Phone numbers
   [ ] Addresses (city/state/zip)
   [ ] Conversation transcripts
-  [ ] Medical notes
-  [ ] Medication/reminder information
-  [ ] Call analyses / health concerns
+  [ ] Deprecated medical notes, if legacy values remain
+  [ ] Reminder information
+  [ ] Call analyses / summaries
   [ ] Memory records (semantic memories)
   [ ] Caregiver information
   [ ] Caregiver notifications
@@ -442,7 +442,7 @@ WHAT INFORMATION WAS INVOLVED
 The types of information that may have been affected include:
 - [List specific types, e.g., "name and phone number"]
 - [e.g., "conversation summaries from phone calls"]
-- [e.g., "medication reminder information"]
+- [e.g., "reminder information"]
 
 Please note: [No financial information such as Social Security numbers,
 credit card numbers, or bank account information was involved in this

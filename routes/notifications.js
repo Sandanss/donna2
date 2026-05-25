@@ -190,9 +190,6 @@ router.post('/api/notifications/trigger', requireServiceApiKey, async (req, res)
       case 'call_completed':
         await notificationService.onCallCompleted(senior_id, data);
         break;
-      case 'concern_detected':
-        await notificationService.onConcernDetected(senior_id, data);
-        break;
       case 'reminder_missed':
         await notificationService.onReminderMissed(senior_id, data);
         break;

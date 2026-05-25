@@ -35,14 +35,12 @@ describe('notificationPreferencesSchema', () => {
   it('accepts correct backend field names', () => {
     const result = notificationPreferencesSchema.safeParse({
       callCompleted: true,
-      concernDetected: false,
       reminderMissed: true,
       weeklySummary: false,
     });
     expect(result.success).toBe(true);
     expect(result.data).toEqual({
       callCompleted: true,
-      concernDetected: false,
       reminderMissed: true,
       weeklySummary: false,
     });
@@ -349,7 +347,7 @@ describe('createReminderSchema', () => {
   it('accepts simple reminder with isActive', () => {
     const result = createReminderSchema.safeParse({
       seniorId: validUuid,
-      title: 'Water porch plants',
+      title: 'Call Emma',
       isActive: true,
     });
     expect(result.success).toBe(true);
@@ -359,7 +357,7 @@ describe('createReminderSchema', () => {
   it('defaults isActive to true when not provided', () => {
     const result = createReminderSchema.safeParse({
       seniorId: validUuid,
-      title: 'Water porch plants',
+      title: 'Water the plants',
     });
     expect(result.success).toBe(true);
     expect(result.data.isActive).toBe(true);
@@ -389,7 +387,7 @@ describe('createReminderSchema', () => {
     const result = createReminderSchema.safeParse({
       seniorId: validUuid,
       type: 'custom',
-      title: 'Water porch plants',
+      title: 'Call Emma',
       isRecurring: true,
       cronExpression: '0 9 * * *',
     });
@@ -399,7 +397,7 @@ describe('createReminderSchema', () => {
   it('accepts recurring reminder without cronExpression', () => {
     const result = createReminderSchema.safeParse({
       seniorId: validUuid,
-      title: 'Water porch plants',
+      title: 'Check the mail',
       isRecurring: true,
     });
     expect(result.success).toBe(true);
@@ -449,7 +447,7 @@ describe('createReminderSchema', () => {
   });
 
   it('accepts all valid reminder types', () => {
-    const types = ['medication', 'appointment', 'custom', 'wellness', 'social'];
+    const types = ['custom', 'social'];
     for (const type of types) {
       const result = createReminderSchema.safeParse({
         seniorId: validUuid,
@@ -467,6 +465,17 @@ describe('createReminderSchema', () => {
       type: 'invalid',
     });
     expect(result.success).toBe(false);
+  });
+
+  it('rejects legacy medical reminder types', () => {
+    for (const type of ['medication', 'appointment', 'wellness']) {
+      const result = createReminderSchema.safeParse({
+        seniorId: validUuid,
+        title: 'Test',
+        type,
+      });
+      expect(result.success, `Type '${type}' should be rejected`).toBe(false);
+    }
   });
 
   it('accepts description', () => {
@@ -662,7 +671,7 @@ describe('onboardingSchema', () => {
   it('accepts reminders as string array', () => {
     const result = onboardingSchema.safeParse({
       ...validPayload,
-      reminders: ['Water porch plants', 'Call Eleanor'],
+      reminders: ['Call Emma', 'Water the plants'],
     });
     expect(result.success).toBe(true);
   });
@@ -832,6 +841,16 @@ describe('createSeniorSchema', () => {
     expect(result.success).toBe(true);
   });
 
+  it('strips deprecated medical notes', () => {
+    const result = createSeniorSchema.safeParse({
+      name: 'Dorothy Smith',
+      phone: '5551234567',
+      medicalNotes: 'Takes blood pressure medication',
+    });
+    expect(result.success).toBe(true);
+    expect(result.data).not.toHaveProperty('medicalNotes');
+  });
+
   it('trims name whitespace', () => {
     const result = createSeniorSchema.safeParse({
       name: '  Dorothy  ',
@@ -906,11 +925,18 @@ describe('createMemorySchema', () => {
   });
 
   it('accepts all valid memory types', () => {
-    const types = ['fact', 'preference', 'event', 'concern', 'relationship',
-                   'health', 'medication', 'family', 'interest', 'routine'];
+    const types = ['fact', 'preference', 'event', 'relationship',
+                   'family', 'interest', 'routine'];
     for (const type of types) {
       const result = createMemorySchema.safeParse({ content: 'Test', type });
       expect(result.success, `Type '${type}' should be valid`).toBe(true);
+    }
+  });
+
+  it('rejects legacy medical and concern memory types', () => {
+    for (const type of ['concern', 'health', 'medication']) {
+      const result = createMemorySchema.safeParse({ content: 'Test', type });
+      expect(result.success, `Type '${type}' should be rejected`).toBe(false);
     }
   });
 
@@ -1092,7 +1118,7 @@ describe('notificationTriggerSchema', () => {
   });
 
   it('accepts all valid event types', () => {
-    for (const type of ['call_completed', 'concern_detected', 'reminder_missed']) {
+    for (const type of ['call_completed', 'reminder_missed']) {
       const result = notificationTriggerSchema.safeParse({
         event_type: type,
         senior_id: validUuid,
@@ -1100,6 +1126,15 @@ describe('notificationTriggerSchema', () => {
       });
       expect(result.success, `Event '${type}' should be valid`).toBe(true);
     }
+  });
+
+  it('rejects legacy concern alerts', () => {
+    const result = notificationTriggerSchema.safeParse({
+      event_type: 'concern_detected',
+      senior_id: validUuid,
+      data: {},
+    });
+    expect(result.success).toBe(false);
   });
 
   it('rejects invalid event type', () => {

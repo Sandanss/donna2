@@ -28,7 +28,7 @@ const MOCK_DATA = {
   state: 'NY',
   zipcode: '10001',
   language: 'english',
-  reminders: [{ title: 'Take morning medication', description: 'Blood pressure pills with breakfast' }],
+  reminders: [{ title: 'Call Emma after lunch', description: 'Emma usually answers after 1 PM. Ask how her trip went.' }],
   interests: {
     gardening: { selected: true, detail: 'Loves roses and tomatoes' },
     cooking: { selected: true, detail: 'Italian recipes' },
