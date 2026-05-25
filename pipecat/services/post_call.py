@@ -31,6 +31,24 @@ def _is_unique_violation_error(exc: Exception) -> bool:
     return getattr(exc, "sqlstate", None) == "23505" or exc.__class__.__name__ == "UniqueViolationError"
 
 
+def _mark_call_metrics_persisted(
+    session_state: dict,
+    *,
+    tools_used: list,
+    context_trace: dict | None,
+    context_trace_encrypted: bool,
+    error_count: int,
+) -> None:
+    """Expose a PHI-safe metrics persistence summary for tests and simulators."""
+    session_state["_post_call_metrics_persisted"] = {
+        "persisted": True,
+        "tools_used": list(tools_used or []),
+        "context_event_count": int((context_trace or {}).get("event_count") or 0),
+        "context_trace_encrypted": bool(context_trace_encrypted),
+        "error_count": int(error_count or 0),
+    }
+
+
 def _call_started_at(session_state: dict) -> datetime | None:
     raw = session_state.get("_call_start_time")
     if isinstance(raw, (int, float)):
@@ -614,6 +632,13 @@ async def _persist_call_metrics(
                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)""",
             *args,
         )
+        _mark_call_metrics_persisted(
+            session_state,
+            tools_used=tools_used,
+            context_trace=context_trace,
+            context_trace_encrypted=bool(context_trace_encrypted),
+            error_count=error_count,
+        )
     except Exception as e:
         if _is_unique_violation_error(e):
             try:
@@ -633,6 +658,13 @@ async def _persist_call_metrics(
                            context_trace_encrypted = $13
                        WHERE call_sid = $1""",
                     *args,
+                )
+                _mark_call_metrics_persisted(
+                    session_state,
+                    tools_used=tools_used,
+                    context_trace=context_trace,
+                    context_trace_encrypted=bool(context_trace_encrypted),
+                    error_count=error_count,
                 )
                 logger.info("[{cs}] Call metrics updated after duplicate insert", cs=call_sid)
             except Exception as update_exc:
@@ -654,6 +686,13 @@ async def _persist_call_metrics(
                        WHERE call_sid = $1""",
                     *args[:-1],
                 )
+                _mark_call_metrics_persisted(
+                    session_state,
+                    tools_used=tools_used,
+                    context_trace=context_trace,
+                    context_trace_encrypted=False,
+                    error_count=error_count,
+                )
                 logger.info("[{cs}] Call metrics updated after duplicate insert without context trace", cs=call_sid)
             return
 
@@ -667,6 +706,13 @@ async def _persist_call_metrics(
                     tools_used, token_usage, error_count)
                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)""",
                 *args[:-1],
+            )
+            _mark_call_metrics_persisted(
+                session_state,
+                tools_used=tools_used,
+                context_trace=context_trace,
+                context_trace_encrypted=False,
+                error_count=error_count,
             )
             logger.warning(
                 "[{cs}] context_trace_encrypted column missing; call metrics persisted without context trace",
@@ -690,6 +736,13 @@ async def _persist_call_metrics(
                        error_count = $12
                    WHERE call_sid = $1""",
                 *args[:-1],
+            )
+            _mark_call_metrics_persisted(
+                session_state,
+                tools_used=tools_used,
+                context_trace=context_trace,
+                context_trace_encrypted=False,
+                error_count=error_count,
             )
             logger.info("[{cs}] Call metrics updated after duplicate insert without context trace", cs=call_sid)
     logger.info(

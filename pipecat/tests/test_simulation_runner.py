@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 from tests.simulation.fixtures import _pick_profile_notes_column
 from tests.simulation.runner import (
+    _apply_post_call_metrics_summary,
     _caller_intends_goodbye,
     _collect_injected_memories,
     _collect_tool_call_details,
@@ -11,6 +12,7 @@ from tests.simulation.runner import (
     _start_scenario_faults,
     _stop_scenario_faults,
 )
+from tests.simulation.transport import CallResult
 from tests.simulation.scenarios import (
     empty_search_result_scenario,
     multiple_reminders_scenario,
@@ -134,6 +136,38 @@ def test_collect_tool_call_details_includes_context_trace_repeated_calls():
             "args": {"reminder_id": "rem-002"},
         },
     ]
+
+
+def test_post_call_metrics_summary_is_exposed_without_tool_arguments():
+    result = CallResult()
+    session_state = {
+        "_post_call_metrics_persisted": {
+            "persisted": True,
+            "tools_used": ["web_search", "create_reminder"],
+            "context_event_count": 3,
+            "context_trace_encrypted": True,
+            "error_count": 0,
+        },
+        "_context_trace_events": [
+            {
+                "source": "tool",
+                "action": "called",
+                "metadata": {
+                    "tool": "web_search",
+                    "arguments": {"query": "local library events"},
+                },
+            }
+        ],
+    }
+
+    _apply_post_call_metrics_summary(result, session_state)
+
+    assert result.post_call_metrics_logged is True
+    assert result.post_call_logged_tools == ["web_search", "create_reminder"]
+    assert result.post_call_context_event_count == 3
+    assert result.post_call_context_trace_encrypted is True
+    assert result.post_call_error_count == 0
+    assert "local library events" not in str(result.__dict__)
 
 
 def test_web_search_fault_flags_patch_runner_services():

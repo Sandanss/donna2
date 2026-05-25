@@ -457,7 +457,7 @@ from tests.simulation import (
 )
 ```
 
-The runner is `run_simulated_call(scenario, senior=None, conversation_id=None, run_post_call_processing=True) -> CallResult`. The full `CallResult` shape is documented in `transport.py` — turns, tool_calls_made, injected_memories, fillers, total_duration_ms, end_reason, post_call_completed.
+The runner is `run_simulated_call(scenario, senior=None, conversation_id=None, run_post_call_processing=True) -> CallResult`. The full `CallResult` shape is documented in `transport.py` — turns, tool_calls_made, injected_memories, fillers, total_duration_ms, end_reason, post_call_completed, plus PHI-safe post-call metrics fields for whether `call_metrics` logged, which tool names were written, and whether encrypted context trace was included.
 
 ---
 

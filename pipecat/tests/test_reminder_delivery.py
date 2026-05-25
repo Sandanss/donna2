@@ -155,7 +155,7 @@ class TestMarkCallEndedWithoutAcknowledgment:
 class TestWaitForReminderByCallSid:
     @pytest.mark.asyncio
     async def test_returns_delayed_row(self):
-        row = {"delivery_id": "d1", "reminder_id": "r1", "title": "Take pills"}
+        row = {"delivery_id": "d1", "reminder_id": "r1", "title": "Water plants"}
         with patch("services.reminder_delivery.query_one", new_callable=AsyncMock, side_effect=[None, row]) as mock_query:
             from services.reminder_delivery import wait_for_reminder_by_call_sid
 
@@ -246,26 +246,32 @@ class TestCreateOrUpdateDeliveryIdempotency:
 class TestFormatReminderPrompt:
     def test_basic_reminder(self):
         from services.reminder_delivery import format_reminder_prompt
-        result = format_reminder_prompt({"title": "Take pills", "type": "generic"})
-        assert "Take pills" in result
+        result = format_reminder_prompt({"title": "Water the porch plants", "type": "generic"})
+        assert "Water the porch plants" in result
         assert "IMPORTANT REMINDER" in result
 
-    def test_medication_type(self):
+    def test_household_type_uses_generic_prompt(self):
         from services.reminder_delivery import format_reminder_prompt
-        result = format_reminder_prompt({"title": "Take metformin", "type": "medication"})
-        assert "medication reminder" in result.lower()
+        result = format_reminder_prompt({"title": "Put out the recycling", "type": "household"})
+        assert "Put out the recycling" in result
+        assert "important reminder" in result.lower()
 
-    def test_appointment_type(self):
+    def test_social_type_uses_generic_prompt(self):
         from services.reminder_delivery import format_reminder_prompt
-        result = format_reminder_prompt({"title": "Dr visit", "type": "appointment"})
-        assert "appointment reminder" in result.lower()
+        result = format_reminder_prompt({"title": "Bridge club", "type": "social"})
+        assert "Bridge club" in result
+        assert "important reminder" in result.lower()
 
     def test_includes_description(self):
         from services.reminder_delivery import format_reminder_prompt
-        result = format_reminder_prompt({"title": "Take pills", "description": "500mg with dinner", "type": "medication"})
-        assert "500mg with dinner" in result
+        result = format_reminder_prompt({
+            "title": "Bring club snack",
+            "description": "for bridge club",
+            "type": "social",
+        })
+        assert "for bridge club" in result
 
     def test_no_description(self):
         from services.reminder_delivery import format_reminder_prompt
-        result = format_reminder_prompt({"title": "Take pills"})
+        result = format_reminder_prompt({"title": "Call Maria"})
         assert "naturally" in result.lower()

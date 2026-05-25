@@ -270,6 +270,10 @@ class TestConsentTool:
         assert kwargs["senior_quote"] == "Yeah that's fine"
         assert session_state["_consent_captured"]["granted"] is True
         assert session_state["_tools_used"] == ["record_consent_response"]
+        event = session_state["_context_trace_events"][0]
+        assert event["source"] == "tool"
+        assert event["action"] == "called"
+        assert event["metadata"]["tool"] == "record_consent_response"
 
     @pytest.mark.asyncio
     async def test_record_consent_handler_is_idempotent_per_call(self):
@@ -337,6 +341,10 @@ class TestDiscoveryTool:
         assert facts[0]["category"] == "friend"
         assert facts[0]["confidence"] == "stated"
         assert session_state["_tools_used"] == ["record_discovery_fact"]
+        event = session_state["_context_trace_events"][0]
+        assert event["source"] == "tool"
+        assert event["action"] == "called"
+        assert event["metadata"]["tool"] == "record_discovery_fact"
         mock_store.assert_awaited_once()
         kwargs = mock_store.await_args.kwargs
         # friend → relationship

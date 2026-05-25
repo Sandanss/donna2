@@ -335,9 +335,11 @@ async def _run_simulated_call_inner(
             elapsed = int((time.monotonic() - wall_start))
             await run_post_call(session_state, components.conversation_tracker, elapsed)
             result.post_call_completed = True
+            _apply_post_call_metrics_summary(result, session_state)
             logger.info("[SimRunner] Post-call processing completed")
         except Exception as exc:
             result.post_call_completed = False
+            _apply_post_call_metrics_summary(result, session_state)
             logger.warning("[SimRunner] Post-call processing failed: {}", exc)
 
     # -----------------------------------------------------------------
@@ -389,6 +391,18 @@ def _scenario_reminders(scenario: LiveSimScenario) -> list[dict]:
             "type": reminder.get("type", scenario.reminder_type),
         })
     return reminders
+
+
+def _apply_post_call_metrics_summary(result: CallResult, session_state: dict) -> None:
+    """Copy PHI-safe post-call metrics persistence metadata into the result."""
+    summary = session_state.get("_post_call_metrics_persisted") or {}
+    result.post_call_metrics_logged = bool(summary.get("persisted"))
+    result.post_call_logged_tools = list(summary.get("tools_used") or [])
+    result.post_call_context_event_count = int(summary.get("context_event_count") or 0)
+    result.post_call_context_trace_encrypted = bool(
+        summary.get("context_trace_encrypted")
+    )
+    result.post_call_error_count = int(summary.get("error_count") or 0)
 
 
 def _reminder_delivery(reminder: dict) -> dict:

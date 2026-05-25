@@ -96,6 +96,26 @@ def get_web_search_schema(session_state: dict | None = None, today_date: date | 
 
 WEB_SEARCH_SCHEMA = get_web_search_schema()
 
+
+def _record_tool_call(session_state: dict, name: str, args: dict | None) -> int | None:
+    """Track an LLM tool call for metrics and encrypted context trace."""
+    turn_sequence = session_state.get("_current_turn_sequence")
+    tools_used = session_state.setdefault("_tools_used", [])
+    if name not in tools_used:
+        tools_used.append(name)
+    logger.info("Tool CALL: {name}", name=name)
+    record_context_event(
+        session_state,
+        source="tool",
+        action="called",
+        label=f"{name} called",
+        provider="llm_tool",
+        turn_sequence=turn_sequence,
+        metadata={"tool": name, "arguments": args or {}},
+    )
+    return turn_sequence
+
+
 CREATE_REMINDER_SCHEMA = {
     "name": "create_reminder",
     "description": (
@@ -727,24 +747,9 @@ def make_tool_handlers(session_state: dict) -> dict:
         "check_caregiver_notes": handle_check_caregiver_notes,
     }
 
-    # Wrap each handler to track tools_used in session_state for metrics
-    tools_used = session_state.setdefault("_tools_used", [])
-
     def _wrap(name, fn):
         async def tracked(args):
-            turn_sequence = session_state.get("_current_turn_sequence")
-            if name not in tools_used:
-                tools_used.append(name)
-            logger.info("Tool CALL: {name}", name=name)
-            record_context_event(
-                session_state,
-                source="tool",
-                action="called",
-                label=f"{name} called",
-                provider="llm_tool",
-                turn_sequence=turn_sequence,
-                metadata={"tool": name, "arguments": args or {}},
-            )
+            turn_sequence = _record_tool_call(session_state, name, args)
             start = time.time()
             result = await fn(args)
             elapsed_ms = round((time.time() - start) * 1000)
@@ -891,11 +896,7 @@ def make_consent_flows_tools(session_state: dict) -> dict[str, FlowsFunctionSche
     async def handle_record_consent(args: dict) -> dict:
         from services.seniors import record_consent
 
-        # Match make_tool_handlers' tracking so the live-sim runner can see
-        # this fired (it reads session_state["_tools_used"]).
-        tools_used = session_state.setdefault("_tools_used", [])
-        if "record_consent_response" not in tools_used:
-            tools_used.append("record_consent_response")
+        _record_tool_call(session_state, "record_consent_response", args)
 
         senior_id = session_state.get("senior_id")
         if not senior_id:
@@ -1031,11 +1032,7 @@ def make_discovery_flows_tools(session_state: dict) -> dict[str, FlowsFunctionSc
     async def handle_record_discovery_fact(args: dict) -> dict:
         from services.memory import store
 
-        # Match make_tool_handlers' tracking so the live-sim runner can see
-        # this fired (it reads session_state["_tools_used"]).
-        tools_used = session_state.setdefault("_tools_used", [])
-        if "record_discovery_fact" not in tools_used:
-            tools_used.append("record_discovery_fact")
+        _record_tool_call(session_state, "record_discovery_fact", args)
 
         senior_id = session_state.get("senior_id")
         if not senior_id:
