@@ -30,6 +30,9 @@ warnings.filterwarnings("ignore", category=DeprecationWarning, module="pipecat.a
 from tests.simulation import (  # noqa: E402
     TestSenior,
     cleanup_test_senior,
+    consent_decline_scenario,
+    consent_grant_scenario,
+    discovery_scenario,
     memory_recall_scenario,
     memory_seed_scenario,
     reminder_scenario,
@@ -43,6 +46,9 @@ SCENARIOS = {
     "memory_seed": memory_seed_scenario,
     "memory_recall": memory_recall_scenario,
     "reminder": reminder_scenario,
+    "consent_grant": consent_grant_scenario,
+    "consent_decline": consent_decline_scenario,
+    "discovery": discovery_scenario,
 }
 
 

@@ -26,6 +26,9 @@ from tests.simulation.fixtures import (
 )
 from tests.simulation.scenarios import (
     LiveSimScenario,
+    consent_decline_scenario,
+    consent_grant_scenario,
+    discovery_scenario,
     memory_recall_scenario,
     memory_seed_scenario,
     reminder_scenario,
@@ -98,6 +101,9 @@ __all__ = [
     "run_simulated_call",
     "run_simulated_calls_concurrent",
     "seed_test_senior",
+    "consent_decline_scenario",
+    "consent_grant_scenario",
+    "discovery_scenario",
     "memory_recall_scenario",
     "memory_seed_scenario",
     "reminder_scenario",

@@ -11,6 +11,9 @@ from tests.simulation.caller import CallerGoal, CallerPersona
 from tests.simulation.fixtures import TestSenior
 from tests.simulation.scenarios import (
     LiveSimScenario,
+    consent_decline_scenario,
+    consent_grant_scenario,
+    discovery_scenario,
     memory_recall_scenario,
     memory_seed_scenario,
     reminder_scenario,
@@ -182,3 +185,66 @@ class TestScenarioDefaults:
         b = LiveSimScenario(name="b", description="b")
         a.goals.append(CallerGoal(description="test"))
         assert len(b.goals) == 0, "Mutable default should not be shared"
+
+
+# ---------------------------------------------------------------------------
+# Consent + Discovery scenarios
+# ---------------------------------------------------------------------------
+
+
+class TestConsentGrantScenario:
+    def test_call_type_is_consent(self):
+        s = consent_grant_scenario()
+        assert s.call_type == "consent"
+
+    def test_expects_record_consent_response(self):
+        s = consent_grant_scenario()
+        assert "record_consent_response" in s.expect_tool_calls
+
+    def test_has_call_and_recording_goals(self):
+        s = consent_grant_scenario()
+        text = " ".join(g.trigger_phrase or "" for g in s.goals).lower()
+        # The two consent answers should be reflected in the goals
+        assert "fine" in text or "alright" in text
+        # Goodbye is the last goal
+        assert "bye" in (s.goals[-1].trigger_phrase or "").lower()
+
+
+class TestConsentDeclineScenario:
+    def test_call_type_is_consent(self):
+        s = consent_decline_scenario()
+        assert s.call_type == "consent"
+
+    def test_includes_decline_for_recording(self):
+        s = consent_decline_scenario()
+        text = " ".join(g.trigger_phrase or "" for g in s.goals).lower()
+        # At least one goal must be a clear "no" to recording
+        assert "didn't" in text or "rather you didn" in text or "private" in text
+
+    def test_skips_post_call_analysis(self):
+        # Consent calls don't run analysis (no transcript-worth-summarizing).
+        s = consent_decline_scenario()
+        assert s.expect_post_call_analysis is False
+
+
+class TestDiscoveryScenario:
+    def test_call_type_is_discovery(self):
+        s = discovery_scenario()
+        assert s.call_type == "discovery"
+
+    def test_expects_record_discovery_fact(self):
+        s = discovery_scenario()
+        assert "record_discovery_fact" in s.expect_tool_calls
+
+    def test_goals_cover_multiple_categories(self):
+        s = discovery_scenario()
+        text = " ".join(g.description.lower() for g in s.goals)
+        # At least friend, hobby/routine (garden), and family (son) appear
+        assert "eleanor" in text or "bridge" in text
+        assert "garden" in text
+        assert "son" in text or "tom" in text
+
+    def test_max_turns_is_generous(self):
+        # Discovery is a conversational call — needs more turns than a reminder.
+        s = discovery_scenario()
+        assert s.max_turns >= 12

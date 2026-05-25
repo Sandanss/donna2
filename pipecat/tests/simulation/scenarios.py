@@ -8,10 +8,13 @@ wires them into the live pipeline.
 
 Scenarios shipped:
 
-* ``web_search_scenario``   — weather + sports triggers web_search tool
-* ``memory_seed_scenario``  — shares new family info (post-call extraction)
-* ``memory_recall_scenario``— asks Donna to recall previously seeded info
-* ``reminder_scenario``     — medication reminder acknowledgement flow
+* ``web_search_scenario``      — weather + sports triggers web_search tool
+* ``memory_seed_scenario``     — shares new family info (post-call extraction)
+* ``memory_recall_scenario``   — asks Donna to recall previously seeded info
+* ``reminder_scenario``        — medication reminder acknowledgement flow
+* ``consent_grant_scenario``   — senior grants both call + recording consent
+* ``consent_decline_scenario`` — senior accepts calls but declines recording
+* ``discovery_scenario``       — senior shares friends/hobbies/routines
 """
 
 from __future__ import annotations
@@ -303,6 +306,184 @@ def reminder_scenario() -> LiveSimScenario:
         reminder_title="Take metformin",
         reminder_description="500mg with dinner",
         expect_tool_calls=["mark_reminder_acknowledged"],
+        expect_memories_injected=False,
+        expect_post_call_analysis=True,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Consent + Discovery scenarios
+# See docs/plans/2026-05-24-consent-and-discovery-call-flows.md
+# ---------------------------------------------------------------------------
+
+
+def consent_grant_scenario() -> LiveSimScenario:
+    """First-ever call: Donna asks permission and the senior agrees to both.
+
+    Tests the happy path of the consent flow — call_permission=true AND
+    recording_permission=true must each fire record_consent_response once.
+    """
+    return LiveSimScenario(
+        name="consent_grant",
+        description=(
+            "Consent call: senior grants both call and recording permission. "
+            "Expects record_consent_response invoked twice (one per consent_type)."
+        ),
+        senior=_margaret_senior(),
+        persona=CallerPersona(
+            name=_MARGARET_BASE.name,
+            age=_MARGARET_BASE.age,
+            personality=(
+                "Friendly but a little cautious about new technology. Trusts her "
+                "daughter who set up the account. Agrees to both consents once Donna "
+                "explains things clearly."
+            ),
+            speech_style=_MARGARET_BASE.speech_style,
+        ),
+        goals=[
+            CallerGoal(
+                description=(
+                    "Listen to Donna's introduction; ask a brief clarifying question"
+                ),
+                trigger_phrase="Oh — okay. Who did you say set this up?",
+            ),
+            CallerGoal(
+                description="Agree to receive regular calls",
+                trigger_phrase="Yeah, that sounds fine. I'd like that.",
+            ),
+            CallerGoal(
+                description="Agree to recordings",
+                trigger_phrase="Sure, that's alright with me too.",
+            ),
+            CallerGoal(
+                description="Warm goodbye",
+                trigger_phrase="Alright dear, talk to you soon. Bye now.",
+            ),
+        ],
+        call_type="consent",
+        max_turns=8,
+        expect_tool_calls=["record_consent_response"],
+        expect_memories_injected=False,
+        expect_post_call_analysis=False,
+    )
+
+
+def consent_decline_scenario() -> LiveSimScenario:
+    """Senior is okay with calls but does NOT want them recorded.
+
+    Tests the mixed-decline path: one consent granted, one declined → roll-up
+    must mark the senior as declined (callable=false) and Donna must NOT
+    push back on the recording refusal.
+    """
+    return LiveSimScenario(
+        name="consent_decline",
+        description=(
+            "Consent call: senior agrees to calls but declines recording. "
+            "Expects both consent_types captured; roll-up should be 'declined'."
+        ),
+        senior=_margaret_senior(),
+        persona=CallerPersona(
+            name=_MARGARET_BASE.name,
+            age=_MARGARET_BASE.age,
+            personality=(
+                "Friendly and chatty but private about her conversations. Happy "
+                "for calls but firm about not wanting recordings."
+            ),
+            speech_style=_MARGARET_BASE.speech_style,
+        ),
+        goals=[
+            CallerGoal(
+                description="Acknowledge Donna's introduction",
+                trigger_phrase="Oh, alright. That's nice of her to set up.",
+            ),
+            CallerGoal(
+                description="Agree to receive calls",
+                trigger_phrase="Yes, calls would be lovely.",
+            ),
+            CallerGoal(
+                description="Decline recording, firmly but politely",
+                trigger_phrase=(
+                    "Hmm — no, I'd rather you didn't record them. I'm a "
+                    "private person."
+                ),
+            ),
+            CallerGoal(
+                description="Warm goodbye",
+                trigger_phrase="Thanks for asking, dear. Take care now.",
+            ),
+        ],
+        call_type="consent",
+        max_turns=8,
+        expect_tool_calls=["record_consent_response"],
+        expect_memories_injected=False,
+        expect_post_call_analysis=False,
+    )
+
+
+def discovery_scenario() -> LiveSimScenario:
+    """Get-to-know-you call: senior shares friends, hobbies, routines.
+
+    Tests the discovery flow — Donna should invoke record_discovery_fact
+    multiple times as the senior shares specifics (name + activity), and
+    transition_to_discovery_closing once the conversation feels complete.
+    """
+    return LiveSimScenario(
+        name="discovery",
+        description=(
+            "Discovery call: senior shares friends, weekly routines, and a hobby. "
+            "Expects record_discovery_fact invoked multiple times across categories."
+        ),
+        senior=_margaret_senior(),
+        persona=CallerPersona(
+            name=_MARGARET_BASE.name,
+            age=_MARGARET_BASE.age,
+            personality=(
+                "Warm and opens up easily when asked about people and activities "
+                "she loves. Has a regular Thursday bridge group with her friend "
+                "Eleanor, gardens most mornings, and talks to her son Tom on Sundays."
+            ),
+            speech_style=_MARGARET_BASE.speech_style,
+        ),
+        goals=[
+            CallerGoal(
+                description="Greet warmly and ask how Donna is doing",
+                trigger_phrase=(
+                    "Hi Donna, it's good to hear from you again. I'm doing well, "
+                    "thank you for asking."
+                ),
+            ),
+            CallerGoal(
+                description="Share about Thursday bridge with Eleanor",
+                trigger_phrase=(
+                    "Well, every Thursday I play bridge with my friend Eleanor "
+                    "and a couple of ladies from the church. We've been doing it "
+                    "for years."
+                ),
+            ),
+            CallerGoal(
+                description="Share morning gardening routine",
+                trigger_phrase=(
+                    "Oh, and most mornings I'm out in the garden right after "
+                    "breakfast. The roses are really coming in this year."
+                ),
+            ),
+            CallerGoal(
+                description="Mention her son Tom",
+                trigger_phrase=(
+                    "My son Tom calls every Sunday too. He lives in Houston but "
+                    "we talk every week."
+                ),
+            ),
+            CallerGoal(
+                description="Warm goodbye",
+                trigger_phrase=(
+                    "It was lovely chatting, Donna. I'll talk to you again soon."
+                ),
+            ),
+        ],
+        call_type="discovery",
+        max_turns=14,
+        expect_tool_calls=["record_discovery_fact"],
         expect_memories_injected=False,
         expect_post_call_analysis=True,
     )
