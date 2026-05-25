@@ -37,6 +37,7 @@ import {
   drainQueueDispatcherReservations,
   getQueueDispatcherDrainState,
   setQueueDispatcherDraining,
+  validateCallArchitectureConfig,
 } from './services/call-queue.js';
 import { startPhase8AutoscalerWorker } from './services/phase8-autoscaler.js';
 import { initGrowthBook, closeGrowthBook } from './lib/growthbook.js';
@@ -100,6 +101,23 @@ const NODE_DISPATCHER_DRAIN_TIMEOUT_MS = Math.max(
 
 // Pipecat handles all voice calls — webhook URLs must point there
 assertNodeSecurityConfig();
+
+// Validate CALL_ARCHITECTURE_MODE + related flags at boot. Surfaces
+// misconfigurations like CALL_QUEUE_ALLOW_REAL_DIAL=true in legacy_only
+// mode (silently ignored at runtime, but now logged loudly here).
+{
+  const { mode, errors, warnings } = validateCallArchitectureConfig();
+  if (errors.length > 0) {
+    console.error(`[CallArchitecture] INVALID CONFIG (mode=${mode}):`, errors);
+  }
+  if (warnings.length > 0) {
+    console.warn(`[CallArchitecture] WARNINGS (mode=${mode}):`, warnings);
+  }
+  if (errors.length === 0 && warnings.length === 0) {
+    console.log(`[CallArchitecture] mode=${mode}`);
+  }
+}
+
 const PIPECAT_BASE_URL = getPipecatPublicUrl() || (
   isProductionEnv()
     ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`

@@ -32,8 +32,10 @@ import { decrypt, decryptJson } from '../lib/encryption.js';
 import { sendError } from '../lib/http-response.js';
 import { normalizeCallAnalysis } from '../services/call-analyses.js';
 import { decryptDailyContextPhi, decryptReminderPhi } from '../lib/phi.js';
+import { createLogger } from '../lib/logger.js';
 
 const router = Router();
+const log = createLogger('Seniors');
 
 function decryptExportConversation(row) {
   const summary = row.summaryEncrypted ? decrypt(row.summaryEncrypted) : row.summary;
@@ -262,7 +264,13 @@ router.patch('/api/seniors/:id/schedule', requireAuth, validateParams(seniorIdPa
       topicsToAvoid: updated.preferredCallTimes?.topicsToAvoid || [],
     });
   } catch (error) {
-    console.error('[Schedule Update] Error:', error.message || error);
+    // Use structured logger so error gets PII-sanitized and shipped to
+    // the standard log sink (was console.error which bypasses both).
+    log.error('Schedule update failed', {
+      seniorId: req.params.id,
+      error: error.message,
+      code: error.code,
+    });
     routeError(res, error, 'PATCH /api/seniors/:id/schedule');
   }
 });

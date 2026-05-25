@@ -2,6 +2,9 @@ import { createHash } from 'crypto';
 import { sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { encrypt } from '../lib/encryption.js';
+import { createLogger } from '../lib/logger.js';
+
+const log = createLogger('CallSchedules');
 import {
   DEFAULT_TIMEZONE,
   getDatePartsInTimezone,
@@ -361,8 +364,18 @@ async function materializeDueNormalizedSchedulesUnlocked({
             updated_at = NOW()
         WHERE id = ${schedule.id}
       `);
-    } catch {
+    } catch (error) {
+      // Without this log, a recurring transient PG error meant the same
+      // schedule row got retried every materializer tick forever with no
+      // signal that anything was wrong. Log scheduleId + error code so
+      // operators can diagnose, but keep the catch so a single bad row
+      // doesn't abort the whole batch.
       failed += 1;
+      log.warn('Schedule materialization failed; will retry next tick', {
+        scheduleId: schedule.id,
+        error: error?.message || String(error),
+        code: error?.code,
+      });
     }
   }
 

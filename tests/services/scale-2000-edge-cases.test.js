@@ -263,16 +263,12 @@ describe('canary bucket math: SQL and JS predicate parity', () => {
   // verify it agrees with canaryBucketForSeniorId for the same input.
   //
   // SQL fragment (from services/call-queue.js):
-  //   floor((
-  //     (strpos('0123456789abcdef', substr(md5(senior_id), 1, 1)) - 1) * 16
-  //     + (strpos('0123456789abcdef', substr(md5(senior_id), 2, 1)) - 1)
-  //   ) * 100 / 256) < canaryPercent
+  //   (('x' || substr(md5(senior_id::text), 1, 4))::bit(16)::int) % 100
+  //   < canaryPercent
   function bucketFromSqlFormula(seniorId) {
-    const hex = '0123456789abcdef';
     const digest = createHash('md5').update(seniorId).digest('hex');
-    const high = hex.indexOf(digest[0]); // strpos - 1
-    const low = hex.indexOf(digest[1]);
-    return Math.floor((high * 16 + low) * 100 / 256);
+    // bit(16)::int yields 0..65535 (zero-padded, always non-negative).
+    return Number.parseInt(digest.slice(0, 4), 16) % 100;
   }
 
   it('SQL bucket math matches canaryBucketForSeniorId for 100 random UUIDs', () => {

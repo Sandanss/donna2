@@ -356,8 +356,12 @@ export async function drainQueueDispatcherReservations({
 export function canaryBucketForSeniorId(seniorId) {
   const id = String(seniorId || '').trim();
   if (!id) return 100;
-  const digestPrefix = crypto.createHash('md5').update(id).digest('hex').slice(0, 2);
-  return Math.floor((Number.parseInt(digestPrefix, 16) * 100) / 256);
+  // Use 16 bits of the md5 prefix (65536 buckets) instead of 8 bits (256).
+  // At canary_percent=1%, the old version included buckets [0,0]
+  // → ~0.39% real coverage. The new version includes [0..654]
+  // → 0.998% real coverage. Bias at any single-digit percent < 0.05%.
+  const digestPrefix = crypto.createHash('md5').update(id).digest('hex').slice(0, 4);
+  return Number.parseInt(digestPrefix, 16) % 100;
 }
 
 export function isSeniorInQueueCanaryCohort(seniorId, {
@@ -382,13 +386,11 @@ function canaryCohortFilterSql({
 
   const clauses = [];
   if (safeCanaryPercent > 0) {
+    // Mirror canaryBucketForSeniorId: 16-bit md5 prefix mod 100.
+    // bit(16)::int gives 0..65535 (zero-padded, always non-negative),
+    // mod 100 yields the same bucket the JS helper computes.
     clauses.push(sql`
-      floor((
-        (
-          (strpos('0123456789abcdef', substr(md5(senior_id::text), 1, 1)) - 1) * 16
-          + (strpos('0123456789abcdef', substr(md5(senior_id::text), 2, 1)) - 1)
-        ) * 100
-      ) / 256) < ${safeCanaryPercent}
+      (('x' || substr(md5(senior_id::text), 1, 4))::bit(16)::int) % 100 < ${safeCanaryPercent}
     `);
   }
 
@@ -1486,6 +1488,12 @@ export async function releaseOutboundCallGuard(input, { database = db } = {}) {
     ? sql`id = ${guardId}`
     : sql`guard_key = ${requireString(guardKey, 'guardKey')}`;
 
+  // DELETE rather than mark released: keeps the unique-conflict path
+  // (ON CONFLICT (guard_key) DO NOTHING in acquireOutboundCallGuard)
+  // working so the next attempt can re-acquire the same guard_key.
+  // Only deletes guards that never produced a real dial. For forensics,
+  // the deleted row is returned so callers can audit if they want — and
+  // the surrounding error context is logged at the call site.
   const result = await database.execute(sql`
     DELETE FROM outbound_call_guards
     WHERE ${selector}
@@ -1493,7 +1501,16 @@ export async function releaseOutboundCallGuard(input, { database = db } = {}) {
     RETURNING *
   `);
 
-  return rowsFrom(result)[0] || null;
+  const deleted = rowsFrom(result)[0] || null;
+  if (deleted) {
+    log.info('Released outbound call guard (no dial occurred)', {
+      guardId: deleted.id,
+      guardKey: deleted.guard_key,
+      seniorId: deleted.senior_id,
+      architecture: deleted.architecture,
+    });
+  }
+  return deleted;
 }
 
 // markQueuedCallInitiating and markQueuedCallStarted require leaseOwner so

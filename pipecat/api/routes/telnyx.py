@@ -964,15 +964,25 @@ async def _maybe_start_telnyx_stream(
         logger.info("[{cid}] Telnyx media stream start already claimed by another replica", cid=call_control_id)
         return False
 
+    # Decide inside the lock, release Redis claim outside it. Holding the
+    # asyncio lock across a Redis round-trip blocked every other handler
+    # on this replica that needed call_metadata; B-12 review fix. Also
+    # ensure we release the claim on the in-process duplicate path
+    # (telnyx_stream_started already True) — previously that early-return
+    # leaked the claim and the 2h TTL could block a legitimate reconnect.
+    release_claim = False
     async with _metadata_lock:
         metadata = call_metadata.get(call_control_id)
         if not metadata:
-            await _release_telnyx_stream_start_claim(call_control_id)
-            return False
-        if metadata.get("telnyx_stream_started"):
-            return False
-        metadata["telnyx_stream_started"] = True
-        metadata["telnyx_stream_start_reason"] = reason
+            release_claim = True
+        elif metadata.get("telnyx_stream_started"):
+            release_claim = True
+        else:
+            metadata["telnyx_stream_started"] = True
+            metadata["telnyx_stream_start_reason"] = reason
+    if release_claim:
+        await _release_telnyx_stream_start_claim(call_control_id)
+        return False
 
     try:
         await _start_telnyx_stream(call_control_id, ws_token)

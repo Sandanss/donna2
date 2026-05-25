@@ -171,24 +171,32 @@ export async function applyOperatorScaleOverride({
     });
 
   if (auditWriter) {
-    await auditWriter({
-      userId: actor,
-      userRole: actorRole,
-      action: 'update',
-      resourceType: 'scale_operation',
-      resourceId: null,
-      ipAddress,
-      userAgent,
-      metadata: {
-        operation: 'phase8_operator_override',
-        direction,
-        targetReplicas: safeTarget,
-        currentReplicas,
-        dryRun: Boolean(scaleOperation.dryRun),
-        applied: Boolean(scaleOperation.applied),
-        reason: safeReasonCode(reason),
-      },
-    });
+    // Wrap audit in try/catch so a failed audit doesn't mask the actual
+    // scale result the operator needs to see. Railway already scaled by
+    // the time we get here; logging the audit failure beats throwing a
+    // 500 that hides what happened.
+    try {
+      await auditWriter({
+        userId: actor,
+        userRole: actorRole,
+        action: 'update',
+        resourceType: 'scale_operation',
+        resourceId: null,
+        ipAddress,
+        userAgent,
+        metadata: {
+          operation: 'phase8_operator_override',
+          direction,
+          targetReplicas: safeTarget,
+          currentReplicas,
+          dryRun: Boolean(scaleOperation.dryRun),
+          applied: Boolean(scaleOperation.applied),
+          reason: safeReasonCode(reason),
+        },
+      });
+    } catch (error) {
+      log.warn('Phase 8 operator override audit failed', { error: error.message });
+    }
   }
 
   return {
