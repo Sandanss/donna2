@@ -62,12 +62,12 @@ class TestQuickObserverGuidanceInjection:
     """
 
     @pytest.mark.asyncio
-    async def test_health_signal_stashes_guidance_in_session_state(self, session_state):
-        """Health-related input should stash guidance in session_state for the Director."""
+    async def test_emotion_signal_stashes_guidance_in_session_state(self, session_state):
+        """Emotion-related input should stash guidance in session_state for the Director."""
         processor = QuickObserverProcessor(session_state=session_state)
         capture = await run_processor_test(
             processors=[processor],
-            frames_to_inject=[make_transcription("I fell in the bathroom")],
+            frames_to_inject=[make_transcription("I'm so lonely, nobody ever calls me")],
         )
 
         # The processor must NOT push the guidance frame itself — that's
@@ -81,7 +81,7 @@ class TestQuickObserverGuidanceInjection:
 
         # And the stash must be populated for the Director to pick up.
         stashed = session_state.get("_pending_observer_guidance")
-        assert stashed, "Expected health signal to populate _pending_observer_guidance"
+        assert stashed, "Expected emotion signal to populate _pending_observer_guidance"
         # Stashed value is the raw guidance text (no [EPHEMERAL: ...] header —
         # the Director adds that when it injects).
         assert isinstance(stashed, str)
