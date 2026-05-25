@@ -805,6 +805,9 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
     if call_type == "onboarding":
         from flows.tools import make_onboarding_flows_tools
         flows_tools = make_onboarding_flows_tools(session_state)
+    elif call_type == "consent":
+        from flows.tools import make_consent_flows_tools
+        flows_tools = make_consent_flows_tools(session_state)
     else:
         flows_tools = make_flows_tools(session_state)
     initial_node = build_initial_node(session_state, flows_tools)

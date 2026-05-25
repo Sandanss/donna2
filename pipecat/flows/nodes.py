@@ -32,6 +32,9 @@ from prompts import (
     ONBOARDING_TASK_FIRST_CALL,
     ONBOARDING_TASK_RETURN_CALLER,
     ONBOARDING_CLOSING_TASK,
+    CONSENT_SYSTEM_PROMPT,
+    CONSENT_TASK_TEMPLATE,
+    CONSENT_CLOSING_TASK_TEMPLATE,
 )
 from services.context_trace import record_context_event
 
@@ -883,6 +886,123 @@ def build_onboarding_closing_node(session_state: dict) -> NodeConfig:
 
 
 # ---------------------------------------------------------------------------
+# Consent nodes (call_type="consent" — outbound permission + AI disclosure)
+# ---------------------------------------------------------------------------
+
+def _build_consent_caregiver_intro(session_state: dict) -> str:
+    """Render the caregiver introduction snippet for the consent prompt.
+
+    Falls back to a neutral phrase when caregiver info isn't available — never
+    leaves a literal placeholder in the spoken prompt.
+    """
+    senior = session_state.get("senior") or {}
+    caregivers = session_state.get("_caregivers") or []
+    if caregivers:
+        cg = caregivers[0]
+        name = (cg.get("name") or "").strip().split(" ")[0]
+        relation = (cg.get("relation") or "").strip().lower()
+        if name and relation:
+            return f"{name}, your {relation},"
+        if name:
+            return f"{name}"
+        if relation:
+            return f"your {relation}"
+    family_info = senior.get("family_info") or senior.get("familyInfo") or {}
+    if isinstance(family_info, dict):
+        rel = (family_info.get("caregiverRelation") or "").strip().lower()
+        if rel:
+            return f"your {rel}"
+    return "someone in your family"
+
+
+def _make_transition_to_consent_closing(session_state: dict):
+    """Create transition function: consent → consent_closing."""
+
+    async def transition_to_consent_closing(args: dict, flow_manager) -> tuple[dict, NodeConfig]:
+        logger.info("Transitioning: consent → consent_closing")
+        _record_phase_transition(session_state, "consent_closing")
+        return (
+            {"status": "success"},
+            build_consent_closing_node(session_state),
+        )
+
+    return transition_to_consent_closing
+
+
+def build_consent_node(session_state: dict, flows_tools: dict) -> NodeConfig:
+    """Build the consent node — capture call + recording permission.
+
+    Stripped flow: no web search, no memory, no caregiver notes.
+    Tools: record_consent_response + transition_to_consent_closing.
+    """
+    senior = session_state.get("senior") or {}
+    first_name = (senior.get("name") or "").split(" ")[0] or "there"
+    caregiver_intro = _build_consent_caregiver_intro(session_state)
+
+    task = CONSENT_TASK_TEMPLATE.format(
+        first_name=first_name,
+        caregiver_intro=caregiver_intro,
+    )
+
+    functions: list = []
+    if "record_consent_response" in flows_tools:
+        functions.append(flows_tools["record_consent_response"])
+    functions.append(FlowsFunctionSchema(
+        name="transition_to_consent_closing",
+        description=(
+            "Call this once both consents have been captured (or the senior "
+            "declined call_permission, which short-circuits the recording ask). "
+            "Moves into the warm goodbye phase."
+        ),
+        properties={},
+        required=[],
+        handler=_make_transition_to_consent_closing(session_state),
+    ))
+
+    system_content = CONSENT_SYSTEM_PROMPT
+    _record_node_prompts(
+        session_state,
+        node_name="consent",
+        system_prompt=CONSENT_SYSTEM_PROMPT,
+        task_prompt=task,
+        prompt_variant="consent",
+    )
+
+    return NodeConfig(
+        name="consent",
+        role_messages=[{"role": "system", "content": system_content}],
+        task_messages=[{"role": "user", "content": task}],
+        functions=functions,
+        context_strategy=ContextStrategyConfig(strategy=ContextStrategy.APPEND),
+        respond_immediately=True,  # Donna initiated the call; she speaks first.
+    )
+
+
+def build_consent_closing_node(session_state: dict) -> NodeConfig:
+    """Build the consent closing node — warm goodbye and end conversation."""
+    senior = session_state.get("senior") or {}
+    first_name = (senior.get("name") or "").split(" ")[0] or "there"
+
+    closing_task = CONSENT_CLOSING_TASK_TEMPLATE.format(first_name=first_name)
+    _record_node_prompts(
+        session_state,
+        node_name="consent_closing",
+        task_prompt=closing_task,
+        prompt_variant="consent",
+    )
+
+    return NodeConfig(
+        name="consent_closing",
+        role_messages=[],
+        task_messages=[{"role": "user", "content": closing_task}],
+        functions=[],
+        post_actions=[{"type": "end_conversation"}],
+        context_strategy=ContextStrategyConfig(strategy=ContextStrategy.APPEND),
+        respond_immediately=False,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -894,6 +1014,7 @@ def build_onboarding_closing_node(session_state: dict) -> NodeConfig:
 # addition to call_type.
 CALL_TYPE_INITIAL_NODES = {
     "onboarding": ("onboarding", build_onboarding_node),
+    "consent": ("consent", build_consent_node),
 }
 
 

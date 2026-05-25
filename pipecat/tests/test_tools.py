@@ -211,3 +211,85 @@ class TestFlowsTools:
         tools = make_onboarding_flows_tools(session_state)
         assert list(tools) == ["web_search"]
         assert tools["web_search"].handler is not None
+
+
+class TestConsentTool:
+    def test_record_consent_schema_valid(self):
+        from flows.tools import RECORD_CONSENT_RESPONSE_SCHEMA
+        assert RECORD_CONSENT_RESPONSE_SCHEMA["name"] == "record_consent_response"
+        assert RECORD_CONSENT_RESPONSE_SCHEMA["properties"]["consent_type"]["enum"] == [
+            "call_permission", "recording_permission",
+        ]
+        assert "consent_type" in RECORD_CONSENT_RESPONSE_SCHEMA["required"]
+        assert "granted" in RECORD_CONSENT_RESPONSE_SCHEMA["required"]
+
+    def test_make_consent_flows_tools_returns_only_consent_tool(self):
+        from flows.tools import make_consent_flows_tools
+        tools = make_consent_flows_tools({"senior_id": "sen-1"})
+        assert list(tools) == ["record_consent_response"]
+        assert tools["record_consent_response"].handler is not None
+
+    @pytest.mark.asyncio
+    async def test_record_consent_handler_persists_and_marks_captured(self):
+        from flows.tools import make_consent_flows_tools
+        session_state = {
+            "senior_id": "sen-1",
+            "conversation_id": "conv-1",
+            "call_type": "consent",
+        }
+        tools = make_consent_flows_tools(session_state)
+        with patch(
+            "services.seniors.record_consent",
+            new_callable=AsyncMock,
+            return_value={"id": "row-1", "captured_at": "now", "rolled_up_status": "pending"},
+        ) as mock_rc:
+            res = await tools["record_consent_response"].handler({
+                "consent_type": "call_permission",
+                "granted": True,
+                "senior_quote": "Yeah that's fine",
+            })
+        assert res["status"] == "success"
+        mock_rc.assert_awaited_once()
+        assert session_state["_consent_captured"]["call_permission"]["granted"] is True
+
+    @pytest.mark.asyncio
+    async def test_record_consent_handler_is_idempotent_per_type(self):
+        from flows.tools import make_consent_flows_tools
+        session_state = {"senior_id": "sen-1"}
+        tools = make_consent_flows_tools(session_state)
+        with patch(
+            "services.seniors.record_consent",
+            new_callable=AsyncMock,
+            return_value={"id": "row-1", "captured_at": "now", "rolled_up_status": "pending"},
+        ) as mock_rc:
+            first = await tools["record_consent_response"].handler({
+                "consent_type": "call_permission", "granted": True,
+            })
+            second = await tools["record_consent_response"].handler({
+                "consent_type": "call_permission", "granted": False,
+            })
+        assert first["status"] == "success"
+        assert second["status"] == "success"
+        assert "Already captured" in second["result"]
+        # Service called only on the first attempt.
+        mock_rc.assert_awaited_once()
+        # First-write wins.
+        assert session_state["_consent_captured"]["call_permission"]["granted"] is True
+
+    @pytest.mark.asyncio
+    async def test_record_consent_handler_rejects_invalid_type(self):
+        from flows.tools import make_consent_flows_tools
+        tools = make_consent_flows_tools({"senior_id": "sen-1"})
+        res = await tools["record_consent_response"].handler({
+            "consent_type": "marketing_emails", "granted": True,
+        })
+        assert res["status"] == "error"
+
+    @pytest.mark.asyncio
+    async def test_record_consent_handler_no_senior_id_returns_error(self):
+        from flows.tools import make_consent_flows_tools
+        tools = make_consent_flows_tools({})
+        res = await tools["record_consent_response"].handler({
+            "consent_type": "call_permission", "granted": True,
+        })
+        assert res["status"] == "error"

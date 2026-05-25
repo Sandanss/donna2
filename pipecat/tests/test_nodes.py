@@ -455,3 +455,66 @@ class TestInitialNode:
         node = build_initial_node(state, tools)
         task_content = node["task_messages"][0]["content"]
         assert "Hello Margaret!" in task_content
+
+
+class TestConsentFlow:
+    """Consent call flow (call_type='consent')."""
+
+    def _consent_state(self, **overrides):
+        state = {
+            "senior_id": "test-senior-consent",
+            "senior": {"name": "Mary Johnson"},
+            "_caregivers": [{"name": "Sarah Johnson", "relation": "daughter"}],
+            "conversation_id": "conv-consent-1",
+            "call_type": "consent",
+            "is_outbound": True,
+        }
+        state.update(overrides)
+        return state
+
+    def test_initial_node_routes_to_consent_when_call_type_consent(self):
+        from flows.tools import make_consent_flows_tools
+        state = self._consent_state()
+        tools = make_consent_flows_tools(state)
+        node = build_initial_node(state, tools)
+        assert node["name"] == "consent"
+
+    def test_consent_node_exposes_only_consent_and_transition_tools(self):
+        from flows.nodes import build_consent_node
+        from flows.tools import make_consent_flows_tools
+        state = self._consent_state()
+        tools = make_consent_flows_tools(state)
+        node = build_consent_node(state, tools)
+        fn_names = {f.name for f in node["functions"]}
+        assert fn_names == {"record_consent_response", "transition_to_consent_closing"}
+
+    def test_consent_node_interpolates_caregiver_intro(self):
+        from flows.nodes import build_consent_node
+        from flows.tools import make_consent_flows_tools
+        state = self._consent_state()
+        tools = make_consent_flows_tools(state)
+        node = build_consent_node(state, tools)
+        task = node["task_messages"][0]["content"]
+        # "Sarah, your daughter," renders from _caregivers
+        assert "Sarah, your daughter" in task
+        # No literal Python placeholders left behind
+        assert "{caregiver_intro}" not in task
+        assert "{first_name}" not in task
+
+    def test_consent_node_caregiver_intro_falls_back(self):
+        from flows.nodes import build_consent_node
+        from flows.tools import make_consent_flows_tools
+        # No caregivers + no family_info → neutral fallback
+        state = self._consent_state(_caregivers=[], senior={"name": "Mary Johnson"})
+        tools = make_consent_flows_tools(state)
+        node = build_consent_node(state, tools)
+        task = node["task_messages"][0]["content"]
+        assert "someone in your family" in task
+
+    def test_consent_closing_node_ends_conversation(self):
+        from flows.nodes import build_consent_closing_node
+        state = self._consent_state()
+        node = build_consent_closing_node(state)
+        assert node["name"] == "consent_closing"
+        assert node.get("post_actions") == [{"type": "end_conversation"}]
+        assert node["functions"] == []

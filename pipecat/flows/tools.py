@@ -763,3 +763,128 @@ def make_onboarding_flows_tools(session_state: dict) -> dict[str, FlowsFunctionS
     )
 
     return schemas
+
+
+# ---------------------------------------------------------------------------
+# Consent call tools (call_type="consent")
+# See docs/plans/2026-05-24-consent-and-discovery-call-flows.md
+# ---------------------------------------------------------------------------
+
+RECORD_CONSENT_RESPONSE_SCHEMA = {
+    "name": "record_consent_response",
+    "description": (
+        "Capture the senior's yes/no answer to a consent question. Call ONCE per "
+        "consent_type, immediately after the senior gives a clear answer (confirm "
+        "fuzzy answers before calling). Pass the senior's actual words in "
+        "senior_quote — do not paraphrase. This writes to the senior_consents audit "
+        "table and rolls up seniors.consent_status / callable."
+    ),
+    "properties": {
+        "consent_type": {
+            "type": "string",
+            "enum": ["call_permission", "recording_permission"],
+            "description": (
+                "Which consent this answer is for. call_permission = okay to call "
+                "regularly. recording_permission = okay to record calls."
+            ),
+        },
+        "granted": {
+            "type": "boolean",
+            "description": "True if the senior said yes; False if they said no.",
+        },
+        "senior_quote": {
+            "type": "string",
+            "description": (
+                "The senior's actual verbatim words confirming this consent "
+                "(e.g., 'Yeah that's fine' or 'No I don't think so'). Do NOT paraphrase."
+            ),
+        },
+    },
+    "required": ["consent_type", "granted"],
+}
+
+
+def make_consent_flows_tools(session_state: dict) -> dict[str, FlowsFunctionSchema]:
+    """Create FlowsFunctionSchema for consent calls.
+
+    Returns: record_consent_response only. Consent calls are intentionally
+    stripped — no web search, no memory, no caregiver notes.
+    """
+    captured = session_state.setdefault("_consent_captured", {})
+
+    async def handle_record_consent(args: dict) -> dict:
+        from services.seniors import record_consent
+
+        senior_id = session_state.get("senior_id")
+        if not senior_id:
+            logger.warning("record_consent_response called with no senior_id")
+            return {
+                "status": "error",
+                "result": "I'm having trouble saving that. Let me try again.",
+            }
+
+        consent_type = (args.get("consent_type") or "").strip()
+        if consent_type not in ("call_permission", "recording_permission"):
+            return {
+                "status": "error",
+                "result": f"Invalid consent_type: {consent_type}.",
+            }
+
+        granted = bool(args.get("granted"))
+        senior_quote = (args.get("senior_quote") or "").strip() or None
+
+        # Idempotency: refuse a second capture of the same consent type within
+        # the same call. Claude is instructed once-per-type; this is the hard
+        # stop. The first answer wins.
+        if consent_type in captured:
+            prior = captured[consent_type]
+            logger.info(
+                "record_consent_response: duplicate {ct} suppressed (prior granted={g})",
+                ct=consent_type,
+                g=prior.get("granted"),
+            )
+            return {
+                "status": "success",
+                "result": (
+                    f"Already captured {consent_type}={prior.get('granted')}. "
+                    "Move on — do not re-ask this consent."
+                ),
+            }
+
+        conversation_id = session_state.get("conversation_id")
+        try:
+            result = await record_consent(
+                senior_id=senior_id,
+                conversation_id=conversation_id,
+                consent_type=consent_type,
+                granted=granted,
+                senior_quote=senior_quote,
+                captured_by="donna_tool",
+            )
+        except Exception as e:
+            logger.error("record_consent_response DB error: {err}", err=str(e))
+            return {
+                "status": "error",
+                "result": "I had trouble saving that. Let me try once more.",
+            }
+
+        captured[consent_type] = {
+            "granted": granted,
+            "rolled_up_status": result.get("rolled_up_status"),
+            "captured_at": result.get("captured_at"),
+        }
+        session_state["_consent_rolled_up_status"] = result.get("rolled_up_status")
+        return {
+            "status": "success",
+            "result": f"Recorded {consent_type}={granted}.",
+        }
+
+    schemas: dict[str, FlowsFunctionSchema] = {}
+    schemas["record_consent_response"] = FlowsFunctionSchema(
+        name=RECORD_CONSENT_RESPONSE_SCHEMA["name"],
+        description=RECORD_CONSENT_RESPONSE_SCHEMA["description"],
+        properties=RECORD_CONSENT_RESPONSE_SCHEMA["properties"],
+        required=RECORD_CONSENT_RESPONSE_SCHEMA["required"],
+        handler=handle_record_consent,
+    )
+    return schemas
