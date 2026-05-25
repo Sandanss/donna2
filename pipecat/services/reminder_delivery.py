@@ -12,12 +12,25 @@ from __future__ import annotations
 
 import asyncio
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 from loguru import logger
 from db import query_one, execute
 from lib.encryption import encrypt
 from lib.phi import decrypt_reminder_phi
+
+
+def build_reminder_delivery_key(reminder_id: str, scheduled_for: datetime) -> str:
+    """Build an ID-only idempotency key for one reminder scheduled instance."""
+    if not reminder_id:
+        raise ValueError("reminder_id is required")
+    if not isinstance(scheduled_for, datetime):
+        raise ValueError("scheduled_for must be a datetime")
+
+    if scheduled_for.tzinfo is not None:
+        scheduled_for = scheduled_for.astimezone(timezone.utc).replace(tzinfo=None)
+    normalized = scheduled_for.replace(second=0, microsecond=0)
+    return f"reminder_delivery:{reminder_id}:{normalized.isoformat(timespec='minutes')}"
 
 
 async def mark_delivered(reminder_id: str) -> None:
@@ -154,17 +167,21 @@ async def create_or_update_delivery_for_call(
     existing_delivery_id: str | None = None,
 ) -> dict:
     """Create or update a reminder delivery row for a call."""
+    delivery_key = build_reminder_delivery_key(reminder_id, scheduled_for)
+
     if existing_delivery_id:
         delivery = await query_one(
             """UPDATE reminder_deliveries SET
                  delivered_at = NOW(),
                  call_sid = $1,
+                 delivery_key = COALESCE(delivery_key, $3),
                  attempt_count = COALESCE(attempt_count, 0) + 1,
                  status = 'delivered'
                WHERE id = $2
                RETURNING *""",
             call_sid,
             existing_delivery_id,
+            delivery_key,
         )
         if not delivery:
             raise ValueError("Existing reminder delivery not found")
@@ -173,12 +190,19 @@ async def create_or_update_delivery_for_call(
 
     delivery = await query_one(
         """INSERT INTO reminder_deliveries
-           (reminder_id, scheduled_for, delivered_at, call_sid, status, attempt_count)
-           VALUES ($1, $2, NOW(), $3, 'delivered', 1)
+           (reminder_id, scheduled_for, delivered_at, call_sid, status, attempt_count, delivery_key)
+           VALUES ($1, $2, NOW(), $3, 'delivered', 1, $4)
+           ON CONFLICT (delivery_key) WHERE delivery_key IS NOT NULL
+           DO UPDATE SET
+             delivered_at = NOW(),
+             call_sid = EXCLUDED.call_sid,
+             attempt_count = COALESCE(reminder_deliveries.attempt_count, 0) + 1,
+             status = 'delivered'
            RETURNING *""",
         reminder_id,
         scheduled_for,
         call_sid,
+        delivery_key,
     )
     if not delivery:
         raise ValueError("Reminder delivery was not created")

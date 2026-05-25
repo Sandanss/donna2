@@ -65,6 +65,23 @@ async def init_growthbook() -> bool:
         return False
 
 
+def is_loaded() -> bool:
+    """Return True if the GrowthBook client has been successfully initialized.
+
+    Used by the Phase 3 replica readiness gate — a configured-but-not-loaded
+    GrowthBook indicates a startup-time network failure that should keep the
+    replica out of capacity rotation until it recovers.
+    """
+    return bool(_initialized and _client is not None)
+
+
+def is_configured() -> bool:
+    """Return True if GrowthBook env vars are set, regardless of init status."""
+    from config import settings
+
+    return bool(settings.growthbook_api_host and settings.growthbook_client_key)
+
+
 async def close_growthbook() -> None:
     """Clean up the GrowthBook client. Call at shutdown."""
     global _client, _initialized

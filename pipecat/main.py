@@ -148,8 +148,32 @@ async def _reject_prepared_call_at_capacity(prepared_call: dict, session_state: 
 MAX_CALLS = settings.max_concurrent_calls
 _call_semaphore = asyncio.Semaphore(MAX_CALLS)
 _active_calls = 0
+_inbound_active_calls = 0
 _peak_calls = 0
 _startup_time = time.monotonic()
+
+# Phase 3 replica readiness gate. Default False until prepare_for_traffic()
+# completes successfully. Reflected in /health and in the capacity heartbeat
+# `ready` field — the Node dispatcher will not lease this replica until True.
+_is_ready: bool = False
+_readiness_report: dict | None = None
+
+
+def _is_draining() -> bool:
+    return _shutting_down or settings.pipecat_draining
+
+
+def _set_ready(value: bool) -> None:
+    global _is_ready
+    _is_ready = bool(value)
+
+
+def _set_readiness_report(report) -> None:
+    global _readiness_report
+    try:
+        _readiness_report = report.to_dict() if hasattr(report, "to_dict") else dict(report)
+    except Exception:
+        _readiness_report = None
 
 # ---------------------------------------------------------------------------
 # Middleware (order matters — outermost first)
@@ -199,26 +223,39 @@ async def health():
     from db.client import get_pool_stats
     from lib.circuit_breaker import get_breaker_states
     from lib.cache_cleanup import get_cache_sizes
+    from lib.redis_client import check_shared_state_health
 
     db_ok = await db_health()
     try:
         pool_stats = await get_pool_stats()
     except Exception:
         pool_stats = {}
+    shared_state = await check_shared_state_health()
     breakers = get_breaker_states()
     caches = get_cache_sizes()
     any_breaker_open = any(s == "open" for s in breakers.values())
+    shared_state_ok = bool(shared_state.get("ok"))
+    shared_state_degraded = bool(shared_state.get("degraded"))
 
-    status_code = 200 if db_ok else 503
+    status_code = 200 if db_ok and shared_state_ok and not _is_draining() else 503
     body = {
-        "status": "degraded" if (not db_ok or any_breaker_open) else "ok",
+        "status": (
+            "draining" if _is_draining()
+            else "degraded" if (not db_ok or not shared_state_ok or shared_state_degraded or any_breaker_open)
+            else "ok"
+        ),
         "service": "donna-pipecat",
         "active_calls": _active_calls,
+        "inbound_active_calls": _inbound_active_calls,
         "peak_calls": _peak_calls,
         "max_calls": MAX_CALLS,
         "uptime_seconds": round(time.monotonic() - _startup_time),
         "shutting_down": _shutting_down,
+        "draining": _is_draining(),
+        "ready": _is_ready and not _is_draining(),
+        "readiness": _readiness_report,
         "database": "ok" if db_ok else "error",
+        "shared_state": shared_state,
         "pool": pool_stats,
         "circuit_breakers": breakers,
         "cache": caches,
@@ -236,12 +273,14 @@ async def live():
     status_code = 503 if _shutting_down else 200
     return JSONResponse(
         content={
-            "status": "draining" if _shutting_down else "ok",
+            "status": "draining" if _is_draining() else "ok",
             "service": "donna-pipecat",
             "active_calls": _active_calls,
+            "inbound_active_calls": _inbound_active_calls,
             "max_calls": MAX_CALLS,
             "uptime_seconds": round(time.monotonic() - _startup_time),
             "shutting_down": _shutting_down,
+            "draining": _is_draining(),
         },
         status_code=status_code,
     )
@@ -253,10 +292,10 @@ async def live():
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """Telnyx connects here for media streaming. Runs the Pipecat pipeline."""
-    global _active_calls, _peak_calls
+    global _active_calls, _inbound_active_calls, _peak_calls
 
-    if _shutting_down:
-        await websocket.close(code=1001, reason="Server shutting down")
+    if _is_draining():
+        await websocket.close(code=1001, reason="Server draining")
         return
 
     await websocket.accept()
@@ -323,9 +362,29 @@ async def websocket_endpoint(websocket: WebSocket):
         await websocket.close(code=1008)
         return
 
+    metadata = prepared_call.get("metadata") or {}
+    inbound_tracked = not bool(metadata.get("is_outbound", True))
+
     _active_calls += 1
+    if inbound_tracked:
+        _inbound_active_calls += 1
     if _active_calls > _peak_calls:
         _peak_calls = _active_calls
+
+    try:
+        if metadata.get("reservation_id"):
+            from services.capacity import release_capacity_reservation
+
+            await release_capacity_reservation(
+                reservation_id=metadata.get("reservation_id"),
+                queue_id=metadata.get("queue_id"),
+            )
+    except Exception as exc:
+        logger.warning(
+            "[{cs}] Failed to release queue capacity reservation after admission: {err}",
+            cs=session_state.get("call_sid") or "unknown",
+            err=str(exc),
+        )
 
     # Track this task for graceful shutdown draining
     current_task = asyncio.current_task()
@@ -352,6 +411,8 @@ async def websocket_endpoint(websocket: WebSocket):
     finally:
         _call_semaphore.release()
         _active_calls -= 1
+        if inbound_tracked:
+            _inbound_active_calls = max(0, _inbound_active_calls - 1)
         # Clean up call_metadata to prevent memory leaks on crashes
         cs = session_state.get("call_sid")
         if cs:
@@ -385,6 +446,29 @@ async def startup():
     except Exception as e:
         logger.error("Database init failed: {err}", err=str(e))
 
+    # Validate Redis/shared-state readiness before admitting calls in scaled mode.
+    try:
+        from lib.redis_client import check_shared_state_health
+
+        shared_state = await check_shared_state_health()
+        if not shared_state.get("ok"):
+            if settings.pipecat_require_redis:
+                raise RuntimeError(str(shared_state.get("error") or "shared_state_unavailable"))
+            logger.warning("Shared state degraded; local single-instance mode only: {state}", state=shared_state)
+        elif shared_state.get("degraded"):
+            logger.warning("Shared state degraded; local single-instance mode only: {state}", state=shared_state)
+        else:
+            logger.info(
+                "Shared state ready (backend={backend}, required={required})",
+                backend=shared_state.get("backend"),
+                required=shared_state.get("required"),
+            )
+    except Exception as e:
+        if settings.pipecat_require_redis:
+            logger.error("Shared state init failed in required mode: {err}", err=str(e))
+            raise
+        logger.warning("Shared state init failed; local single-instance mode only: {err}", err=str(e))
+
     # Initialize GrowthBook feature flags
     try:
         from lib.growthbook import init_growthbook
@@ -395,6 +479,53 @@ async def startup():
     # Start background cache cleanup loop
     from lib.cache_cleanup import start_cleanup_loop
     asyncio.create_task(start_cleanup_loop())
+
+    # Publish PHI-free capacity heartbeats for global dispatch decisions.
+    try:
+        from services.capacity import start_capacity_heartbeat
+
+        async def _capacity_db_pool_stats() -> dict:
+            try:
+                from db.client import get_pool_stats
+                return await get_pool_stats()
+            except Exception:
+                return {}
+
+        def _capacity_open_breakers() -> int:
+            try:
+                from lib.circuit_breaker import get_breaker_states
+                return sum(1 for state in get_breaker_states().values() if state == "open")
+            except Exception:
+                return 0
+
+        asyncio.create_task(start_capacity_heartbeat(
+            get_active_calls=lambda: _active_calls,
+            get_inbound_active_calls=lambda: _inbound_active_calls,
+            get_max_calls=lambda: MAX_CALLS,
+            is_draining=_is_draining,
+            get_db_pool_stats=_capacity_db_pool_stats,
+            get_circuit_breakers_open_count=_capacity_open_breakers,
+            get_is_ready=lambda: _is_ready,
+        ))
+        logger.info("Capacity heartbeat loop started")
+    except Exception as e:
+        if settings.pipecat_require_redis:
+            logger.error("Capacity heartbeat init failed in required mode: {err}", err=str(e))
+            raise
+        logger.warning("Capacity heartbeat init failed: {err}", err=str(e))
+
+    # Phase 3 replica readiness gate. Runs vendor session + pool checks in the
+    # background so startup() doesn't block; flips _is_ready when all required
+    # checks pass. The Node dispatcher filters on the heartbeat's `ready` flag.
+    try:
+        from services.readiness import prepare_for_traffic
+
+        asyncio.create_task(
+            prepare_for_traffic(set_ready=_set_ready, set_report=_set_readiness_report)
+        )
+        logger.info("Replica readiness gate started")
+    except Exception as e:
+        logger.warning("Readiness gate init failed: {err}", err=str(e))
 
     # Node is the authoritative scheduler/retention worker. Keep Pipecat's
     # worker opt-in only to avoid two services purging the same PHI tables.
@@ -447,6 +578,13 @@ async def shutdown():
         pass
 
     # Close DB pool last
+    try:
+        from lib.redis_client import get_shared_state
+        await get_shared_state().close()
+        logger.info("Shared state closed")
+    except Exception as e:
+        logger.warning("Shared state shutdown error: {err}", err=str(e))
+
     try:
         from db.client import close_pool
         await close_pool()

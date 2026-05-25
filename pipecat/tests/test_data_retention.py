@@ -104,7 +104,7 @@ async def test_purge_expired_data_calls_all_tables():
     assert mock_reminders.await_count == 1
     assert mock_review.await_count == 1
     # Should have attempted all delete tables after conversation PHI redaction.
-    assert mock_purge.call_count == 11
+    assert mock_purge.call_count == 16
     tables_purged = {call.args[0] for call in mock_purge.call_args_list}
     assert "conversations" in tables_purged
     assert "memories" in tables_purged
@@ -115,6 +115,11 @@ async def test_purge_expired_data_calls_all_tables():
     assert "notifications" in tables_purged
     assert "caregiver_notes" in tables_purged
     assert "prospects" in tables_purged
+    assert "call_queue" in tables_purged
+    assert "call_attempts" in tables_purged
+    assert "post_call_jobs" in tables_purged
+    assert "outbound_call_guards" in tables_purged
+    assert "scheduler_shadow_comparisons" in tables_purged
     assert "waitlist" in tables_purged
     assert "audit_logs" in tables_purged
 
@@ -140,6 +145,11 @@ async def test_purge_expired_data_skips_zero_retention():
         mock_settings.retention_caregiver_notes_days = 0
         mock_settings.retention_prospects_days = 0
         mock_settings.retention_inactive_senior_review_days = 0
+        mock_settings.retention_call_queue_days = 0
+        mock_settings.retention_call_attempts_days = 0
+        mock_settings.retention_post_call_jobs_days = 0
+        mock_settings.retention_outbound_call_guards_days = 0
+        mock_settings.retention_scheduler_shadow_comparisons_days = 0
         mock_settings.retention_waitlist_days = 0
         mock_settings.retention_audit_logs_days = 0
 
@@ -175,7 +185,7 @@ async def test_purge_expired_data_handles_table_error():
         results = await purge_expired_data()
 
     # All delete tables should be attempted even though memories failed.
-    assert call_count == 11
+    assert call_count == 16
     assert results["memories"] == -1
     assert results["conversations"] == 10
 
@@ -218,6 +228,11 @@ def test_default_retention_periods():
     assert s.retention_call_metrics_days == 180
     assert s.retention_reminder_deliveries_days == 90
     assert s.retention_notifications_days == 180
+    assert s.retention_call_queue_days == 90
+    assert s.retention_call_attempts_days == 180
+    assert s.retention_post_call_jobs_days == 180
+    assert s.retention_outbound_call_guards_days == 30
+    assert s.retention_scheduler_shadow_comparisons_days == 30
     assert s.retention_waitlist_days == 365
     assert s.retention_audit_logs_days == 2190
 
@@ -240,4 +255,6 @@ def test_tables_use_policy_date_columns():
     assert TABLE_DATE_COLUMNS["conversations"] == "started_at"
     assert TABLE_DATE_COLUMNS["daily_call_context"] == "call_date"
     assert TABLE_DATE_COLUMNS["notifications"] == "sent_at"
+    assert TABLE_DATE_COLUMNS["call_queue"] == "created_at"
+    assert TABLE_DATE_COLUMNS["post_call_jobs"] == "created_at"
     assert TABLE_DATE_COLUMNS["waitlist"] == "created_at"

@@ -15,8 +15,8 @@ Usage:
 
 from __future__ import annotations
 
-import asyncio
 import json
+import os
 import time
 from typing import Any
 
@@ -27,6 +27,8 @@ class InMemoryState:
     """In-memory fallback when Redis is not configured."""
 
     is_shared = False
+    configured_shared = False
+    backend_name = "memory"
 
     def __init__(self):
         self._data: dict[str, Any] = {}
@@ -101,11 +103,16 @@ class InMemoryState:
     async def close(self) -> None:
         pass
 
+    async def ping(self) -> bool:
+        return True
+
 
 class RedisState:
     """Redis-backed shared state for multi-instance deployments."""
 
     is_shared = True
+    configured_shared = True
+    backend_name = "redis"
 
     def __init__(self, url: str):
         self._url = url
@@ -176,6 +183,10 @@ class RedisState:
         """Redis handles TTL expiry automatically. Returns 0."""
         return 0
 
+    async def ping(self) -> bool:
+        r = await self._get_client()
+        return bool(await r.ping())
+
     async def close(self) -> None:
         if self._redis:
             await self._redis.close()
@@ -186,6 +197,8 @@ class UpstashRestState:
     """Upstash REST-backed shared state for multi-instance deployments."""
 
     RETRY_AFTER_SECONDS = 60
+    configured_shared = True
+    backend_name = "upstash"
 
     def __init__(self, url: str, token: str):
         url = url.strip()
@@ -300,10 +313,27 @@ class UpstashRestState:
         """Upstash handles TTL expiry automatically. Returns 0."""
         return 0
 
+    async def ping(self) -> bool:
+        result = await self._command("PING")
+        return result in ("PONG", "OK", True)
+
     async def close(self) -> None:
         if self._client:
             await self._client.aclose()
             self._client = None
+
+
+def shared_state_required() -> bool:
+    """Return true when Pipecat must fail closed without shared state."""
+    return str(os.getenv("PIPECAT_REQUIRE_REDIS", "")).lower() in {"1", "true", "yes", "on"}
+
+
+def shared_state_configured() -> bool:
+    """Return true when a shared Redis-compatible backend is configured."""
+    return bool(
+        os.getenv("REDIS_URL", "")
+        or (os.getenv("UPSTASH_REDIS_REST_URL", "") and os.getenv("UPSTASH_REDIS_REST_TOKEN", ""))
+    )
 
 
 def create_shared_state(
@@ -337,3 +367,84 @@ def get_shared_state() -> InMemoryState | RedisState | UpstashRestState:
         upstash_token = os.getenv("UPSTASH_REDIS_REST_TOKEN", "")
         _state = create_shared_state(redis_url, upstash_url, upstash_token)
     return _state
+
+
+def reset_shared_state_for_tests() -> None:
+    """Clear the module singleton. Intended for tests that patch env vars."""
+    global _state
+    _state = None
+
+
+def require_shared_state(operation: str = "shared state") -> InMemoryState | RedisState | UpstashRestState:
+    """Return shared state or raise when scaled mode requires Redis-compatible state."""
+    state = get_shared_state()
+    if shared_state_required() and not getattr(state, "is_shared", False):
+        raise RuntimeError(f"{operation} requires Redis/shared state when PIPECAT_REQUIRE_REDIS=true")
+    return state
+
+
+async def check_shared_state_health() -> dict:
+    """Return a PHI-free shared-state readiness snapshot."""
+    state = get_shared_state()
+    required = shared_state_required()
+    configured = shared_state_configured()
+    backend = getattr(state, "backend_name", type(state).__name__)
+    shared_backend = bool(getattr(state, "configured_shared", getattr(state, "is_shared", False)))
+    available = bool(getattr(state, "is_shared", False))
+
+    if required and not configured:
+        return {
+            "required": required,
+            "configured": False,
+            "backend": backend,
+            "shared": shared_backend,
+            "available": available,
+            "ok": False,
+            "error": "shared_state_not_configured",
+        }
+
+    if required and not available:
+        return {
+            "required": required,
+            "configured": configured,
+            "backend": backend,
+            "shared": shared_backend,
+            "available": available,
+            "ok": False,
+            "error": "shared_state_not_available",
+        }
+
+    if not shared_backend:
+        return {
+            "required": required,
+            "configured": configured,
+            "backend": backend,
+            "shared": shared_backend,
+            "available": available,
+            "ok": True,
+        }
+
+    try:
+        ok = bool(await state.ping())
+    except Exception as exc:
+        logger.warning("Shared state health check failed: {err}", err=str(exc))
+        return {
+            "required": required,
+            "configured": configured,
+            "backend": backend,
+            "shared": shared_backend,
+            "available": False,
+            "ok": False if required else True,
+            "error": "shared_state_unreachable",
+            "degraded": True,
+            "fallback": "local_memory" if not required else None,
+        }
+
+    return {
+        "required": required,
+        "configured": configured,
+        "backend": backend,
+        "shared": shared_backend,
+        "available": ok,
+        "ok": ok,
+    }

@@ -65,6 +65,47 @@ async def _assert_no_active_senior_legal_hold(conn, senior_id: str) -> None:
                 AND lh.resource_id = n.id::text
             )
             OR EXISTS (
+              SELECT 1 FROM senior_call_schedules scs
+              WHERE scs.senior_id = $1
+                AND lh.resource_type = 'senior_call_schedule'
+                AND lh.resource_id = scs.id::text
+            )
+            OR EXISTS (
+              SELECT 1 FROM call_queue cq
+              WHERE cq.senior_id = $1
+                AND lh.resource_type = 'call_queue'
+                AND lh.resource_id = cq.id::text
+            )
+            OR EXISTS (
+              SELECT 1 FROM call_attempts cat
+              WHERE cat.senior_id = $1
+                AND lh.resource_type = 'call_attempt'
+                AND lh.resource_id = cat.id::text
+            )
+            OR EXISTS (
+              SELECT 1 FROM post_call_jobs pcj
+              WHERE (
+                  pcj.senior_id = $1
+                  OR pcj.conversation_id IN (
+                    SELECT c.id FROM conversations c WHERE c.senior_id = $1
+                  )
+                )
+                AND lh.resource_type = 'post_call_job'
+                AND lh.resource_id = pcj.id::text
+            )
+            OR EXISTS (
+              SELECT 1 FROM outbound_call_guards ocg
+              WHERE ocg.senior_id = $1
+                AND lh.resource_type = 'outbound_call_guard'
+                AND lh.resource_id = ocg.id::text
+            )
+            OR EXISTS (
+              SELECT 1 FROM scheduler_shadow_comparisons ssc
+              WHERE ssc.senior_id = $1
+                AND lh.resource_type = 'scheduler_shadow_comparison'
+                AND lh.resource_id = ssc.id::text
+            )
+            OR EXISTS (
               SELECT 1 FROM caregiver_notes cn
               WHERE cn.senior_id = $1
                 AND lh.resource_type = 'caregiver_note'
@@ -142,6 +183,16 @@ async def hard_delete_senior(
                 ("daily_call_context", "SELECT COUNT(*) FROM daily_call_context WHERE senior_id = $1"),
                 ("call_analyses", "SELECT COUNT(*) FROM call_analyses WHERE senior_id = $1"),
                 ("call_metrics", "SELECT COUNT(*) FROM call_metrics WHERE senior_id = $1"),
+                ("senior_call_schedules", "SELECT COUNT(*) FROM senior_call_schedules WHERE senior_id = $1"),
+                ("call_queue", "SELECT COUNT(*) FROM call_queue WHERE senior_id = $1"),
+                ("call_attempts", "SELECT COUNT(*) FROM call_attempts WHERE senior_id = $1"),
+                ("post_call_jobs", """
+                    SELECT COUNT(*) FROM post_call_jobs
+                    WHERE senior_id = $1
+                       OR conversation_id IN (SELECT id FROM conversations WHERE senior_id = $1)
+                """),
+                ("outbound_call_guards", "SELECT COUNT(*) FROM outbound_call_guards WHERE senior_id = $1"),
+                ("scheduler_shadow_comparisons", "SELECT COUNT(*) FROM scheduler_shadow_comparisons WHERE senior_id = $1"),
                 ("memories", "SELECT COUNT(*) FROM memories WHERE senior_id = $1"),
                 ("conversations", "SELECT COUNT(*) FROM conversations WHERE senior_id = $1"),
             ]
@@ -197,6 +248,28 @@ async def hard_delete_senior(
             # call_metrics → senior_id (from migration 004)
             await conn.execute(
                 "DELETE FROM call_metrics WHERE senior_id = $1", senior_id
+            )
+            await conn.execute(
+                """DELETE FROM post_call_jobs
+                   WHERE senior_id = $1
+                      OR conversation_id IN (SELECT id FROM conversations WHERE senior_id = $1)""",
+                senior_id,
+            )
+            await conn.execute(
+                "DELETE FROM scheduler_shadow_comparisons WHERE senior_id = $1",
+                senior_id,
+            )
+            await conn.execute(
+                "DELETE FROM outbound_call_guards WHERE senior_id = $1", senior_id
+            )
+            await conn.execute(
+                "DELETE FROM call_attempts WHERE senior_id = $1", senior_id
+            )
+            await conn.execute(
+                "DELETE FROM call_queue WHERE senior_id = $1", senior_id
+            )
+            await conn.execute(
+                "DELETE FROM senior_call_schedules WHERE senior_id = $1", senior_id
             )
             await conn.execute(
                 "DELETE FROM memories WHERE senior_id = $1", senior_id

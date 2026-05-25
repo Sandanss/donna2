@@ -23,6 +23,14 @@ def _transcript_has_content(transcript) -> bool:
     return bool(transcript)
 
 
+def _is_undefined_column_error(exc: Exception) -> bool:
+    return getattr(exc, "sqlstate", None) == "42703" or exc.__class__.__name__ == "UndefinedColumnError"
+
+
+def _is_unique_violation_error(exc: Exception) -> bool:
+    return getattr(exc, "sqlstate", None) == "23505" or exc.__class__.__name__ == "UniqueViolationError"
+
+
 def _call_started_at(session_state: dict) -> datetime | None:
     raw = session_state.get("_call_start_time")
     if isinstance(raw, (int, float)):
@@ -205,6 +213,16 @@ async def run_post_call(
         return await _run_onboarding_post_call(
             session_state, conversation_tracker, duration_seconds
         )
+
+    try:
+        from services.post_call_jobs import maybe_enqueue_post_call_job_graph
+        await maybe_enqueue_post_call_job_graph(
+            conversation_id=conversation_id,
+            call_sid=call_sid,
+            senior_id=senior_id,
+        )
+    except Exception as e:
+        logger.error("[{cs}] Post-call job graph enqueue failed: {err}", cs=call_sid, err=str(e))
 
     # Collect full transcript from session, falling back to persisted Neon draft.
     transcript = await _get_post_call_transcript(session_state, conversation_tracker)
@@ -537,20 +555,83 @@ async def _persist_call_metrics(
             *args,
         )
     except Exception as e:
-        if getattr(e, "sqlstate", None) != "42703" and e.__class__.__name__ != "UndefinedColumnError":
+        if _is_unique_violation_error(e):
+            try:
+                await execute(
+                    """UPDATE call_metrics
+                       SET senior_id = $2,
+                           call_type = $3,
+                           duration_seconds = $4,
+                           end_reason = $5,
+                           turn_count = $6,
+                           phase_durations = $7,
+                           latency = $8,
+                           breaker_states = $9,
+                           tools_used = $10,
+                           token_usage = $11,
+                           error_count = $12,
+                           context_trace_encrypted = $13
+                       WHERE call_sid = $1""",
+                    *args,
+                )
+                logger.info("[{cs}] Call metrics updated after duplicate insert", cs=call_sid)
+            except Exception as update_exc:
+                if not _is_undefined_column_error(update_exc):
+                    raise
+                await execute(
+                    """UPDATE call_metrics
+                       SET senior_id = $2,
+                           call_type = $3,
+                           duration_seconds = $4,
+                           end_reason = $5,
+                           turn_count = $6,
+                           phase_durations = $7,
+                           latency = $8,
+                           breaker_states = $9,
+                           tools_used = $10,
+                           token_usage = $11,
+                           error_count = $12
+                       WHERE call_sid = $1""",
+                    *args[:-1],
+                )
+                logger.info("[{cs}] Call metrics updated after duplicate insert without context trace", cs=call_sid)
+            return
+
+        if not _is_undefined_column_error(e):
             raise
-        await execute(
-            """INSERT INTO call_metrics
-               (call_sid, senior_id, call_type, duration_seconds, end_reason,
-                turn_count, phase_durations, latency, breaker_states,
-                tools_used, token_usage, error_count)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)""",
-            *args[:-1],
-        )
-        logger.warning(
-            "[{cs}] context_trace_encrypted column missing; call metrics persisted without context trace",
-            cs=call_sid,
-        )
+        try:
+            await execute(
+                """INSERT INTO call_metrics
+                   (call_sid, senior_id, call_type, duration_seconds, end_reason,
+                    turn_count, phase_durations, latency, breaker_states,
+                    tools_used, token_usage, error_count)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)""",
+                *args[:-1],
+            )
+            logger.warning(
+                "[{cs}] context_trace_encrypted column missing; call metrics persisted without context trace",
+                cs=call_sid,
+            )
+        except Exception as fallback_exc:
+            if not _is_unique_violation_error(fallback_exc):
+                raise
+            await execute(
+                """UPDATE call_metrics
+                   SET senior_id = $2,
+                       call_type = $3,
+                       duration_seconds = $4,
+                       end_reason = $5,
+                       turn_count = $6,
+                       phase_durations = $7,
+                       latency = $8,
+                       breaker_states = $9,
+                       tools_used = $10,
+                       token_usage = $11,
+                       error_count = $12
+                   WHERE call_sid = $1""",
+                *args[:-1],
+            )
+            logger.info("[{cs}] Call metrics updated after duplicate insert without context trace", cs=call_sid)
     logger.info(
         "[{cs}] Call metrics persisted (turns={t}, duration={d}s, errors={e}, context_events={c})",
         cs=call_sid,

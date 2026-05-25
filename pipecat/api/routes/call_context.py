@@ -62,10 +62,10 @@ async def _persist_metadata(call_id: str, data: dict) -> None:
     """Write encrypted metadata to Redis if configured for multi-instance routing."""
     data["call_metadata_expires_at"] = time.time() + CALL_METADATA_TTL_SECONDS
     try:
-        from lib.redis_client import get_shared_state
+        from lib.redis_client import require_shared_state
         from lib.shared_state_phi import encode_phi_payload
 
-        state = get_shared_state()
+        state = require_shared_state("call metadata persistence")
         if getattr(state, "is_shared", False):
             await state.set(
                 _metadata_key(call_id),
@@ -73,6 +73,10 @@ async def _persist_metadata(call_id: str, data: dict) -> None:
                 ttl=CALL_METADATA_TTL_SECONDS,
             )
     except Exception as exc:
+        from lib.redis_client import shared_state_required
+
+        if shared_state_required():
+            raise
         logger.warning("[{cs}] Redis metadata write failed: {err}", cs=call_id, err=str(exc))
 
 
@@ -85,10 +89,10 @@ async def get_call_metadata(call_id: str) -> dict | None:
             return None
         return metadata
     try:
-        from lib.redis_client import get_shared_state
+        from lib.redis_client import require_shared_state
         from lib.shared_state_phi import decode_phi_payload
 
-        state = get_shared_state()
+        state = require_shared_state("call metadata lookup")
         if getattr(state, "is_shared", False):
             raw_metadata = await state.get(_metadata_key(call_id))
             metadata = decode_phi_payload(raw_metadata, label="call metadata")
@@ -99,6 +103,10 @@ async def get_call_metadata(call_id: str) -> dict | None:
                 call_metadata[call_id] = metadata
             return metadata
     except Exception as exc:
+        from lib.redis_client import shared_state_required
+
+        if shared_state_required():
+            raise
         logger.warning("[{cs}] Redis metadata lookup failed: {err}", cs=call_id, err=str(exc))
     return None
 
@@ -128,9 +136,9 @@ async def consume_ws_token(call_id: str, provided_token: str) -> dict:
 
     shared_claimed = False
     try:
-        from lib.redis_client import get_shared_state
+        from lib.redis_client import require_shared_state
 
-        state = get_shared_state()
+        state = require_shared_state("WebSocket token consume")
         if getattr(state, "is_shared", False):
             ttl = max(1, min(CALL_METADATA_TTL_SECONDS, int(float(metadata.get("ws_token_expires_at")) - now)))
             shared_claimed = bool(
@@ -145,6 +153,10 @@ async def consume_ws_token(call_id: str, provided_token: str) -> dict:
     except WsTokenConsumeError:
         raise
     except Exception as exc:
+        from lib.redis_client import shared_state_required
+
+        if shared_state_required():
+            raise WsTokenConsumeError("shared token consume unavailable") from exc
         logger.warning("[{cs}] Shared token consume claim failed: {err}", cs=call_id, err=str(exc))
 
     async with _metadata_lock:

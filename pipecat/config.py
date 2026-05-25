@@ -113,6 +113,21 @@ class Settings:
     load_test_mode: bool = False
     redis_url: str = ""  # Optional — enables multi-instance shared state
     pipecat_require_redis: bool = False
+    pipecat_draining: bool = False
+    instance_id: str = ""
+
+    # ---- Replica Readiness Gate (Phase 3 exit criteria) ----
+    # A new replica only advertises itself as available capacity after these
+    # checks pass. Each check can be disabled in dev where its cost is wasted
+    # (e.g. a vendor session against a stub backend).
+    readiness_min_pool_connections: int = 3
+    readiness_check_timeout_seconds: float = 30.0
+    readiness_require_prompt_cache_primer: bool = True
+    readiness_require_deepgram_session: bool = True
+    readiness_require_tts_session: bool = True
+    readiness_require_growthbook_loaded: bool = True
+    readiness_require_db_pool_warm: bool = True
+    readiness_require_breakers_closed: bool = True
 
     # ---- GrowthBook ----
     growthbook_api_host: str = ""
@@ -124,6 +139,8 @@ class Settings:
     # ---- Feature Flags ----
     scheduler_enabled: bool = False
     pipecat_retention_enabled: bool = False
+    post_call_queue_enabled: bool = False
+    post_call_worker_enabled: bool = False
     voice_backend: str = ""
     tts_provider: str = ""
     telephony_ws_handshake_timeout_seconds: float = 5.0
@@ -141,6 +158,11 @@ class Settings:
     retention_caregiver_notes_days: int = 365
     retention_prospects_days: int = 90
     retention_inactive_senior_review_days: int = 365
+    retention_call_queue_days: int = 90
+    retention_call_attempts_days: int = 180
+    retention_post_call_jobs_days: int = 180
+    retention_outbound_call_guards_days: int = 30
+    retention_scheduler_shadow_comparisons_days: int = 30
     retention_waitlist_days: int = 365
     retention_audit_logs_days: int = 2190
 
@@ -259,8 +281,17 @@ def validate_production_config() -> list[str]:
         or "gemini" in os.getenv("CALL_ANALYSIS_MODEL", "gemini-3-flash-preview").lower()
     ) and not os.getenv("GOOGLE_API_KEY", ""):
         errors.append("GOOGLE_API_KEY is required for Gemini observer or analysis models")
-    if _truthy(os.getenv("PIPECAT_REQUIRE_REDIS")) and not os.getenv("REDIS_URL", ""):
-        errors.append("REDIS_URL is required when PIPECAT_REQUIRE_REDIS=true")
+    has_shared_state = bool(
+        os.getenv("REDIS_URL", "")
+        or (
+            os.getenv("UPSTASH_REDIS_REST_URL", "")
+            and os.getenv("UPSTASH_REDIS_REST_TOKEN", "")
+        )
+    )
+    if _truthy(os.getenv("PIPECAT_REQUIRE_REDIS")) and not has_shared_state:
+        errors.append("REDIS_URL or UPSTASH_REDIS_REST_URL/TOKEN is required when PIPECAT_REQUIRE_REDIS=true")
+    if _truthy(os.getenv("REDIS_RATE_LIMITS_ENABLED")) and not os.getenv("REDIS_URL", ""):
+        errors.append("REDIS_URL is required when REDIS_RATE_LIMITS_ENABLED=true")
     if os.getenv("VOICE_BACKEND", "").strip().lower() == "gemini_live":
         errors.append("VOICE_BACKEND=gemini_live is not allowed in production")
 
@@ -384,6 +415,17 @@ def _load_settings() -> Settings:
         load_test_mode=_env("LOAD_TEST_MODE", "false").lower() == "true",
         redis_url=_env("REDIS_URL"),
         pipecat_require_redis=_truthy(_env("PIPECAT_REQUIRE_REDIS")),
+        pipecat_draining=_truthy(_env("PIPECAT_DRAINING")),
+        instance_id=_env("INSTANCE_ID", _env("RAILWAY_REPLICA_ID")),
+        # Replica readiness gate (Phase 3)
+        readiness_min_pool_connections=int(_env("READINESS_MIN_POOL_CONNECTIONS", "3")),
+        readiness_check_timeout_seconds=float(_env("READINESS_CHECK_TIMEOUT_SECONDS", "30")),
+        readiness_require_prompt_cache_primer=_truthy(_env("READINESS_REQUIRE_PROMPT_CACHE_PRIMER", "true")),
+        readiness_require_deepgram_session=_truthy(_env("READINESS_REQUIRE_DEEPGRAM_SESSION", "true")),
+        readiness_require_tts_session=_truthy(_env("READINESS_REQUIRE_TTS_SESSION", "true")),
+        readiness_require_growthbook_loaded=_truthy(_env("READINESS_REQUIRE_GROWTHBOOK_LOADED", "true")),
+        readiness_require_db_pool_warm=_truthy(_env("READINESS_REQUIRE_DB_POOL_WARM", "true")),
+        readiness_require_breakers_closed=_truthy(_env("READINESS_REQUIRE_BREAKERS_CLOSED", "true")),
         # GrowthBook
         growthbook_api_host=_env("GROWTHBOOK_API_HOST"),
         growthbook_client_key=_env("GROWTHBOOK_CLIENT_KEY"),
@@ -392,6 +434,8 @@ def _load_settings() -> Settings:
         # Feature Flags
         scheduler_enabled=_env("SCHEDULER_ENABLED", "false").lower() == "true",
         pipecat_retention_enabled=_truthy(_env("PIPECAT_RETENTION_ENABLED")),
+        post_call_queue_enabled=_truthy(_env("POST_CALL_QUEUE_ENABLED")),
+        post_call_worker_enabled=_truthy(_env("POST_CALL_WORKER_ENABLED")),
         voice_backend=_env("VOICE_BACKEND"),
         tts_provider=_env("TTS_PROVIDER"),
         telephony_ws_handshake_timeout_seconds=float(
@@ -410,6 +454,11 @@ def _load_settings() -> Settings:
         retention_caregiver_notes_days=int(_env("RETENTION_CAREGIVER_NOTES_DAYS", "365")),
         retention_prospects_days=int(_env("RETENTION_PROSPECTS_DAYS", "90")),
         retention_inactive_senior_review_days=int(_env("RETENTION_INACTIVE_SENIOR_REVIEW_DAYS", "365")),
+        retention_call_queue_days=int(_env("RETENTION_CALL_QUEUE_DAYS", "90")),
+        retention_call_attempts_days=int(_env("RETENTION_CALL_ATTEMPTS_DAYS", "180")),
+        retention_post_call_jobs_days=int(_env("RETENTION_POST_CALL_JOBS_DAYS", "180")),
+        retention_outbound_call_guards_days=int(_env("RETENTION_OUTBOUND_CALL_GUARDS_DAYS", "30")),
+        retention_scheduler_shadow_comparisons_days=int(_env("RETENTION_SCHEDULER_SHADOW_COMPARISONS_DAYS", "30")),
         retention_waitlist_days=int(_env("RETENTION_WAITLIST_DAYS", "365")),
         retention_audit_logs_days=int(_env("RETENTION_AUDIT_LOGS_DAYS", "2190")),
     )

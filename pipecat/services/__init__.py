@@ -16,6 +16,7 @@ __all__ = [
     "memory",
     "news",
     "post_call",
+    "post_call_jobs",
     "reminder_delivery",
     "scheduler",
     "seniors",

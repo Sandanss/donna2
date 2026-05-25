@@ -26,6 +26,13 @@ from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
 
 from api.middleware.auth import require_service_api_key
+from api.middleware.rate_limit import (
+    CALL_LIMIT,
+    SERVICE_CALL_LIMIT,
+    limiter,
+    public_request_key,
+    service_request_key,
+)
 from api.routes.call_context import (
     _cleanup_metadata,
     _hydrate_senior_call_context,
@@ -43,6 +50,7 @@ router = APIRouter()
 TELNYX_DEFAULT_STREAM_CODEC = DEFAULT_TELNYX_AUDIO_PROFILE.codec
 TELNYX_DEFAULT_STREAM_SAMPLE_RATE = DEFAULT_TELNYX_AUDIO_PROFILE.sample_rate
 TELNYX_EVENT_DEDUPE_TTL_SECONDS = 600
+TELNYX_STREAM_START_LOCK_TTL_SECONDS = 7200
 TELNYX_PREWARM_TTL_SECONDS = 600
 TELNYX_PREWARM_SCHEDULE_TOLERANCE_SECONDS = 60
 
@@ -78,6 +86,8 @@ class TelnyxOutboundCallRequest(BaseModel):
     context_notes: str | None = Field(default=None, alias="contextNotes")
     scheduled_for: datetime | None = Field(default=None, alias="scheduledFor")
     existing_delivery_id: str | None = Field(default=None, alias="existingDeliveryId")
+    queue_id: str | None = Field(default=None, alias="queueId")
+    reservation_id: str | None = Field(default=None, alias="reservationId")
     prewarmed_context: "TelnyxPrewarmedOutboundContext | None" = Field(
         default=None,
         alias="prewarmedContext",
@@ -409,6 +419,24 @@ async def _mark_telnyx_event_seen(event_id: str) -> bool:
     if not event_id:
         return False
 
+    try:
+        from lib.redis_client import require_shared_state
+
+        state = require_shared_state("Telnyx webhook event dedupe")
+        if getattr(state, "is_shared", False):
+            claimed = await state.set_if_absent(
+                f"telnyx:event:{event_id}",
+                {"seen_at": time.time()},
+                ttl=TELNYX_EVENT_DEDUPE_TTL_SECONDS,
+            )
+            return not bool(claimed)
+    except Exception:
+        from lib.redis_client import shared_state_required
+
+        if shared_state_required():
+            raise
+        logger.warning("Shared Telnyx event dedupe unavailable; using local fallback")
+
     now = time.monotonic()
     async with _telnyx_event_lock:
         expired = [
@@ -424,6 +452,40 @@ async def _mark_telnyx_event_seen(event_id: str) -> bool:
 
         _recent_telnyx_event_ids[event_id] = now
         return False
+
+
+async def _claim_telnyx_stream_start(call_control_id: str) -> bool:
+    """Claim one media-stream start across Pipecat replicas."""
+    try:
+        from lib.redis_client import require_shared_state
+
+        state = require_shared_state("Telnyx stream-start lock")
+        if getattr(state, "is_shared", False):
+            return bool(
+                await state.set_if_absent(
+                    f"telnyx:stream_started:{call_control_id}",
+                    {"claimed_at": time.time()},
+                    ttl=TELNYX_STREAM_START_LOCK_TTL_SECONDS,
+                )
+            )
+    except Exception:
+        from lib.redis_client import shared_state_required
+
+        if shared_state_required():
+            raise
+        logger.warning("[{cid}] Shared Telnyx stream-start lock unavailable; using local fallback", cid=call_control_id)
+    return True
+
+
+async def _release_telnyx_stream_start_claim(call_control_id: str) -> None:
+    try:
+        from lib.redis_client import require_shared_state
+
+        state = require_shared_state("Telnyx stream-start lock release")
+        if getattr(state, "is_shared", False):
+            await state.delete(f"telnyx:stream_started:{call_control_id}")
+    except Exception:
+        pass
 
 
 async def _upsert_call_metadata(call_control_id: str, updates: dict[str, Any]) -> dict[str, Any]:
@@ -444,6 +506,8 @@ async def _seed_outbound_call_metadata(
     ws_token: str,
     context_seed: dict[str, Any],
     context_seed_source: str,
+    queue_id: str | None = None,
+    reservation_id: str | None = None,
 ) -> dict[str, Any]:
     profile = resolve_telnyx_audio_profile(get_settings())
     amd_mode = _telnyx_amd_mode()
@@ -484,6 +548,8 @@ async def _seed_outbound_call_metadata(
         "telnyx_amd_status": "pending" if amd_mode else "disabled",
         "telnyx_voicemail_detected": False,
         "telnyx_voicemail_message_started": False,
+        "queue_id": queue_id,
+        "reservation_id": reservation_id,
     }
     seeded = await _upsert_call_metadata(call_control_id, metadata)
     logger.info(
@@ -570,6 +636,8 @@ async def _store_senior_metadata(
         "telnyx_stream_sample_rate": profile.sample_rate,
         "telnyx_context_ready": True,
         "telnyx_context_ready_at": time.time(),
+        "queue_id": current_metadata.get("queue_id"),
+        "reservation_id": current_metadata.get("reservation_id"),
     }
     metadata = await _upsert_call_metadata(call_control_id, metadata)
 
@@ -891,12 +959,25 @@ async def _maybe_start_telnyx_stream(
         if not ws_token:
             logger.error("[{cid}] Cannot start Telnyx media stream: missing ws_token", cid=call_control_id)
             return False
+
+    if not await _claim_telnyx_stream_start(call_control_id):
+        logger.info("[{cid}] Telnyx media stream start already claimed by another replica", cid=call_control_id)
+        return False
+
+    async with _metadata_lock:
+        metadata = call_metadata.get(call_control_id)
+        if not metadata:
+            await _release_telnyx_stream_start_claim(call_control_id)
+            return False
+        if metadata.get("telnyx_stream_started"):
+            return False
         metadata["telnyx_stream_started"] = True
         metadata["telnyx_stream_start_reason"] = reason
 
     try:
         await _start_telnyx_stream(call_control_id, ws_token)
     except Exception:
+        await _release_telnyx_stream_start_claim(call_control_id)
         await _upsert_call_metadata(
             call_control_id,
             {
@@ -999,6 +1080,17 @@ async def _handle_call_answered(call_control_id: str) -> None:
         ready=bool(metadata.get("telnyx_context_ready")),
         started=bool(metadata.get("telnyx_stream_started")),
     )
+    if metadata.get("queue_id"):
+        try:
+            from services.call_attempts import mark_call_attempt_answered
+
+            await mark_call_attempt_answered(call_control_id)
+        except Exception as exc:
+            logger.warning(
+                "[{cid}] call_attempts answered hook failed: {err}",
+                cid=call_control_id,
+                err=str(exc),
+            )
     await _maybe_start_telnyx_stream(call_control_id, reason="call_answered")
 
 
@@ -1020,6 +1112,18 @@ async def _record_streaming_event(call_control_id: str, event_type: str, payload
         elif event_type == "streaming.stopped":
             updates["telnyx_stream_stopped_at"] = time.time()
         await _upsert_call_metadata(call_control_id, updates)
+
+        if event_type == "streaming.started" and metadata.get("queue_id"):
+            try:
+                from services.call_attempts import mark_call_attempt_media_started
+
+                await mark_call_attempt_media_started(call_control_id)
+            except Exception as exc:
+                logger.warning(
+                    "[{cid}] call_attempts media_started hook failed: {err}",
+                    cid=call_control_id,
+                    err=str(exc),
+                )
 
     log_fn = logger.warning if event_type == "streaming.failed" else logger.info
     log_fn(
@@ -1046,7 +1150,17 @@ async def telnyx_events(request: Request, background_tasks: BackgroundTasks):
     payload = data.get("payload") or {}
     call_control_id = payload.get("call_control_id", "")
 
-    if event_id and await _mark_telnyx_event_seen(event_id):
+    try:
+        duplicate_event = bool(event_id and await _mark_telnyx_event_seen(event_id))
+    except Exception as exc:
+        logger.error(
+            "[{cid}] Telnyx webhook dedupe unavailable in required shared-state mode: {err}",
+            cid=call_control_id or "unknown",
+            err=str(exc),
+        )
+        raise HTTPException(status_code=503, detail="Shared webhook dedupe unavailable") from exc
+
+    if duplicate_event:
         logger.info(
             "[{cid}] Ignoring duplicate Telnyx webhook event={event} event_id={event_id}",
             cid=call_control_id or "unknown",
@@ -1067,6 +1181,27 @@ async def telnyx_events(request: Request, background_tasks: BackgroundTasks):
         background_tasks.add_task(_record_streaming_event, call_control_id, event_type, payload)
     elif event_type in _TERMINAL_EVENTS and call_control_id:
         metadata = call_metadata.get(call_control_id) or {}
+        if metadata.get("reservation_id"):
+            try:
+                from services.capacity import release_capacity_reservation
+
+                await release_capacity_reservation(
+                    reservation_id=metadata.get("reservation_id"),
+                    queue_id=metadata.get("queue_id"),
+                )
+            except Exception as exc:
+                logger.warning("[{cid}] Failed to release queue capacity reservation on terminal event: {err}", cid=call_control_id, err=str(exc))
+        if metadata.get("queue_id"):
+            try:
+                from services.call_attempts import mark_call_attempt_ended
+
+                await mark_call_attempt_ended(call_control_id, event_type)
+            except Exception as exc:
+                logger.warning(
+                    "[{cid}] call_attempts ended hook failed: {err}",
+                    cid=call_control_id,
+                    err=str(exc),
+                )
         if metadata.get("telnyx_voicemail_detected") and metadata.get("conversation_id"):
             try:
                 from services.conversations import complete
@@ -1364,6 +1499,8 @@ async def create_telnyx_outbound_call(body: TelnyxOutboundCallRequest) -> dict:
         ws_token=ws_token,
         context_seed=context_seed,
         context_seed_source=context_seed_source,
+        queue_id=body.queue_id,
+        reservation_id=body.reservation_id,
     )
 
     try:
@@ -1410,12 +1547,21 @@ async def create_telnyx_outbound_call(body: TelnyxOutboundCallRequest) -> dict:
         sid=str(senior["id"])[:8],
         call_type=body.call_type,
     )
+    try:
+        from services.capacity import resolve_instance_id
+
+        instance_id = resolve_instance_id()
+    except Exception:
+        instance_id = None
     return {
         "success": True,
         "provider": "telnyx",
         "callSid": call_control_id,
         "callControlId": call_control_id,
         "seniorId": senior["id"],
+        "queueId": body.queue_id,
+        "reservationId": body.reservation_id,
+        **({"instanceId": instance_id} if instance_id else {}),
     }
 
 
@@ -1426,7 +1572,10 @@ async def end_telnyx_call(call_control_id: str) -> dict:
 
 
 @router.post("/telnyx/prewarm")
+@limiter.limit(CALL_LIMIT, key_func=public_request_key)
+@limiter.limit(SERVICE_CALL_LIMIT, key_func=service_request_key)
 async def telnyx_prewarm_call(
+    request: Request,
     body: TelnyxOutboundCallRequest,
     _service_label: str = Depends(require_service_api_key),
 ):
@@ -1437,7 +1586,10 @@ async def telnyx_prewarm_call(
 
 
 @router.post("/telnyx/outbound")
+@limiter.limit(CALL_LIMIT, key_func=public_request_key)
+@limiter.limit(SERVICE_CALL_LIMIT, key_func=service_request_key)
 async def telnyx_outbound_call(
+    request: Request,
     body: TelnyxOutboundCallRequest,
     _service_label: str = Depends(require_service_api_key),
 ):

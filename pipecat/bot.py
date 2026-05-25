@@ -100,7 +100,10 @@ async def _wait_for_call_metadata(call_sid: str) -> dict | None:
 
     while True:
         attempts += 1
-        metadata = await get_call_metadata(call_sid)
+        try:
+            metadata = await get_call_metadata(call_sid)
+        except Exception as exc:
+            raise WebSocketAuthError("shared metadata unavailable") from exc
         if metadata:
             if attempts > 1:
                 logger.info(

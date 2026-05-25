@@ -35,8 +35,14 @@ async def _can_access_senior(auth: AuthContext, senior_id: str) -> bool:
 
 def _serialize(obj):
     """JSON-safe serialization for datetime, UUID, and other types."""
+    if obj is None or isinstance(obj, (str, int, float, bool)):
+        return obj
     if isinstance(obj, datetime):
         return obj.isoformat()
+    if isinstance(obj, list):
+        return [_serialize(item) for item in obj]
+    if isinstance(obj, dict):
+        return {key: _serialize(value) for key, value in obj.items()}
     if hasattr(obj, "hex"):  # UUID
         return str(obj)
     if isinstance(obj, bytes):
@@ -53,14 +59,7 @@ def _clean_rows(rows: list[dict]) -> list[dict]:
             # Skip raw embedding vectors — they are large and not human-readable
             if k == "embedding":
                 continue
-            if isinstance(v, (datetime,)):
-                clean[k] = v.isoformat()
-            elif hasattr(v, "hex"):
-                clean[k] = str(v)
-            elif isinstance(v, bytes):
-                clean[k] = v.decode("utf-8", errors="replace")
-            else:
-                clean[k] = v
+            clean[k] = _serialize(v)
         cleaned.append(clean)
     return cleaned
 
@@ -109,6 +108,30 @@ def _decrypt_call_analyses(rows: list[dict]) -> list[dict]:
             clean["follow_up_suggestions"] = clean.get("follow_up_suggestions") or full.get("follow_up_suggestions")
             clean["call_quality"] = clean.get("call_quality") or full.get("call_quality")
         clean.pop("analysis_encrypted", None)
+        exported.append(clean)
+    return exported
+
+
+def _decrypt_call_schedules(rows: list[dict]) -> list[dict]:
+    """Decrypt schedule context notes for authorized export responses."""
+    exported = []
+    for row in rows:
+        clean = dict(row)
+        if clean.get("context_notes_encrypted"):
+            clean["context_notes"] = decrypt(clean["context_notes_encrypted"])
+        clean.pop("context_notes_encrypted", None)
+        exported.append(clean)
+    return exported
+
+
+def _decrypt_post_call_jobs(rows: list[dict]) -> list[dict]:
+    """Decrypt post-call job payloads for authorized export responses."""
+    exported = []
+    for row in rows:
+        clean = dict(row)
+        if clean.get("payload_encrypted"):
+            clean["payload"] = decrypt_json(clean["payload_encrypted"])
+        clean.pop("payload_encrypted", None)
         exported.append(clean)
     return exported
 
@@ -178,6 +201,64 @@ async def export_senior_data(
         senior_id,
     )
 
+    call_schedules = await query_many(
+        """SELECT id, senior_id, source_profile_hash, call_type, timezone,
+                  target_local_time, window_minutes, frequency, days_of_week,
+                  one_time_date, priority_lane, reminder_ids, context_notes_encrypted,
+                  next_run_at, last_materialized_for, is_active, created_at, updated_at
+           FROM senior_call_schedules WHERE senior_id = $1 ORDER BY created_at DESC""",
+        senior_id,
+    )
+
+    call_queue = await query_many(
+        """SELECT id, senior_id, schedule_id, reminder_id, call_type, priority_lane,
+                  priority_score, target_at, earliest_at, latest_at, status, dedupe_key,
+                  lease_owner, lease_expires_at, attempt_count, last_attempt_id,
+                  last_error_code, last_error_at, cancel_reason, created_at, updated_at
+           FROM call_queue WHERE senior_id = $1 ORDER BY created_at DESC""",
+        senior_id,
+    )
+
+    call_attempts = await query_many(
+        """SELECT id, queue_id, senior_id, attempt_number, provider, call_control_id,
+                  status, reservation_id, reserved_capacity, architecture, cohort,
+                  test_run_id, dispatch_decision_id, dial_started_at, answered_at,
+                  media_started_at, ended_at, provider_error_code, provider_error_class,
+                  created_at, updated_at
+           FROM call_attempts WHERE senior_id = $1 ORDER BY created_at DESC""",
+        senior_id,
+    )
+
+    post_call_jobs = await query_many(
+        """SELECT id, conversation_id, call_sid, senior_id, job_type, status, priority,
+                  dedupe_key, payload_encrypted, depends_on, attempt_count, max_attempts,
+                  lease_owner, lease_expires_at, started_at, completed_at,
+                  dead_lettered_at, dead_letter_reason, last_error_code, last_error_at, run_after,
+                  created_at, updated_at
+           FROM post_call_jobs
+           WHERE senior_id = $1
+              OR conversation_id IN (SELECT id FROM conversations WHERE senior_id = $1)
+           ORDER BY created_at DESC""",
+        senior_id,
+    )
+
+    outbound_call_guards = await query_many(
+        """SELECT id, senior_id, guard_key, call_type, architecture, queue_id,
+                  legacy_dedup_key, target_at, expires_at, call_control_id,
+                  status, created_at, updated_at
+           FROM outbound_call_guards WHERE senior_id = $1 ORDER BY created_at DESC""",
+        senior_id,
+    )
+
+    scheduler_shadow_comparisons = await query_many(
+        """SELECT id, test_run_id, senior_id, queue_id, call_type, priority_lane,
+                  legacy_dedup_key, queue_dedupe_key, target_at, legacy_decision,
+                  queue_decision, skip_reason, capacity_decision,
+                  estimated_queue_lag_seconds, created_at
+           FROM scheduler_shadow_comparisons WHERE senior_id = $1 ORDER BY created_at DESC""",
+        senior_id,
+    )
+
     logger.info(
         "Data export for senior {sid}: {c} conversations, {m} memories, {r} reminders",
         sid=senior_id[:8],
@@ -198,6 +279,8 @@ async def export_senior_data(
             "conversations": len(conversations),
             "memories": len(memories),
             "reminders": len(reminders),
+            "call_queue": len(call_queue),
+            "post_call_jobs": len(post_call_jobs),
             "surface": "pipecat_export",
         },
     )
@@ -215,4 +298,10 @@ async def export_senior_data(
         "call_analyses": _clean_rows(_decrypt_call_analyses(call_analyses)),
         "daily_context": _clean_rows([decrypt_daily_context_phi(row) for row in daily_context]),
         "caregiver_links": _clean_rows(caregiver_links),
+        "call_schedules": _clean_rows(_decrypt_call_schedules(call_schedules)),
+        "call_queue": _clean_rows(call_queue),
+        "call_attempts": _clean_rows(call_attempts),
+        "post_call_jobs": _clean_rows(_decrypt_post_call_jobs(post_call_jobs)),
+        "outbound_call_guards": _clean_rows(outbound_call_guards),
+        "scheduler_shadow_comparisons": _clean_rows(scheduler_shadow_comparisons),
     }
