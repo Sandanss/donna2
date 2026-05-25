@@ -162,6 +162,9 @@
       "phoneAlreadyRegistered": "Ese número de teléfono ya está registrado. Usa otro número o contacta a soporte.",
       "phoneCheckFailed": "No pudimos verificar este número de teléfono. Inténtalo de nuevo.",
       "relationshipRequired": "Por favor selecciona una relacion",
+      "cityRequired": "La ciudad es obligatoria",
+      "stateRequired": "El estado es obligatorio",
+      "zipRequired": "El código postal es obligatorio",
       "stateFormat": "Usa código de 2 letras",
       "zipFormat": "Usa código de 5 digitos"
     },

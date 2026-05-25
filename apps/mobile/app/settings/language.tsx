@@ -5,11 +5,13 @@ import { useRouter } from "expo-router";
 import { ArrowLeft, Check } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
 import { COLORS } from "@/src/constants/theme";
+import { FlagUS } from "@/src/components/icons/FlagUS";
+import { FlagMX } from "@/src/components/icons/FlagMX";
 import { getStoredLanguage, setStoredLanguage } from "@/src/i18n";
 
 const LANGUAGES = [
-  { code: "en", nativeLabel: "English" },
-  { code: "es", nativeLabel: "Espanol" },
+  { code: "en", nativeLabel: "English", Flag: FlagUS },
+  { code: "es", nativeLabel: "Espanol", Flag: FlagMX },
 ] as const;
 
 export default function LanguageSettingsScreen() {
@@ -67,9 +69,12 @@ export default function LanguageSettingsScreen() {
                   accessibilityLabel={lang.nativeLabel}
                   style={{ minHeight: 56 }}
                 >
-                  <Text className="text-[16px] font-medium text-charcoal">
-                    {lang.nativeLabel}
-                  </Text>
+                  <View className="flex-row items-center gap-3">
+                    <lang.Flag size={28} />
+                    <Text className="text-[16px] font-medium text-charcoal">
+                      {lang.nativeLabel}
+                    </Text>
+                  </View>
                   {isSelected && <Check size={20} color={COLORS.sage} />}
                 </Pressable>
                 {index < LANGUAGES.length - 1 && (

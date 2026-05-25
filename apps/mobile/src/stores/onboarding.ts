@@ -98,21 +98,20 @@ const INITIAL_STATE = {
   calls: [{ ...DEFAULT_CALL }],
 };
 
+// Address fields (city/state/zipcode for both caregiver and loved one) are
+// intentionally excluded from the persisted draft. Stale addresses from a
+// prior onboarding session would otherwise rehydrate as fake "defaults",
+// letting a fresh user advance past validation without consciously entering
+// their own location.
 const draftFields = (state: OnboardingState) => ({
   authProvider: state.authProvider,
   donnaLanguage: state.donnaLanguage,
   firstName: state.firstName,
   lastName: state.lastName,
   phone: state.phone,
-  caregiverCity: state.caregiverCity,
-  caregiverState: state.caregiverState,
-  caregiverZipcode: state.caregiverZipcode,
   lovedOneName: state.lovedOneName,
   lovedOnePhone: state.lovedOnePhone,
   relationship: state.relationship,
-  city: state.city,
-  state: state.state,
-  zipcode: state.zipcode,
   selectedInterests: state.selectedInterests,
   additionalTopics: state.additionalTopics,
   topicsToAvoid: state.topicsToAvoid,

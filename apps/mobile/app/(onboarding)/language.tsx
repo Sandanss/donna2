@@ -4,12 +4,14 @@ import { useRouter } from "expo-router";
 import { ArrowLeft } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
 import { Button, ProgressBar } from "@/src/components/ui";
+import { FlagUS } from "@/src/components/icons/FlagUS";
+import { FlagMX } from "@/src/components/icons/FlagMX";
 import { COLORS } from "@/src/constants/theme";
 import { useOnboardingStore } from "@/src/stores/onboarding";
 
 const LANGUAGES = [
-  { code: "en" as const, label: "English", badge: "En" },
-  { code: "es" as const, label: "Spanish", badge: "Es" },
+  { code: "en" as const, label: "English", Flag: FlagUS },
+  { code: "es" as const, label: "Spanish", Flag: FlagMX },
 ];
 
 export default function LanguageScreen() {
@@ -64,18 +66,8 @@ export default function LanguageScreen() {
                 accessibilityLabel={lang.label}
                 style={{ minHeight: 56 }}
               >
-                <View
-                  className={`w-10 h-10 rounded-full items-center justify-center mr-4 ${
-                    isSelected ? "bg-sage" : "bg-beige"
-                  }`}
-                >
-                  <Text
-                    className={`text-[14px] font-semibold ${
-                      isSelected ? "text-white" : "text-charcoal"
-                    }`}
-                  >
-                    {lang.badge}
-                  </Text>
+                <View className="mr-4">
+                  <lang.Flag size={32} />
                 </View>
                 <Text
                   className={`text-[17px] font-medium ${

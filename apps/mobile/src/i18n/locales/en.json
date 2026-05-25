@@ -162,6 +162,9 @@
       "phoneAlreadyRegistered": "That phone number is already registered. Use a different number or contact support.",
       "phoneCheckFailed": "We couldn't check this phone number. Please try again.",
       "relationshipRequired": "Please select a relationship",
+      "cityRequired": "City is required",
+      "stateRequired": "State is required",
+      "zipRequired": "Zip code is required",
       "stateFormat": "Use 2-letter code",
       "zipFormat": "Use 5-digit zip"
     },

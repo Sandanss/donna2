@@ -103,9 +103,12 @@ export default function Step2Screen() {
     ) {
       next.lovedOnePhone = t("onboarding.step2.phoneMatchesCaregiver");
     }
-    if (state.trim() && state.trim().length !== 2)
+    if (!city.trim()) next.city = t("onboarding.step2.cityRequired");
+    if (!state.trim()) next.state = t("onboarding.step2.stateRequired");
+    else if (state.trim().length !== 2)
       next.state = t("onboarding.step2.stateFormat");
-    if (zipcode.trim() && zipcode.trim().length !== 5)
+    if (!zipcode.trim()) next.zipcode = t("onboarding.step2.zipRequired");
+    else if (zipcode.trim().length !== 5)
       next.zipcode = t("onboarding.step2.zipFormat");
     setErrors(next);
     return Object.keys(next).length === 0;
