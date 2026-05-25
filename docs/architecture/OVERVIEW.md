@@ -74,7 +74,7 @@ The documented **10,000-user path** is forward work built on the new queue archi
 │   │         ┌───────────────────────┐                                    │   │
 │   │         │  Layer 1: Quick       │  0ms — BLOCKING                    │   │
 │   │         │  Observer             │  250+ regex patterns               │   │
-│   │         │                       │  Injects guidance for THIS turn    │   │
+│   │         │                       │  Stashes guidance for Director     │   │
 │   │         │                       │  Goodbye → EndFrame                │   │
 │   │         └───────────┬───────────┘                                    │   │
 │   │                     ▼                                                │   │
@@ -92,7 +92,7 @@ The documented **10,000-user path** is forward work built on the new queue archi
 │   │                     ▼                                                │   │
 │   │         Context Aggregator (user) ← builds LLM context              │   │
 │   │                     ▼                                                │   │
-│   │         Claude Haiku 4.5 + FlowManager (2 active tools)             │   │
+│   │         Claude Haiku 4.5 + FlowManager (3 subscriber-call tools)    │   │
 │   │         (conditional reminder → main → winding_down → closing)      │   │
 │   │                     │ TextFrame                                      │   │
 │   │                     ▼                                                │   │
@@ -144,7 +144,7 @@ The documented **10,000-user path** is forward work built on the new queue archi
 │   │  notifications | audit_logs | waitlist | admin_users                  │  │
 │   │  Queue layer (Phase 1): senior_call_schedules | call_queue            │  │
 │   │  call_attempts | post_call_jobs | outbound_call_guards                │  │
-│   │  scheduler_shadow_comparisons                                         │  │
+│   │  scheduler_shadow_comparisons | canary_cohort_membership             │  │
 │   └──────────────────────────────────────────────────────────────────────┘  │
 │                                                                              │
 └──────────────────────────────────────────────────────────────────────────────┘
@@ -235,9 +235,9 @@ Quick Observer pattern categories:
 
 | Phase | Tools | Context Strategy |
 |-------|-------|-----------------|
-| **Reminder** *(conditional)* | mark_reminder_acknowledged, transition_to_main | APPEND, respond_immediately |
-| **Main** | web_search, mark_reminder_acknowledged, transition_to_winding_down | APPEND |
-| **Winding Down** | mark_reminder_acknowledged, transition_to_closing | APPEND |
+| **Reminder** *(conditional)* | mark_reminder_acknowledged, create_reminder, transition_to_main | APPEND, respond_immediately |
+| **Main** | web_search, mark_reminder_acknowledged, create_reminder, transition_to_winding_down | APPEND |
+| **Winding Down** | mark_reminder_acknowledged, create_reminder, transition_to_closing | APPEND |
 | **Closing** | *(none — post_action: end_conversation)* | APPEND |
 
 ---
@@ -266,9 +266,9 @@ Quick Observer pattern categories:
 
 | App | Tech | URL |
 |-----|------|-----|
-| **Admin Dashboard v2** | React 18 + Vite + Tailwind + Radix UI | [admin-v2-liart.vercel.app](https://admin-v2-liart.vercel.app) |
-| **Website / caregiver web** | React 18 + Vite + Clerk + Framer Motion | [calldonna.co](https://calldonna.co) |
-| **Mobile app** | Expo SDK 54 + React Native + Clerk | TestFlight/App Store build, bundle ID `com.donna.caregiver` |
+| **Admin Dashboard v2** | React 18 + Vite 6 + Tailwind + lucide-react | [admin-v2-liart.vercel.app](https://admin-v2-liart.vercel.app) |
+| **Website / caregiver web** | React 19 + Vite 7 + Clerk + Framer Motion | [calldonna.co](https://calldonna.co) |
+| **Mobile app** | Expo SDK 54 + React Native 0.81 + React 19 + Clerk + native Apple auth | TestFlight/App Store build, bundle ID `com.donna.caregiver` |
 | **Observability** | React 18 + Vite (vanilla CSS) | [observability-five.vercel.app](https://observability-five.vercel.app) |
 
 ---
@@ -281,7 +281,7 @@ pipecat/
 ├── bot.py                           ← Pipeline assembly + run_bot() + _run_post_call()
 ├── flows/
 │   ├── nodes.py                     ← 4 call phase NodeConfigs + system prompts
-│   └── tools.py                     ← 2 active Claude tools + retired handlers
+│   └── tools.py                     ← 3 active subscriber-call Claude tools + retired handlers; onboarding exposes web_search only
 ├── processors/
 │   ├── patterns.py                  ← 250+ regex patterns, 19 categories
 │   ├── quick_observer.py            ← Layer 1: analysis logic + goodbye EndFrame
@@ -378,7 +378,7 @@ The outbound call path is mid-migration from the legacy in-process Node schedule
 
 ```
 Scheduler tick (every 60s):
-  legacy plan ─┬─► acquire outbound_call_guards row ─► Telnyx dial ─► record call_attempt (architecture=legacy)
+  legacy plan ─┬─► acquire outbound_call_guards row ─► Pipecat /telnyx/outbound
                │
                └─► materialize each due call into call_queue (shadow_materialize and above)
 
@@ -390,9 +390,11 @@ Dispatcher tick (every N seconds, in same Node process):
 
 Mode progression: `legacy_only` → `shadow_materialize` → `shadow_dispatch` → `canary_queue` → `queue_primary`. `legacy_rollback` is the emergency exit. See [`ARCHITECTURE.md`](ARCHITECTURE.md#outbound-call-dispatch--dual-path-rollout) for the full mode matrix and the consistency-model rule (Postgres decides *what*, Redis decides *what is running right now*).
 
-**Out-of-band post-call (Phase 6 infra).** `services/post-call-jobs.js` defines an 8-job DAG (`metrics_finalize`, `reminder_recovery`, `analysis`, `memory_extraction`, `daily_context`, `caregiver_notifications`, `interest_discovery`, `snapshot_rebuild`) backed by the `post_call_jobs` queue. Per-provider semaphores keep `geminiFlash`/`openAiEmbeddings`/`resend` at concurrency 1 across the fleet; `db` lane runs at 200. Terminal failures move to `dead_letter` and are admin-replayable. Pipecat enqueues only when `POST_CALL_QUEUE_ENABLED=true`; the worker has no continuous loop yet and runs via the shadow script — inline `pipecat/services/post_call.py` remains the active path until the canary flip.
+Manual caregiver/admin calls through `routes/calls.js` still call Pipecat directly; the `manual` queue lane exists for the queue architecture but manual `/api/call` is not queue-backed yet.
 
-**Phase 7 canary + Phase 8 capacity actuator.** `services/canary-cohort.js` and `routes/canary.js` store the queue canary allowlist in `canary_cohort_membership`, with the env allowlist kept as an emergency fallback. `scripts/phase7-canary-report.js` produces the daily aggregate report for the 5→10→25 live canary. `scripts/phase8-capacity-plan.js` + `services/phase8-autoscaler.js` recommend and (optionally) apply Railway replica scaling for known call windows; dry-run by default. Admin override at `POST /api/scale-operations/phase8/override`. See [`ARCHITECTURE.md`](ARCHITECTURE.md#capacity-planning--autoscaling-phases-7-8) for the full surface.
+**Out-of-band post-call (Phase 6 infra).** `services/post-call-jobs.js` defines an 8-job DAG (`metrics_finalize`, `reminder_recovery`, `analysis`, `memory_extraction`, `daily_context`, `caregiver_notifications`, `interest_discovery`, `snapshot_rebuild`) backed by the `post_call_jobs` queue. Per-provider semaphores keep `geminiFlash`/`openAiEmbeddings`/`resend` at concurrency 1 per worker process; `db` lane runs at 200. Terminal failures move to `dead_letter` and are admin-replayable. Pipecat enqueues only when `POST_CALL_QUEUE_ENABLED=true`, but it still runs the inline chain today; the worker is an explicit script/runbook path until the canary flip disables inline work.
+
+**Phase 7 canary + Phase 8 capacity actuator.** `services/canary-cohort.js` and `routes/canary.js` store the queue canary allowlist in `canary_cohort_membership`, with the env allowlist kept as an emergency fallback. Integrated scheduler runtime merges DB membership with the env allowlist; standalone `scripts/run-dispatcher-worker.js` still relies on env allowlist/percent validation. `scripts/phase7-canary-daily-report.js` produces the daily SLO report, while `scripts/phase7-canary-report.js` remains the aggregate exit report for the 5→10→25 live canary. `services/phase8-capacity-plan.js` + `services/phase8-autoscaler.js` recommend and (optionally) apply Railway replica scaling for known call windows; dry-run by default. Admin override at `POST /api/scale-operations/phase8/override`. See [`ARCHITECTURE.md`](ARCHITECTURE.md#capacity-planning--autoscaling-phases-7-8) for the full surface.
 
 **Path to 10,000 users.** The queue architecture is deliberately shaped so the next scale step is incremental rather than a rewrite: move hot operational tables to `ops.*` or hash/time partitioning when DB pressure appears, move Redis/shared state to a HA or multi-region topology when reliability or latency demands it, add caller-ID pool/reputation management when answer rate declines, add provider sharding/failover when vendor 429s appear, and promote the post-call DAG to Temporal/Inngest or equivalent if Postgres-only workers become the bottleneck. These are documented triggers, not implemented guarantees.
 
@@ -412,7 +414,7 @@ Three environments: **dev** (experiments), **staging** (CI), **production** (cus
 | Observability | Vercel | — | observability-five.vercel.app |
 | Database | Neon | — | Managed PostgreSQL + pgvector (3 branches) |
 
-**CI/CD:** PRs → tests → staging deploy → smoke tests. Push to main → production auto-deploy.
+**CI/CD:** PRs run tests/checks. Staging deploy and smoke tests are push-gated in CI. Push to main triggers the production deploy workflow.
 
 ---
 

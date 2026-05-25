@@ -173,4 +173,4 @@ The Director's ephemeral context injection (via `LLMMessagesAppendFrame`) has no
 
 ---
 
-*Last updated: April 2026 — Gemini Live evaluation, Split Director architecture, ephemeral context, active web_search tool path*
+*Last updated: May 2026 — Gemini Live evaluation, Split Director architecture, ephemeral context, and current subscriber/onboarding tool surfaces*

@@ -72,10 +72,15 @@ The dispatcher reads available capacity from a cross-replica registry before iss
 | `max_calls` | Pipecat `MAX_CALLS` config | per-instance ceiling |
 | `pending_start_count` | active reservations not yet attached to a call | overbook protection |
 | `draining` | `_is_draining()` global | dispatcher excludes the replica |
+| `healthy` | heartbeat publisher health | dispatcher/autoscaler health signal |
+| `ready` | readiness warm-up and health gate | dispatcher excludes unready replicas |
+| `warmup_gate_green` | `services/readiness.py` warm-up gate | autoscaler readiness signal |
+| `db_pool_stats_available` | asyncpg pool inspection | tells operators whether pool stats are present |
+| `db_pool_size` | asyncpg pool stats | DB pressure signal |
 | `db_pool_idle` | `asyncpg` pool stats | back-pressure signal |
 | `circuit_breakers_open` | breaker registry | back-pressure signal |
 
-Publisher: `pipecat/services/capacity.py` writes to `pipecat:instance:{id}` every 5 s with a 15 s TTL. Reader: `services/pipecat-capacity.js` lists all `pipecat:instance:*` heartbeats via Redis (TCP) → Upstash REST → local fallback, drops stale entries, and exposes available slots per instance to the dispatcher.
+Publisher: `pipecat/services/capacity.py` writes to `pipecat:instance:{id}` every 5 s with a 15 s TTL. Reader: `services/pipecat-capacity.js` lists all `pipecat:instance:*` heartbeats via Redis (TCP) or Upstash REST, drops stale entries, and exposes available slots per instance to the dispatcher. There is no local heartbeat-registry fallback; without shared state, the queue code either falls back to configured batch-size capacity or blocks when the registry is required.
 
 **Lease mechanics**: `services/call-queue.js:leaseQueuedCalls` uses `FOR UPDATE SKIP LOCKED` over `call_queue` and writes `(lease_owner, lease_expires_at)`. `reconcileQueueLeases` recovers expired leases and expires overdue queued rows past `latest_at`.
 
@@ -89,19 +94,19 @@ Publisher: `pipecat/services/capacity.py` writes to `pipecat:instance:{id}` ever
 
 **Active files**: `services/post-call-jobs.js`, `scripts/run-post-call-worker-once.js`, `db/migrations/012_post_call_job_state_machine.sql`
 
-Post-call work runs out-of-band so the hang-up critical path stays bounded. Jobs lease via `FOR UPDATE SKIP LOCKED` on `post_call_jobs`, respect the dependency DAG (`depends_on UUID[]` — no job leases while any prerequisite is unfinished), and execute under per-provider semaphores so external rate limits cannot be exceeded by a worker stampede.
+Phase 6 adds a queued path for post-call work, but the active Pipecat runtime still runs the inline chain unless flags later disable it. When `POST_CALL_QUEUE_ENABLED=true`, Pipecat seeds the job DAG early and continues inline processing; `run_bot()` still awaits the post-call task before releasing active-call capacity. Jobs lease via `FOR UPDATE SKIP LOCKED` on `post_call_jobs`, respect the dependency DAG (`depends_on UUID[]` — no job leases while any prerequisite is unfinished), and execute under per-provider semaphores to limit each worker process.
 
-**Provider concurrency caps:** `db=200`, `anthropicHaiku=1`, `geminiFlash=1`, `openAiEmbeddings=1`, `resend=1`. Each post-call job type maps to exactly one provider lane (`analysis → geminiFlash`, `memory_extraction → openAiEmbeddings`, `caregiver_notifications → resend`, etc.), so the entire fleet of workers holds at most N concurrent leases per external dependency regardless of replica count.
+**Provider concurrency caps:** `db=200`, `anthropicHaiku=1`, `geminiFlash=1`, `openAiEmbeddings=1`, `resend=1`. Each post-call job type maps to exactly one provider lane (`analysis → geminiFlash`, `memory_extraction → openAiEmbeddings`, `caregiver_notifications → resend`, etc.). The semaphores are in-process JS objects, so they cap each worker process, not the whole fleet; fleet-wide caps still require operational worker-count control or a future distributed limiter.
 
 **Retry policy:** default `maxAttempts=5` with backoff `[30, 120, 480, 1920]` seconds; `analysis` and `memory_extraction` use a longer schedule (`[60, 300, 1800, 7200]`). After `maxAttempts`, the job is moved to `dead_letter` with a PHI-free reason code; the partial index `idx_post_call_jobs_dead_letter` keeps dead-letter scans cheap.
 
-**Shadow rollout:** `scripts/run-post-call-worker-once.js` defaults to `handler-mode=artifact_verification`, which leases real jobs and computes the would-be output without writing. `--confirm-db-writes` is required to actually mutate the database. Use this mode for Phase 6 backlog-drain and provider-concurrency evidence before committing artifacts.
+**Shadow/evidence runner:** `scripts/run-post-call-worker-once.js` requires `--confirm-db-writes` before it will run. `handler-mode=artifact_verification` validates existing artifacts, but the worker still mutates lease/status rows as part of the job lifecycle. Use this mode for Phase 6 backlog-drain and provider-concurrency evidence only where those DB writes are intentional.
 
 ---
 
 ## Capacity Planning (Phase 8)
 
-**Active files**: `scripts/phase8-capacity-plan.js`, `services/phase8-autoscaler.js`, `services/railway-scaling.js`
+**Active files**: `services/phase8-capacity-plan.js`, `services/phase8-autoscaler.js`, `services/railway-scaling.js`
 
 The Phase 8 planner reads future `call_queue` rows for a window plus live `pipecat:instance:*` heartbeats, and emits a single `recommendation`:
 

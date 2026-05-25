@@ -9,7 +9,7 @@ Primary surfaces (future): `services/call-queue.js` partitioning, Postgres topol
 
 This is a **roadmap, not a plan**. It describes the architectural moves that become necessary somewhere between 10k and 100k daily users, the rough order they become load-bearing, and the design decisions worth making *now* (during the 2k buildout) so we don't paint ourselves into a corner. None of this is committed work. The point is to make the 2k → 10k → 100k path evolutionary, not a rewrite.
 
-The scale-to-2000 plan is the authoritative document for everything happening this quarter. Where this roadmap says "today" it means the state after the 2k plan ships.
+The scale-to-2000 plan is the authoritative document for everything happening this quarter. Where this roadmap says "today" it means the state after the 2k plan ships. Current `zuludev` code still uses flat default-schema queue/job tables; `ops.*`, hash partitioning, region columns, and cross-DB splits below are future targets unless a later migration lands.
 
 ---
 
@@ -87,11 +87,11 @@ At $19/mo, per-user revenue is $228/year. Per-call cost today (rough): Telnyx + 
 
 This is the section the rest of the roadmap hinges on. The DB is the hardest thing to change later, and choices we make at 2k constrain what's cheap at 100k.
 
-### 3.1 Today (post-2k plan)
+### 3.1 Today (current branch and post-2k baseline)
 
 - **One Neon Postgres cluster**, branched for dev/staging/prod.
-- All tables live in `public.*` except for the new `ops.*` schema (queue, attempts, jobs, guards, shadow comparisons) introduced in the 2k plan.
-- Queue tables already `PARTITION BY HASH (senior_id)` — a cheap-now, expensive-later decision the 2k plan got right.
+- Current runtime migrations create flat default-schema operational tables: `call_queue`, `call_attempts`, `post_call_jobs`, `outbound_call_guards`, `scheduler_shadow_comparisons`, and Node-owned `canary_cohort_membership`.
+- The `ops.*` schema and hash partitions are forward targets from the 2k plan, not current branch implementation.
 - Connection pooling via PgBouncer / Neon's pooler.
 - pgvector for memory embeddings, in-DB.
 
@@ -104,7 +104,7 @@ Sharding by `senior_id` is intuitive (each user is independent), but it's also t
 | Access pattern | Examples | Move to |
 | --- | --- | --- |
 | **Hot transactional, user-scoped** | `seniors`, `caregivers`, `reminders`, `daily_call_context` | Stay in primary Postgres |
-| **Hot transactional, ops-scoped** | `ops.call_queue`, `ops.call_attempts`, `ops.post_call_jobs`, `ops.outbound_call_guards` | Dedicated **ops** Postgres (own cluster) |
+| **Hot transactional, ops-scoped** | current flat `call_queue`, `call_attempts`, `post_call_jobs`, `outbound_call_guards`; future `ops.*` equivalents | Dedicated **ops** Postgres (own cluster) |
 | **Append-only, high volume** | `conversations` (turn transcripts), `call_analyses`, audit logs | Dedicated **journal** store — Postgres logical replica, ClickHouse, or BigQuery |
 | **Vector search** | `memories` pgvector embeddings | Dedicated vector DB (Pinecone, Weaviate, or pgvector on its own cluster) at ~1M+ vectors |
 | **Long-cold archive** | Conversations >90 days, retired senior data | Object storage (S3) with metadata pointers |
@@ -118,17 +118,17 @@ The cost: cross-store consistency. We need application-level logic (or a workflo
 **Phase A (today through ~5k users): tune the single cluster.**
 
 - Stay on one Neon Postgres.
-- Verify `ops.*` schema works as the seam — all dispatcher queries hit `ops.*`, no app-level reads of `ops.*` outside the dispatcher service.
+- Verify the repository/module boundary works as the seam — today that is unqualified queue tables in `services/call-queue.js`; if `ops.*` lands, all dispatcher queries should move there without scattering SQL across services.
 - Read replicas for analytics queries (admin dashboards, daily reports).
-- Aggressive `VACUUM` and partition maintenance on `ops.call_queue` and `ops.call_attempts`.
+- Aggressive `VACUUM` and index maintenance on `call_queue` and `call_attempts`; partition maintenance begins only after partitioned tables land.
 - pgvector stays in-DB; index type stays `hnsw`.
 
 **Acceptance for leaving Phase A:** p95 query latency on the dispatcher's dequeue stays under 50ms at peak. If it doesn't, Phase B is overdue.
 
 **Phase B (~5k–25k users): split out the operational store.**
 
-- Move `ops.*` to a dedicated Postgres cluster ("donna-ops"). The 2k plan's schema-isolation choice makes this a config change in the dispatcher service, not a query rewrite.
-- Cross-DB foreign keys disappear — `ops.call_queue.senior_id` is just a UUID, not enforced FK. Application logic (dispatcher service) is the boundary.
+- Move operational queue/job/attempt/guard tables to a dedicated Postgres cluster ("donna-ops"). If `ops.*` has not already landed, this requires an online migration from the current flat tables.
+- Cross-DB foreign keys disappear — the operational `call_queue.senior_id` is just a UUID, not an enforced FK. Application logic (dispatcher service) is the boundary.
 - Audit logs move to the journal store (Postgres logical replica first, ClickHouse later if cardinality warrants it).
 - Read replica for admin/caregiver-facing reads to take pressure off primary.
 
@@ -162,12 +162,12 @@ Likely shape if/when needed:
 
 These cost almost nothing now and pay off enormously:
 
-- **Application queries hit `ops.*` via a single repository module**, not scattered across services. If/when the ops DB splits out, only that module changes. (`services/call-queue.js` is already shaping up this way.)
-- **No FKs cross the `public.* / ops.*` boundary.** Already enforced by the 2k plan's schema choices.
+- **Application queries hit operational queue tables through a single repository/module boundary**, not scattered across services. If/when `ops.*` or a separate ops DB lands, only that boundary changes. (`services/call-queue.js` is already shaping up this way.)
+- **No new FKs should cross the future `public.* / ops.*` boundary.** Current migrations still use default-schema FKs, so removing cross-boundary FKs is future online migration work.
 - **Every senior-scoped write includes `senior_id` in the row**, even when redundant. Sharding later requires this; backfilling it is painful.
 - **Audit logs are insert-only and never queried in the hot path.** Already true. Keep it that way — no triggers that read audit on write.
 - **Memory embeddings are queried by `senior_id + similarity`, never global similarity.** Already true. This makes per-tenant sharding of the vector store trivial later.
-- **Region column on every operationally relevant table.** Already in `call_attempts`. Add to `call_queue`, `post_call_jobs`, and future cross-cluster-replicated tables. Default `'us-east-1'` is fine.
+- **Region column on every operationally relevant table.** This is not current runtime schema. Add it to `call_attempts`, `call_queue`, `post_call_jobs`, and future cross-cluster-replicated tables when multi-region routing becomes real. Default `'us-east-1'` is fine for the first migration.
 - **Don't add cross-table joins that the dispatcher needs.** The dispatcher should be able to operate with only `ops.*` knowledge. Today it joins to `seniors` for some queries — that's a future migration cost worth paying down opportunistically.
 
 ### 3.5 What we're explicitly *not* deciding now
@@ -182,13 +182,13 @@ These cost almost nothing now and pay off enormously:
 
 ### 4.1 Today
 
-`ops.call_queue` is already partitioned `BY HASH (senior_id)` per the 2k plan. The dispatcher leases with `FOR UPDATE SKIP LOCKED`. At ~5 dispatches/sec this is fine.
+Current `call_queue` is a flat default-schema table. The dispatcher leases with `FOR UPDATE SKIP LOCKED` and uses status/lane/time indexes. At ~5 dispatches/sec this is fine for the 2k target, but `ops.call_queue PARTITION BY HASH (senior_id)` remains a future migration target.
 
 ### 4.2 At 100k
 
 200+ dispatches/sec on a single logical queue starts to cause lock contention even with `SKIP LOCKED`. Two paths:
 
-**Path 1: Worker-affinity to hash partitions.** Each dispatcher worker leases only from N partitions (e.g., partition `i` if `worker_id % N == i % N`). No worker ever contends with another for the same partition. Cheap to implement on top of existing partitioning, no infra change.
+**Path 1: Worker-affinity to hash partitions.** First add hash partitions, then have each dispatcher worker lease only from N partitions (e.g., partition `i` if `worker_id % N == i % N`). No worker ever contends with another for the same partition. This is an online schema+dispatcher migration, not an already available switch.
 
 **Path 2: Move to a broker.** Vercel Queues, Kafka, or Redis Streams with consumer groups. The broker handles fan-out; Postgres becomes the durable record of truth but not the lease point.
 
@@ -305,7 +305,7 @@ This is the order things become load-bearing, not a committed schedule. Each ste
 | --- | --- | --- | --- |
 | Today | 0–2k | 2k plan executes | Single Neon |
 | Near (post-2k) | 2k–5k | Provider router (Layer 1) | Read replicas |
-| Mid | 5k–25k | Worker-affinity queue partitions; provider fallback (Layer 2) | Phase B: split `ops.*` |
+| Mid | 5k–25k | Add/activate worker-affinity queue partitions; provider fallback (Layer 2) | Phase B: split operational tables into `ops.*`/ops DB |
 | Mid-late | 25k–60k | Multi-region Pipecat; AI Gateway adoption | Phase C: vector + journal split |
 | Late | 60k–100k | Per-region capacity orchestration; advanced cost routing | Phase D: tenant sharding (only if measured ceiling demands it) |
 

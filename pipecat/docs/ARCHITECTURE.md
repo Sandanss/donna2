@@ -47,7 +47,7 @@ Telnyx Audio ──► FastAPIWebsocketTransport
               │   Quick Observer     │  Layer 1: Instant regex (0ms)
               │   (BLOCKING)         │  → patterns: health, goodbye,
               │   (regex patterns)   │    emotion, cognitive, activity
-              │                      │  → Injects guidance for THIS turn
+              │                      │  → Stashes guidance for Director
               │   Goodbye detected → │  → EndFrame after configurable delay
               └─────────┬───────────┘
                         │
@@ -82,7 +82,7 @@ Telnyx Audio ──► FastAPIWebsocketTransport
                         ▼
               ┌─────────────────────┐
               │   Anthropic LLM      │  Claude Haiku 4.5 (streaming)
-              │   + Flow Manager     │  2 tools, conditional reminder + main/wind-down/closing
+              │   + Flow Manager     │  3 subscriber tools, conditional reminder + main/wind-down/closing
               └─────────┬───────────┘
                         │ TextFrame
                         ▼
@@ -119,7 +119,7 @@ Telnyx Audio ──► FastAPIWebsocketTransport
 
 The pipeline processors don't call each other directly. They communicate through two mechanisms:
 
-1. **Frame injection** — Quick Observer and Conversation Director inject guidance into the LLM context by pushing `LLMMessagesAppendFrame` frames. These get appended to Claude's message history before it generates a response, but they don't trigger an LLM call on their own (`run_llm=False`). The next `TranscriptionFrame` reaching the Context Aggregator triggers the actual LLM call, at which point all injected guidance is already in context.
+1. **Frame injection** — Conversation Director injects guidance into the LLM context by pushing `LLMMessagesAppendFrame` frames. Quick Observer is a signal producer only: it stashes `_pending_observer_guidance`, and Director injects it in one canonical place. These frames get appended to Claude's message history before it generates a response, but they don't trigger an LLM call on their own (`run_llm=False`). The next `TranscriptionFrame` reaching the Context Aggregator triggers the actual LLM call, at which point injected guidance is already in context.
 
 2. **Shared `session_state` dict** — A mutable dictionary initialized in `main.py` and passed to every processor. Key shared state:
    - `_transcript` — Rolling conversation history (max 40 turns), written by ConversationTracker after guidance stripping, read by ConversationDirector for its Groq/Gemini analysis
@@ -186,7 +186,7 @@ Instant regex-based analysis across Quick Observer categories:
 | **Factual/Curiosity** | Question patterns ("what year", "how tall") | Direct-answer guidance |
 | **Cognitive** | Confusion, repetition, time disorientation | Cognitive signals |
 
-**Guidance injection**: When patterns match, Quick Observer builds a guidance string (e.g., `[HEALTH] They mentioned pain. Ask how they are feeling.`) and pushes it as an `LLMMessagesAppendFrame` with `run_llm=False`. This appends a user-role message to Claude's context before the next LLM call, steering the response without adding latency.
+**Guidance handoff**: When patterns match, Quick Observer builds a guidance string (e.g., `[HEALTH] They mentioned pain. Ask how they are feeling.`) and stores it in `session_state["_pending_observer_guidance"]`. Conversation Director then injects it as an `LLMMessagesAppendFrame` with `run_llm=False`. This single-writer handoff keeps Observer guidance current-turn without duplicate ephemeral messages.
 
 **Model recommendations**: Quick Observer also generates token budget recommendations based on signal priority (16 ordered rules). Crisis situations get 350 tokens; simple questions get 100. This data is available on the `AnalysisResult` but is not currently consumed by the pipeline — it's designed for future dynamic token routing.
 
@@ -379,9 +379,9 @@ The opening phase is merged into main — the bot starts directly in main (or re
 
 | Phase | Tools |
 |-------|-------|
-| **Reminder** *(conditional)* | `mark_reminder_acknowledged`, `transition_to_main` |
-| **Main** | `web_search`, `mark_reminder_acknowledged`, `transition_to_winding_down` |
-| **Winding Down** | `mark_reminder_acknowledged`, `transition_to_closing` |
+| **Reminder** *(conditional)* | `mark_reminder_acknowledged`, `create_reminder`, `transition_to_main` |
+| **Main** | `web_search`, `mark_reminder_acknowledged`, `create_reminder`, `transition_to_winding_down` |
+| **Winding Down** | `mark_reminder_acknowledged`, `create_reminder`, `transition_to_closing` |
 | **Closing** | *(none — post_action ends call)* |
 
 *Note: Memory and caregiver-note context is prefetched/injected. Web search remains an active Claude tool.*
@@ -402,15 +402,16 @@ The opening phase is merged into main — the bot starts directly in main (or re
 |------|---------|
 | `mark_reminder_acknowledged` | Track reminder delivery with acknowledgment status |
 | `web_search` | Search current information via Tavily first, OpenAI fallback |
+| `create_reminder` | Save a senior-requested reminder after explicit confirmation/readback |
 
 ## Post-Call Processing
 
-When the telephony client disconnects, `run_post_call()` in `services/post_call.py` executes:
+When the telephony client disconnects, `run_post_call()` in `services/post_call.py` executes. If `POST_CALL_QUEUE_ENABLED=true`, Pipecat seeds the `post_call_jobs` graph after conversation completion, but it still continues through the inline chain today. `run_bot()` awaits this post-call task before active-call capacity is released.
 
 1. **Complete conversation** — Updates DB with duration, status, transcript
 2. **Call analysis** — Gemini Flash generates summary, concerns, engagement score (1-10), mood, caregiver takeaways, recommended caregiver action, and follow-up suggestions. The encrypted JSON still includes a legacy `caregiver_sms` key, but SMS delivery is inactive.
 2.5. **Caregiver notes + notifications** — Marks caregiver notes delivered only when assistant transcript evidence shows Donna delivered them. POSTs to Node.js API for call_completed + concern_detected alerts, raising on non-2xx responses and retrying transient failures once. Node sends email/in-app notification records; SMS is inactive.
-3. **Summary persistence** — Writes analysis summary to `conversations.summary` (enables `get_recent_summaries()` and cross-call context)
+3. **Summary persistence** — Writes analysis summary through encrypted summary storage with legacy plaintext read fallback during migration (enables `get_recent_summaries()` and cross-call context)
 3.5. **Interest discovery** — Maps new topics to predefined interest categories and updates `seniors.interests` plus editable `familyInfo.interestDetails`
 3.6. **Interest scores** — Computes engagement scores per interest topic
 4. **Memory extraction** — OpenAI extracts facts/preferences/events from transcript, stores with embeddings
@@ -446,8 +447,9 @@ Three modes, picked at startup:
 ```
 publish_capacity_heartbeat() every 5 s ──► pipecat:instance:{id} hash (TTL 15 s)
    includes: instance_id, active_calls, max_calls, inbound_active_calls,
-             pending_start_count, draining, healthy, db_pool_idle,
-             circuit_breakers_open
+             pending_start_count, draining, healthy, ready,
+             warmup_gate_green, db_pool_stats_available, db_pool_size,
+             db_pool_idle, circuit_breakers_open
 
 list_capacity_instances() (Node side via services/pipecat-capacity.js):
    scans pipecat:instance:* keys
@@ -467,7 +469,7 @@ The heartbeat publisher is started by `start_capacity_heartbeat()` in `main.py`.
 
 ### Dual-path call seeding (`pipecat/api/routes/telnyx.py`)
 
-`TelnyxOutboundCallRequest` accepts optional `queue_id` and `reservation_id` from the dispatcher. Both flow into call metadata so post-call processing and audit trails can attribute the call to the queue path. When the legacy scheduler dials, those fields are absent and the metadata records `architecture=legacy`.
+`TelnyxOutboundCallRequest` accepts optional `queue_id` and `reservation_id` from the dispatcher. Both flow into call metadata so post-call processing and audit trails can attribute the call to the queue path. When the legacy scheduler dials, those fields are absent; Pipecat lifecycle attempt updates are no-ops without `queue_id`.
 
 ### Capacity heartbeat hardening (Phase 8 follow-up)
 
@@ -477,7 +479,7 @@ The Node-side Phase 8 actuator (`services/phase8-autoscaler.js`) reads the same 
 
 ### Post-call queue seam (Phase 6 — gated)
 
-Phase 6 wires the seam to move post-call work onto the Node-managed `post_call_jobs` queue. When `POST_CALL_QUEUE_ENABLED=true`, `services/post_call.py` calls `services/post_call_jobs.maybe_enqueue_post_call_job_graph` after writing the conversation record, and the Node worker (`services/post-call-jobs.js`) leases and runs jobs under per-provider semaphores. The flag is **off by default**: the active runtime still executes the full inline analyzer chain in `services/post_call.py`. Pipecat's responsibility under the new path is limited to writing a clean, deduped seed row per call; the DAG (`metrics_finalize`, `reminder_recovery`, `analysis`, `memory_extraction`, `daily_context`, `caregiver_notifications`, `interest_discovery`, `snapshot_rebuild`) and dead-letter handling live on the Node side. See [`docs/architecture/ARCHITECTURE.md`](../../docs/architecture/ARCHITECTURE.md#post-call-job-workflow-phase-6) for the provider-semaphore and retry-policy contract.
+Phase 6 wires the seam to move post-call work onto the Node-managed `post_call_jobs` queue. When `POST_CALL_QUEUE_ENABLED=true`, `services/post_call.py` calls `services/post_call_jobs.maybe_enqueue_post_call_job_graph` after writing the conversation record, and the Node worker (`services/post-call-jobs.js`) leases and runs jobs under per-process provider semaphores. The flag is **off by default**: the active runtime still executes the full inline analyzer chain in `services/post_call.py`. Even when the graph is seeded, inline work still continues today and `run_bot()` awaits the post-call task before active-call capacity is released. The DAG (`metrics_finalize`, `reminder_recovery`, `analysis`, `memory_extraction`, `daily_context`, `caregiver_notifications`, `interest_discovery`, `snapshot_rebuild`) and dead-letter handling live on the Node side. See [`docs/architecture/ARCHITECTURE.md`](../../docs/architecture/ARCHITECTURE.md#post-call-job-workflow-phase-6) for the provider-semaphore and retry-policy contract.
 
 ## Directory Structure
 
@@ -508,7 +510,7 @@ pipecat/
 │
 ├── flows/
 │   ├── nodes.py                     ← 4 call phase NodeConfigs + system prompts
-│   └── tools.py                     ← LLM tool schemas + async handlers (2 active tools: web_search, mark_reminder_acknowledged)
+│   └── tools.py                     ← LLM tool schemas + async handlers (3 active subscriber tools; onboarding exposes web_search only)
 │
 ├── processors/
 │   ├── patterns.py                  ← Regex pattern data
@@ -737,4 +739,4 @@ RUN_DB_TESTS=1                   # Set to run DB integration tests
 
 ---
 
-*Last updated: April 2026 — current Groq/Gemini Director, memory prefetch, active web_search tool, GrowthBook feature flags, call metrics observability, enhanced health endpoint*
+*Last updated: May 2026 — current Groq/Gemini Director, memory prefetch, active subscriber tool surface, GrowthBook feature flags, call metrics observability, enhanced health/capacity heartbeat, and queue rollout seams*

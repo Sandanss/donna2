@@ -75,7 +75,7 @@ The script:
   - setup success rate per cohort vs floor 0.95
   - duplicate outbound rows per cohort, target 0
   - post-call critical-job completion rate vs floor 0.95
-  - post-call critical-job p95 seconds
+  - post-call critical-job p95 seconds (informational in the current script; only completion rate drives pass/fail)
 - Prints a PHI-free JSON report with a `breaches` list.
 
 Output is aggregate counts and percentiles only. No senior names, phone numbers, transcripts, reminder text, caregiver notes, raw senior IDs, or guard keys appear. Senior IDs can be included as truncated SHA-256 hashes with `--include-senior-id-hashes`.
@@ -169,7 +169,7 @@ This stops the queue dispatcher from issuing new dials; legacy is dial authority
 After Level 2 rollback:
 
 1. Record start and finish timestamps.
-2. Run `npm run phase5:live-ab-report -- --rollback-started-at=<iso> --rollback-completed-at=<iso>` to capture the rollback drain stat.
+2. Run `npm run phase5:live-ab-report -- --test-run-id=<id> --rollback-started-at=<iso> --rollback-completed-at=<iso> --rollback-target-seconds=300` to capture the rollback drain stat.
 3. Page on-call and founder.
 4. Do not re-enable canary mode until root cause is identified.
 

@@ -142,13 +142,13 @@ Current migrations use flat default-schema tables. The `ops.*` schema and partit
 | `shadow_dispatch` | yes | yes | dry-run only | no |
 | `canary_queue` | non-canary only | yes | canary cohort | yes, if allowed |
 | `queue_primary` | no | yes | all eligible rows | yes |
-| `legacy_rollback` | yes | visibility only | no | no |
+| `legacy_rollback` | yes | no by default; existing queue rows retained for analysis | no | no |
 
 `CALL_QUEUE_ALLOW_REAL_DIAL=true` is valid only in `canary_queue` or `queue_primary`.
 
 ### Dial Authority
 
-`outbound_call_guards.guard_key` is the duplicate-call safety primitive. Legacy and queue paths build the same key for a call instance; only the process that wins the guard may dial. The queue path records attempts in `call_attempts` with `architecture='queue'`; legacy attempts use `architecture='legacy'`.
+`outbound_call_guards.guard_key` is the duplicate-call safety primitive. Legacy and queue paths build the same key for a call instance; only the process that wins the guard may dial. Current `call_attempts` writes are queue-dispatch owned; Pipecat lifecycle events update an attempt only when the outbound metadata includes a `queue_id`. The legacy scheduler does not currently persist `architecture='legacy'` attempt rows.
 
 ### Capacity Coordination
 
@@ -157,7 +157,7 @@ Current migrations use flat default-schema tables. The `ops.*` schema and partit
 - `pipecat/services/capacity.py`
 - `services/pipecat-capacity.js`
 - `services/call-queue.js`
-- `scripts/phase8-capacity-plan.js`
+- `services/phase8-capacity-plan.js`
 
 Pipecat publishes PHI-free heartbeats to Redis:
 
@@ -178,6 +178,8 @@ Heartbeat fields include:
 - `circuit_breakers_open`
 
 The dispatcher reads fresh heartbeats, excludes unready/draining replicas, subtracts active calls and pending reservations, applies lane policy, then acquires a short-lived reservation before dialing.
+
+`services/pipecat-capacity.js` supports Redis, Upstash REST, or no shared registry. There is no local heartbeat-registry fallback. If the registry is absent and not required, the queue dispatcher falls back to configured batch-size capacity; if `CALL_QUEUE_REQUIRE_CAPACITY_REGISTRY=true`, missing shared state blocks queue dispatch.
 
 Current queue lane reserves are code-defined in `services/call-queue.js` for:
 
@@ -210,7 +212,7 @@ When `PIPECAT_REQUIRE_REDIS=true`, Pipecat must fail closed if Redis/shared stat
 
 - `pipecat/services/readiness.py`
 - `pipecat/services/capacity.py`
-- `scripts/phase8-capacity-plan.js`
+- `services/phase8-capacity-plan.js`
 - `services/phase8-autoscaler.js`
 - `routes/scale-operations.js`
 
@@ -244,7 +246,7 @@ The active runtime still uses inline post-call work unless `POST_CALL_QUEUE_ENAB
 - `interest_discovery`
 - `snapshot_rebuild`
 
-The Node worker leases jobs with `FOR UPDATE SKIP LOCKED`, honors dependencies, applies provider semaphores, retries with backoff, and moves exhausted jobs to `dead_letter`.
+The Node worker leases jobs with `FOR UPDATE SKIP LOCKED`, honors dependencies, applies in-process provider semaphores, retries with backoff, and moves exhausted jobs to `dead_letter`. Provider limits are per worker process until a distributed limiter or worker-count cap is added.
 
 ### Canary Membership
 
@@ -254,7 +256,7 @@ The Node worker leases jobs with `FOR UPDATE SKIP LOCKED`, honors dependencies, 
 - `routes/canary.js`
 - `db/migrations/013_canary_cohort_membership.sql`
 
-`canary_cohort_membership` is the steady-state source of truth for Phase 7 canary members. `CALL_QUEUE_COHORT_ALLOWLIST` remains an emergency/env fallback. Admin routes expose membership by senior ID and ramp phase only; they do not join names, phone numbers, reminder text, transcripts, or notes.
+`canary_cohort_membership` is the steady-state source of truth for Phase 7 canary members in the integrated scheduler runtime, which merges DB membership with the env allowlist. `CALL_QUEUE_COHORT_ALLOWLIST` remains an emergency/env fallback, and a non-empty env allowlist or nonzero percent is still needed until the standalone dispatcher/config validator becomes DB-aware. Admin routes expose membership by senior ID and ramp phase only; they do not join names, phone numbers, reminder text, transcripts, or notes.
 
 ---
 
@@ -306,7 +308,7 @@ The main discipline for 10k is the same as for 2k: do not count a future design 
 | `services/phase8-autoscaler.js` | Capacity planner actuator and Railway scale wrapper |
 | `routes/scale-operations.js` | Admin capacity planning and override API |
 | `routes/canary.js` | Admin canary membership API |
-| `scripts/phase8-capacity-plan.js` | PHI-free pre-window capacity plan |
+| `services/phase8-capacity-plan.js` | PHI-free pre-window capacity plan |
 | `docs/plans/2026-05-18-scale-to-2000-users-technical-plan.md` | Full 2,000-user plan and 10k path |
 
 ---

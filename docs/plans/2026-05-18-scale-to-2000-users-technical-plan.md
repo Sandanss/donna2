@@ -15,7 +15,7 @@ Rev 2 changes from rev 1:
 - **Document reshaped to four sections.** Goals & constraints, Architecture, Phased implementation with explicit prerequisite gates, Operations. The single source of truth for SLOs, flags, and vendor capacity is a table at the top, not scattered across phases.
 - **Phase 4 (Pipecat hardening) is a HARD prerequisite for Phase 7 (live canary).** Sequence isn't enough; it's a checkbox.
 - **Rollback drills are acceptance criteria, not just triggers.** Each canary phase includes an executed rollback drill with elapsed time recorded.
-- **Implementation bug noted.** Current `db/migrations/009_call_queue_foundation.sql` puts `CREATE INDEX CONCURRENTLY` inside a transactionally-wrapped migration; this will fail at apply time. Phase 1 work item §2 fixes it.
+- **CONCURRENTLY migration bug fixed in current code.** The queue foundation and concurrent index work are now split between `db/migrations/010_call_queue_foundation.sql` and `db/migrations/011_call_queue_concurrent_indexes.sql` (mirrored by Pipecat `023`/`024`). Live apply must still run concurrent-index migrations outside a transaction.
 
 ## Executive Summary
 
@@ -36,7 +36,7 @@ The target is to change from "find due calls and fire them" to "materialize elig
 
 Several schema-level decisions were evaluated for forward compatibility. The current `zuludev` implementation is more conservative than the original rev-2 target (full status in §2.7 Schema Layout And Partitioning):
 
-- Current migrations create `senior_call_schedules`, `call_queue`, `call_attempts`, `post_call_jobs`, `outbound_call_guards`, and `scheduler_shadow_comparisons` in the default application schema, matching the active services and tests.
+- Current migrations create `senior_call_schedules`, `call_queue`, `call_attempts`, `post_call_jobs`, `outbound_call_guards`, `scheduler_shadow_comparisons`, and Node-owned `canary_cohort_membership` in the default application schema, matching the active services and tests.
 - Current queue, attempt, and job tables are not hash-partitioned. They rely on senior/status/lease/dedupe indexes and `FOR UPDATE SKIP LOCKED`; `senior_id` hash partitioning remains a forward-compatible migration decision before higher-volume rollout.
 - Post-call work currently uses `post_call_jobs` as the Postgres metadata/work table behind an opt-in worker. A durable workflow engine (Temporal Cloud or Inngest) remains the recommended production runtime once Phase 0 closes that decision.
 - Current Redis key shapes are single-region: `pipecat:instance:{instance_id}`, `pipecat:reservation:{reservation_id}`, and `pipecat:queue-reservations:{queue_id}`. Region-aware schema and Redis keys remain future multi-region work.
@@ -425,9 +425,9 @@ This section separates the **current branch implementation** from the **forward-
 
 ### Current `zuludev` implementation
 
-Verified against `db/migrations/009_call_queue_foundation.sql`, `pipecat/db/migrations/023_call_queue_foundation.sql`, `services/call-queue.js`, `services/post-call-jobs.js`, and the integration tests:
+Verified against `db/migrations/010_call_queue_foundation.sql`, `db/migrations/011_call_queue_concurrent_indexes.sql`, `db/migrations/012_post_call_job_state_machine.sql`, `db/migrations/013_canary_cohort_membership.sql`, `pipecat/db/migrations/023_call_queue_foundation.sql`, `pipecat/db/migrations/024_call_queue_concurrent_indexes.sql`, `pipecat/db/migrations/025_post_call_job_state_machine.sql`, `services/call-queue.js`, `services/post-call-jobs.js`, and the integration tests:
 
-- `senior_call_schedules`, `call_queue`, `call_attempts`, `post_call_jobs`, `outbound_call_guards`, and `scheduler_shadow_comparisons` are created in the default application schema.
+- `senior_call_schedules`, `call_queue`, `call_attempts`, `post_call_jobs`, `outbound_call_guards`, `scheduler_shadow_comparisons`, and Node-owned `canary_cohort_membership` are created in the default application schema.
 - There is no `ops` schema, `call_control_index` table, `call_attempts.region` column, or `PARTITION BY HASH` declaration in the current migrations.
 - The current uniqueness model is global `dedupe_key`, global `outbound_call_guards.guard_key`, `(queue_id, attempt_number)`, and partial unique `call_attempts.call_control_id` where not null.
 - The current hot-path scaling primitives are indexes on status/lane/time/senior, `FOR UPDATE SKIP LOCKED` leasing, bounded worker batches, Redis capacity reservations, and the durable guard reconciler.
@@ -486,7 +486,7 @@ The rollout is deliberately concurrent, but not double-authoritative. The legacy
 | `shadow_dispatch` | evaluates + dials | materializes + dry-run leases + capacity simulation; no Telnyx calls | legacy | prove leasing, lane policy, capacity inputs, reconciler |
 | `canary_queue` | evaluates + dials for non-canary cohorts | dials only allowlisted/canary cohort | split by cohort, never both | live treatment/control comparison |
 | `queue_primary` | evaluates only if needed for rollback visibility; skips execution | dials all eligible queue rows | queue | production target |
-| `legacy_rollback` | evaluates + dials | dispatcher stopped; queue rows retained for analysis | legacy | emergency rollback |
+| `legacy_rollback` | evaluates + dials | dispatcher stopped; existing queue rows retained for analysis; no new materialization by default | legacy | emergency rollback |
 
 Operational rules:
 
@@ -574,11 +574,11 @@ These artifacts do not satisfy Phase 0 by themselves. They make the Phase 0 evid
 **Work items:**
 
 1. **Schema and migrations.** See §2.7 for current branch status and the forward-compatible target.
-   - Current branch migrations create `senior_call_schedules`, `call_queue`, `call_attempts`, `post_call_jobs`, `outbound_call_guards`, and `scheduler_shadow_comparisons` in the default application schema. Node and Pipecat migration files are intentionally mirrored.
+   - Current branch migrations create `senior_call_schedules`, `call_queue`, `call_attempts`, `post_call_jobs`, `outbound_call_guards`, `scheduler_shadow_comparisons`, and Node-owned `canary_cohort_membership` in the default application schema. Queue/job migrations are mirrored between Node and Pipecat; canary membership is Node-only today.
    - Current branch migrations do **not** create `ops.*`, `call_control_index`, `call_attempts.region`, or hash partitions. Do not mark those items complete until a separate migration/code rewrite lands.
    - Before live Phase 1 apply, record whether we are accepting the current flat-table implementation for the 2,000-user rollout or rewriting the migrations to the `ops.*` / partitioned target before any live data exists.
    - If the flat-table implementation is accepted, the trigger for `ops.*` / partitioning moves to the Phase 0 DB measurements and the §6 operational Postgres split decision.
-2. **Fix: `CREATE INDEX CONCURRENTLY` outside transactional migration files.** Today's `db/migrations/009_call_queue_foundation.sql` puts `CONCURRENTLY` inside a file that the migration runner wraps in `BEGIN/COMMIT`. CONCURRENTLY cannot run inside a transaction; the two `CONCURRENTLY` index statements will fail at apply time. Move them to a separate non-transactional migration step (or to a runtime backfill job).
+2. **Keep `CREATE INDEX CONCURRENTLY` outside transactional migration files.** Current code has already split the concurrent indexes into `db/migrations/011_call_queue_concurrent_indexes.sql` and `pipecat/db/migrations/024_call_queue_concurrent_indexes.sql`. Live apply must run those files in autocommit/outside a transaction; do not run them through a migration runner that wraps files in `BEGIN/COMMIT`.
 3. **`reminder_deliveries.delivery_key` backfill.** Existing rows have no delivery key. Backfill script that derives `delivery_key` from `reminder_id` + normalized `scheduled_for` (using the same tolerance window the current scheduler uses for dedupe). Run on a staging clone first; if any collisions are found, document the collision-resolution policy before applying the unique index in production.
 4. **Migration timing measured on prod-sized clone**, not asserted. Each migration completes within the threshold set in Phase 0 dry-run. Before applying concurrent unique indexes, run an aggregate idempotency preflight that reports duplicate/collision counts only, never raw call SIDs, reminder IDs, delivery keys, names, phone numbers, transcripts, notes, or response bodies.
 5. Idempotency constraints:
@@ -597,15 +597,17 @@ These artifacts do not satisfy Phase 0 by themselves. They make the Phase 0 evid
 - Unit + integration tests cover unique constraints and dedupe behavior.
 - PHI sentinel scan passes against all new tables.
 - Retention / hard-delete / export coverage tested end-to-end on staging clone.
-- Both Node and Pipecat retention loops verified to purge all 5 new tables.
+- Node and Pipecat retention loops verified for mirrored queue/job tables, with Node-only coverage verified for canary cohort membership.
 
 **Phase 1 implementation artifacts on this branch:**
 
 - Migration runbook: `docs/operations/scale-2000-phase1-migration-runbook.md`.
 - Aggregate idempotency preflight: `npm run phase1:preflight-idempotency`.
 - Reminder delivery key backfill: `npm run phase1:backfill-delivery-keys -- --dry-run`, then `--write` only after zero collisions.
-- Transaction-safe foundation migrations: `db/migrations/009_call_queue_foundation.sql` and `pipecat/db/migrations/023_call_queue_foundation.sql`.
-- Non-transactional concurrent index migrations: `db/migrations/010_call_queue_concurrent_indexes.sql` and `pipecat/db/migrations/024_call_queue_concurrent_indexes.sql`.
+- Transaction-safe foundation migrations: `db/migrations/010_call_queue_foundation.sql` and `pipecat/db/migrations/023_call_queue_foundation.sql`.
+- Non-transactional concurrent index migrations: `db/migrations/011_call_queue_concurrent_indexes.sql` and `pipecat/db/migrations/024_call_queue_concurrent_indexes.sql`.
+- Post-call job state migrations: `db/migrations/012_post_call_job_state_machine.sql` and `pipecat/db/migrations/025_post_call_job_state_machine.sql`.
+- Canary cohort membership migration: `db/migrations/013_canary_cohort_membership.sql` (Node-owned; no Pipecat mirror).
 - Gap vs forward target: the current migrations are flat default-schema tables, not `ops.*` and not `PARTITION BY HASH`. That is a documented remaining schema decision, not a completed Phase 1 artifact.
 
 ## Phase 2 — Schedule Normalization and Materializer (~1–2 weeks)
@@ -798,7 +800,7 @@ This phase runs in parallel with Phase 2. It is a hard prerequisite for Phase 7 
 
 - Live A/B and rollback runbook: `docs/operations/scale-2000-phase5-live-ab-runbook.md`.
 - Aggregate drill report: `npm run phase5:live-ab-report -- --test-run-id=<id> --answer-rate-baseline=<phase0-rate>`.
-- Rollback timing report: same command with `--rollback-started-at=<iso> --rollback-completed-at=<iso>`.
+- Rollback timing report: same command with `--test-run-id=<id> --rollback-started-at=<iso> --rollback-completed-at=<iso> --rollback-target-seconds=300`.
 - Report output is PHI-safe aggregate counts only. It verifies duplicate queue attempts, duplicate call-control IDs, duplicate conversation rows, duplicate reminder delivery keys, media-start rate, answer-rate baseline threshold, and rollback drain state.
 - Test coverage: `tests/services/phase5-live-ab-report.test.js`.
 
@@ -842,8 +844,8 @@ Decision belongs to Phase 0 (Open Decisions closed in writing) — choose Tempor
    - Retention policy applies (180d default).
    - Alerts fire if dead-letter rate per job type exceeds threshold.
 5. **Per-provider concurrency caps (tied to Phase 0 vendor inventory).**
-   - Anthropic Haiku post-call analysis: cap at 60% of measured peak TPM from Phase 0.
-   - Gemini Flash analysis fallback: cap at 60% of measured concurrent capacity.
+   - Gemini Flash post-call analysis: cap at 60% of measured concurrent capacity from Phase 0.
+   - Anthropic Haiku only if a future handler config routes post-call analysis back to Anthropic.
    - OpenAI embeddings: cap at 50% of measured RPM.
    - Resend notifications: cap at 50% of measured send rate.
 6. **Stampede test (rev 2 addition).** 600 simultaneous call completions against vendor stubs. Asserts:
@@ -863,9 +865,9 @@ Decision belongs to Phase 0 (Open Decisions closed in writing) — choose Tempor
 
 **Phase 6 implementation artifacts on this branch:**
 
-- Post-call job state migration: `db/migrations/011_post_call_job_state_machine.sql` mirrored by `pipecat/db/migrations/025_post_call_job_state_machine.sql`.
-- Queue primitives and worker executor: `services/post-call-jobs.js` implements dependency-aware enqueue/lease, retry backoff policy, dead-letter propagation, manual replay, provider-cap math, provider semaphores, and one-tick worker execution.
-- Pipecat enqueue wiring: `pipecat/services/post_call.py` calls `pipecat/services/post_call_jobs.py` behind `POST_CALL_QUEUE_ENABLED`; default behavior remains inline post-call processing with no queue rows.
+- Post-call job state migration: `db/migrations/012_post_call_job_state_machine.sql` mirrored by `pipecat/db/migrations/025_post_call_job_state_machine.sql`.
+- Queue primitives and worker executor: `services/post-call-jobs.js` implements dependency-aware enqueue/lease, retry backoff policy, dead-letter propagation, manual replay, provider-cap math, in-process provider semaphores, and one-tick worker execution.
+- Pipecat enqueue wiring: `pipecat/services/post_call.py` calls `pipecat/services/post_call_jobs.py` behind `POST_CALL_QUEUE_ENABLED`; default behavior remains inline post-call processing with no queue rows, and even with the flag enabled the inline chain still runs until the later cutover disables it.
 - Dual-path worker tick: `npm run phase6:post-call-worker-once -- --confirm-db-writes` leases queued jobs through the production workflow handler seam. Default `artifact_verification` mode verifies PHI-free completion artifacts produced by inline Pipecat post-call processing; a real workflow adapter can be injected without changing lease/run/complete semantics. The explicit flag is required because staging currently shares the production Neon database.
 - Admin dead-letter surface: `GET /api/post-call-jobs/dead-letter` and `POST /api/post-call-jobs/:id/replay`; responses omit encrypted payloads and replay writes a PHI-free audit record. `apps/admin-v2/src/pages/PostCallJobs.tsx` renders the dead-letter rows and manual replay action without exposing job payloads.
 - Authorized export coverage: Node export already decrypts `payload_encrypted`; Pipecat export now includes post-call jobs and strips ciphertext after authorized decryption.
@@ -898,8 +900,9 @@ Decision belongs to Phase 0 (Open Decisions closed in writing) — choose Tempor
 
 **Implementation artifacts:**
 
-- `scripts/phase7-canary-report.js` reuses the Phase 5 aggregate report checks and adds Phase 7 allowlist-size, 7-day SLO streak, PHI sentinel, incident, and rollback gates.
-- `npm run phase7:canary-report` is the daily canary reporting entry point.
+- `scripts/phase7-canary-daily-report.js` is the daily SLO report. It enforces setup success, duplicate rows, and post-call completion rate; current post-call critical-job p95 is informational.
+- `scripts/phase7-canary-report.js` reuses the Phase 5 aggregate report checks and adds Phase 7 allowlist-size, 7-day SLO streak, PHI sentinel, incident, and rollback gates for exit evidence.
+- `npm run phase7:canary-daily-report` is the daily canary reporting entry point; `npm run phase7:canary-report` is the aggregate exit report.
 - `docs/operations/scale-2000-phase7-canary-runbook.md` records the 5 → 10 → 25 allowlist progression and hold/rollback criteria.
 
 **Exit criteria:**
@@ -924,7 +927,7 @@ Decision belongs to Phase 0 (Open Decisions closed in writing) — choose Tempor
 
 **Implementation artifacts:**
 
-- `scripts/phase8-capacity-plan.js` reads future `call_queue` demand by lane/status, Pipecat readiness heartbeats, and critical post-call backlog counts, then emits a PHI-free scale recommendation.
+- `services/phase8-capacity-plan.js` reads future `call_queue` demand by lane/status, Pipecat readiness heartbeats, and critical post-call backlog counts, then emits a PHI-free scale recommendation.
 - `npm run phase8:capacity-plan` is the operator entry point for pre-window planning and budget checks.
 - `services/phase8-autoscaler.js` and `npm run phase8:autoscaler-once` execute the capacity recommendation through a dry-run-by-default Railway CLI scale actuator. `--confirm-scale` is required before `railway scale` is invoked.
 - `GET /api/scale-operations/phase8/plan`, `POST /api/scale-operations/phase8/autoscale-once`, and `POST /api/scale-operations/phase8/override` expose the same PHI-free plan and guarded operator override path to admins.
@@ -1190,7 +1193,7 @@ Below items move from "open" to "closed by Phase 0 exit." None of them is allowe
 For the engineer or AI agent executing this plan, the build order is:
 
 1. **Phase 0** — measure, decide, contract. Do not skip. Do not partial-skip. Phase 1 cannot start until baselines exist.
-2. **Phase 1** — schema + idempotency + retention parity. Fix the `CONCURRENTLY`-inside-transaction bug in `009_call_queue_foundation.sql` and explicitly record whether live rollout uses the current flat tables or the `ops.*` / partitioned target from §2.7.
+2. **Phase 1** — schema + idempotency + retention parity. Apply the current split migrations (`010` foundation, `011` concurrent indexes, `012` post-call state, `013` canary membership) and explicitly record whether live rollout uses the current flat tables or the `ops.*` / partitioned target from §2.7.
 3. **Phase 2** (parallel with Phase 3) — materializer, shadow-only. DST suite required.
 4. **Phase 3** (parallel with Phase 2) — Pipecat multi-instance hardening, replica readiness gate, Node-side drain, inbound lane wiring.
 5. **Phase 4** — dispatcher, `shadow_dispatch` dry-run first, then `canary_queue` live only for allowlisted cohorts, with service-to-service rate-limit carve-out and senior-delete race recheck.

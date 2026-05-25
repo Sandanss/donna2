@@ -108,8 +108,8 @@ PHI is any individually identifiable health information. In Donna's system, the 
 | Encryption in transit | Implemented | TLS everywhere: Railway (HTTPS), Neon (SSL), Telnyx webhook/media paths, Resend email API, and all AI/vendor API calls over HTTPS/WSS where applicable |
 | Encryption at rest | Partial | Neon PostgreSQL encrypts at rest (AES-256); application-level encryption is implemented for new PHI writes across conversations, memories, analyses, senior profile PHI, reminders, daily context, notifications, waitlist/prospect context, and caregiver notes. Legacy plaintext backfill/nulling must still be run per environment. |
 | Audit logging | Partial | Structured `audit_logs` table plus Node/Pipecat audit services exist for PHI access paths. Coverage should still be verified before production PHI launch. |
-| PII/PHI sanitization in logs | Partial | Sanitizers exist, but the May 5 audit found raw PHI-bearing logs in mobile schedule save and several server/client debug paths. Production PHI launch requires log cleanup and review. |
-| Input validation | Partial | Pydantic/Zod schemas exist for many API inputs, but the May 5 audit found gaps including raw memory search query validation/clamping and public waitlist validation/rate limiting. |
+| PII/PHI sanitization in logs | Partial | Sanitizers exist and Node structured logger metadata is sanitized, but direct `console.*` and Python `loguru` paths still require review. Production PHI launch requires log cleanup and Railway/Sentry review. |
+| Input validation | Partial | Pydantic/Zod schemas exist for many API inputs. Memory search now validates/clamps query parameters and minimizes audit metadata, but route-level validation coverage still needs periodic review. |
 | Rate limiting | Implemented | 5-tier rate limiting on all API endpoints |
 | Security headers | Implemented | HSTS, X-Frame-Options, CSP-adjacent headers |
 | Telnyx webhook validation | Implemented | Ed25519 Telnyx signature verification on `/telnyx/events`, plus single-use `ws_token` validation for Telnyx media WebSocket startup |
@@ -125,10 +125,10 @@ PHI is any individually identifiable health information. In Donna's system, the 
 | Resend BAA/minimized email path | Not verified | CRITICAL | Low/Medium (vendor/legal decision plus email minimization if needed) |
 | Complete application-level encryption of PHI | Partial | HIGH | Low/Medium (new writes are covered; run SQL migration plus encrypted backfill/nulling in every deployed database, then test exports and calls) |
 | HIPAA audit trail coverage verification | Partial | HIGH | Low/Medium (confirm every PHI read/write path writes `audit_logs`) |
-| Data retention operational verification | Partial | HIGH | Low/Medium (Node owns daily purge; verify per environment and add coverage for inactive reminders, senior profiles, caregiver notes, prospects, legal holds, and idempotency replay rows) |
+| Data retention operational verification | Partial | HIGH | Low/Medium (Node owns the broader daily purge; verify per environment, Pipecat parity, legal holds, senior profile deletion, converted-onboarding residue, and idempotency replay rows) |
 | Client-side plaintext onboarding storage | Not remediated | HIGH | Medium (remove credentials/PHI from website `localStorage` or replace with encrypted/minimized short-lived storage) |
 | Test/prod API separation | Not verified | HIGH | Low/Medium (remove hardcoded production Railway URLs from website/consumer E2E clients) |
-| Token revocation fail-closed behavior | Gap found | HIGH | Low/Medium (revocation should not fail open on storage errors) |
+| Token revocation fail-closed behavior | Mostly implemented | MEDIUM | Low (production fails closed when revocation state is unavailable; non-production keeps compatibility fallback, so tests/runbooks must preserve that split) |
 | Formal risk assessment | Not performed | HIGH | Medium (documented risk analysis per 45 CFR 164.308(a)(1)) |
 | Workforce training | Not performed | MEDIUM | Low (document policies, train team) |
 | Breach notification tabletop/testing | Documented, not tested | HIGH | Low (see [Breach Notification](BREACH_NOTIFICATION.md)) |
@@ -258,8 +258,8 @@ A formal risk assessment per 45 CFR 164.308(a)(1)(ii)(A) has not yet been conduc
 | Audit trail coverage not fully verified | High | Medium | **HIGH** | Verify audit logging coverage and harden append-only controls |
 | Conversation data in 12+ vendor systems | High | High | **CRITICAL** | Minimize data sent to vendors, sign BAAs, evaluate vendor alternatives |
 | Website onboarding PHI/credentials in plaintext localStorage | High | High | **HIGH** | Remove credentials/PHI from client storage; use minimized server-side or encrypted short-lived state |
-| Test/prod contamination from hardcoded production API URLs | Medium | High | **HIGH** | Remove production Railway URL defaults from tests and local clients |
-| Raw PHI in debug logs | Medium | High | **HIGH** | Sanitize/remove schedule, onboarding, caregiver, news, cache, and memory query logs |
+| Test/prod contamination from hardcoded production API URLs | Medium | High | **HIGH** | Keep tests and local clients on mocks or non-production endpoints by default |
+| Raw PHI in debug logs | Medium | High | **HIGH** | Sanitize/remove schedule, onboarding, caregiver, news, cache, prompt, transcript, WebSocket token, and memory query logs |
 | Developer access to production data | Medium | Medium | **MEDIUM** | Synthetic data for dev, restrict production access |
 | Data retention purge not yet operationally verified in every environment | High | Medium | **HIGH** | Verify the Node-owned daily purge and document purge history (see [Data Retention](DATA_RETENTION_POLICY.md)) |
 | Breach notification procedures not drilled | Medium | High | **HIGH** | Run tabletop exercises and update [Breach Notification](BREACH_NOTIFICATION.md) from findings |
@@ -275,14 +275,14 @@ A formal risk assessment per 45 CFR 164.308(a)(1)(ii)(A) has not yet been conduc
 1. **Sign BAAs with tier-1 vendors** (Telnyx, Anthropic, Neon, Deepgram, Google, OpenAI, Sentry, and Resend if email carries PHI) -- these all offer, advertise, or require verification of BAA paths on business/enterprise plans. Keep Twilio out of active PHI flows while SMS remains disabled.
 2. **Designate a HIPAA Security Officer** (can be a co-founder initially).
 3. **Document breach notification procedures** -- see [Breach Notification](BREACH_NOTIFICATION.md).
-4. **Verify HIPAA audit logging coverage** across Node and Pipecat routes (`audit_logs` table exists; confirm every PHI access path writes an audit event).
+4. **Verify HIPAA audit logging coverage** across Node and Pipecat routes (`audit_logs` table exists; confirm every PHI access path writes an audit event, and document which latency-sensitive paths are best-effort).
 5. **Verify Clerk JWKS env configuration** in every deployment. `pipecat/api/middleware/auth.py` now verifies Clerk JWT signatures, but it rejects Clerk tokens if JWKS cannot be derived from env.
 6. **Remove high-risk client/log exposures** from website onboarding storage, mobile schedule logging, and server/client debug logs before PHI launch.
 
 ### Phase 2: Data Protection (Weeks 5-8) -- HIGH
 
 7. **Complete field-level encryption rollout** for PHI columns by running the migration/backfill/nulling sequence in every environment and verifying encrypted export/read behavior.
-8. **Implement data retention policies** with automated purge jobs -- see [Data Retention](DATA_RETENTION_POLICY.md).
+8. **Operationally verify data retention policies** with automated purge jobs and durable evidence where required -- see [Data Retention](DATA_RETENTION_POLICY.md).
 9. **Evaluate and replace non-compliant vendors** (Groq, Cartesia, Tavily; Cerebras is legacy/not active in current Director code) -- see [Vendor Security](VENDOR_SECURITY_EVALUATION.md).
 10. **Restrict developer access to production data** -- synthetic data for dev/staging environments.
 

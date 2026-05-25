@@ -54,6 +54,7 @@ tests/e2e/
 ├── consumer/                           # Legacy test directory name; targets apps/website
 │   ├── landing.spec.ts              # Landing page, FAQ
 │   ├── dashboard.spec.ts            # Protected route redirect tests
+│   ├── security.spec.ts             # Signup storage/PHI credential persistence and same-origin waitlist routing
 │   └── authenticated/
 │       ├── dashboard.spec.ts        # Dashboard access, nav, sign out
 │       └── onboarding.spec.ts       # Onboarding flow access

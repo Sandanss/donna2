@@ -42,7 +42,7 @@ Telnyx L16/16k audio ──► FastAPIWebsocketTransport
                         ▼
               ┌─────────────────────┐
               │   Quick Observer     │  Layer 1 (0ms): 250+ regex patterns
-              │   (BLOCKING)         │  Injects guidance via LLMMessagesAppendFrame
+              │   (BLOCKING)         │  Stashes guidance for Director injection
               │                      │  Strong goodbye → guarded EndFrame
               └─────────┬───────────┘
                         ▼
@@ -71,7 +71,7 @@ Telnyx L16/16k audio ──► FastAPIWebsocketTransport
               Context Aggregator (assistant) ← tracks assistant responses
 ```
 
-**Key mechanism**: Both Quick Observer and Director inject guidance into Claude's context via `LLMMessagesAppendFrame(run_llm=False)`. Guidance appears as user-role messages before the next LLM call.
+**Key mechanism**: Quick Observer is no longer an LLM-context writer. It stashes `_pending_observer_guidance`; Conversation Director is the single writer that injects Observer/Director/news guidance into Claude's context via `LLMMessagesAppendFrame(run_llm=False)`. This prevents duplicate ephemeral guidance while keeping the regex path on the current turn.
 
 ### Runtime Audio Profile
 
@@ -96,7 +96,7 @@ The guiding rule is: keep PCM throughout the pipeline and match active Telnyx ca
 ### Layer 1: Quick Observer (`processors/quick_observer.py`)
 - **Latency**: 0ms (blocking, inline)
 - **Method**: 250+ regex patterns across 19 categories (health, goodbye, emotion, cognitive, activity, etc.)
-- **Output**: Injects guidance for the current turn
+- **Output**: Stores guidance for Director to inject on the current turn
 - **Goodbye detection**: Explicit strong goodbye → programmatic EndFrame after the minimum call-age guard and configured delay (bypasses unreliable LLM tool calls)
 
 ### Layer 2: Conversation Director (`processors/conversation_director.py`)
@@ -116,16 +116,17 @@ Conditional reminder, main, winding_down, and closing phases are managed by `Flo
 
 | Phase | Tools Available | Context Strategy | Transition |
 |-------|----------------|-----------------|------------|
-| **Reminder** *(conditional)* | mark_reminder_acknowledged, transition_to_main | APPEND, respond_immediately | After reminders delivered |
-| **Main** | web_search, mark_reminder_acknowledged, transition_to_winding_down | APPEND | Natural wind-down or Director force |
-| **Winding Down** | mark_reminder_acknowledged, transition_to_closing | APPEND | Closing cue or Director force |
+| **Reminder** *(conditional)* | mark_reminder_acknowledged, create_reminder, transition_to_main | APPEND, respond_immediately | After reminders delivered |
+| **Main** | web_search, mark_reminder_acknowledged, create_reminder, transition_to_winding_down | APPEND | Natural wind-down or Director force |
+| **Winding Down** | mark_reminder_acknowledged, create_reminder, transition_to_closing | APPEND | Closing cue or Director force |
 | **Closing** | *(none — post_action: end_conversation)* | APPEND | Auto-end |
 
-### LLM Tools (2 active)
+### LLM Tools (3 active subscriber-call tools)
 1. **web_search** — In-call factual search via Tavily first, OpenAI fallback.
 2. **mark_reminder_acknowledged** — Track reminder delivery status.
+3. **create_reminder** — Save senior-requested reminders after Donna confirms title, date/time, recurrence, and readback.
 
-Retired handlers remain in `pipecat/flows/tools.py` for Gemini/future work, but `make_flows_tools()` exposes only the two active tools above. Memory and caregiver-note context is prefetched/injected instead of exposed as Claude tools.
+Retired handlers remain in `pipecat/flows/tools.py` for Gemini/future work, but `make_flows_tools()` exposes only the three active subscriber-call tools above. Onboarding calls expose `web_search` only. Memory and caregiver-note context is prefetched/injected instead of exposed as Claude tools.
 
 ### Senior Context Assembly
 
@@ -146,7 +147,7 @@ Prompt context events are recorded through `services.context_trace` without logg
 
 ## Post-Call Processing (`services/post_call.py`)
 
-Runs after the telephony WebSocket disconnects, parallelized with `asyncio.gather`:
+Runs after the telephony WebSocket disconnects. If `POST_CALL_QUEUE_ENABLED=true`, Pipecat first seeds the `post_call_jobs` graph, but the current runtime still continues through the inline chain below. `run_bot()` awaits this post-call task before releasing the Pipecat active-call semaphore, so Phase 6 is a migration seam and evidence path, not yet a full capacity release until the inline work is disabled behind flags.
 
 ```
 Step 1: Complete conversation (prerequisite) ───────── sequential
@@ -169,8 +170,8 @@ Donna is rolling the outbound dialer off the in-process Node scheduler onto a du
 
 ```
                        ┌── Legacy plan ────┐
-                       │ services/         │ acquires guard, dials Telnyx,
-  scheduler.js tick ──►│ scheduler.js      │ records call_attempt (architecture=legacy)
+                       │ services/         │ acquires guard, dials through Pipecat
+  scheduler.js tick ──►│ scheduler.js      │ (legacy path does not write call_attempts)
                        │ (in-process)      │
                        └─────────┬─────────┘
                                  │ (in shadow_materialize / shadow_dispatch / canary_queue / queue_primary)
@@ -189,6 +190,8 @@ Donna is rolling the outbound dialer off the in-process Node scheduler onto a du
 
 **Consistency model.** Postgres decides *what* runs (queue rows, leases, guards, attempts, jobs); Redis decides *what is running right now* (capacity heartbeats, dedupe TTLs, rate limits). The dispatcher reads capacity from Redis but only commits dial authority by acquiring a Postgres row.
 
+Manual caregiver/admin calls through Node `routes/calls.js` still call Pipecat `/telnyx/outbound` directly. The `manual` lane exists in queue policy, but manual `/api/call` is not queue-backed in the current runtime.
+
 **Modes (`CALL_ARCHITECTURE_MODE`):**
 
 | Mode | Legacy dials | Queue inserts | Queue dispatches | Real queue dial |
@@ -198,13 +201,13 @@ Donna is rolling the outbound dialer off the in-process Node scheduler onto a du
 | `shadow_dispatch` | yes (guarded) | yes | dry-run lease + comparison | no |
 | `canary_queue` | yes (non-canary, guarded) | yes | leases canary cohort | yes (requires `CALL_QUEUE_ALLOW_REAL_DIAL=true` + cohort selector) |
 | `queue_primary` | no | yes | leases everything | yes |
-| `legacy_rollback` | yes (guarded) | yes (for visibility) | no | no |
+| `legacy_rollback` | yes (guarded) | no by default; existing queue rows retained | no | no |
 
-**Dial-authority guard.** `outbound_call_guards.guard_key` is `INSERT ... ON CONFLICT DO NOTHING`-protected. Both paths build the same guard key from `(callType, seniorId, scheduleOrReminderId, targetAt)` and race for it; the loser suppresses its dial. The transition `active → initiating` happens inside the transaction that issues the Telnyx call, after rechecking senior `is_active` and `deleted_at` (closes the senior-delete race).
+**Dial-authority guard.** `outbound_call_guards.guard_key` is `INSERT ... ON CONFLICT DO NOTHING`-protected. Both paths build the same guard key from `(callType, seniorId, scheduleOrReminderId, targetAt)` and race for it; the loser suppresses its dial. The queue transition can move through `active`, `initiating`, `initiated`, `cancelled`, and `released_expired`; uninitiated guards may be deleted by cleanup. Before dialing, the transaction rechecks that the senior is active and not caregiver-paused. The current `seniors` schema does not have `deleted_at`, so deletion safety is handled by FK/cascade behavior and active-state checks rather than a soft-delete predicate.
 
 **Materializer is canary-blind by design.** All due schedules materialize into `call_queue` regardless of cohort. Canary selection happens at dispatch time via `canaryPercent` + `canarySeniorIds`; the legacy scheduler removes canary seniors from its own plan in `canary_queue` mode so the guard mediates only between cohorts that should converge.
 
-**Capacity coordination.** `pipecat/services/capacity.py` publishes per-replica heartbeats every 5s to `pipecat:instance:{id}` with a 15s TTL. `services/pipecat-capacity.js` reads via Redis → Upstash REST → local fallback. The dispatcher computes available slots per instance before issuing leases. Current queue lane reserves are defined in `DEFAULT_LANE_RESERVE_POLICY` for `manual`, `hard_reminder`, `reminder_retry`, `scheduled_checkin`, `welfare`, and `low_priority_retry`; inbound calls are accounted for through the heartbeat's `inbound_active_calls` and total active-capacity subtraction, not as a leased `call_queue` lane.
+**Capacity coordination.** `pipecat/services/capacity.py` publishes per-replica heartbeats every 5s to `pipecat:instance:{id}` with a 15s TTL. `services/pipecat-capacity.js` reads via Redis or Upstash REST. There is no local heartbeat registry fallback; when no shared registry is configured and the registry is not required, queue code falls back to configured batch-size capacity rather than per-replica state. The dispatcher computes available slots per instance before issuing leases when the registry is available. Current queue lane reserves are defined in `DEFAULT_LANE_RESERVE_POLICY` for `manual`, `hard_reminder`, `reminder_retry`, `scheduled_checkin`, `welfare`, and `low_priority_retry`; inbound calls are accounted for through the heartbeat's `inbound_active_calls` and total active-capacity subtraction, not as a leased `call_queue` lane.
 
 **Reconciler.** `reconcileQueueLeases` recovers expired `call_queue` leases and expires overdue queued rows past `latest_at`. The Phase 4 guard reconciler (PR #261) releases stale `outbound_call_guards` past `expires_at` so the queue side does not stay blocked when a legacy dial process dies mid-flight.
 
@@ -229,7 +232,7 @@ Phase 6 lands the infrastructure for moving post-call work (analysis, memory ext
 | `interest_discovery` | `memory_extraction` | `openAiEmbeddings` |
 | `snapshot_rebuild` | `memory_extraction`, `daily_context` | `db` |
 
-**Provider semaphores (`DEFAULT_PROVIDER_LIMITS`):** `db=200`, `anthropicHaiku=1`, `geminiFlash=1`, `openAiEmbeddings=1`, `resend=1`. The worker holds at most N concurrent jobs per provider key, regardless of total worker concurrency. Limits can be overridden per process via `--{db,gemini-flash,openai-embeddings,resend}-concurrency` on `scripts/run-post-call-worker-once.js`.
+**Provider semaphores (`DEFAULT_PROVIDER_LIMITS`):** `db=200`, `anthropicHaiku=1`, `geminiFlash=1`, `openAiEmbeddings=1`, `resend=1`. These are in-process semaphores, so they cap concurrency per worker process, not globally across a fleet. Limits can be overridden per process via `--{db,gemini-flash,openai-embeddings,resend}-concurrency` on `scripts/run-post-call-worker-once.js`.
 
 **Retry policy (`POST_CALL_RETRY_POLICIES`):** default is 5 attempts with backoff `[30, 120, 480, 1920]` seconds. `analysis` and `memory_extraction` use longer per-type backoff. After `max_attempts`, the job moves to `dead_letter` with a PHI-free `dead_letter_reason`.
 
@@ -237,19 +240,19 @@ Phase 6 lands the infrastructure for moving post-call work (analysis, memory ext
 - `GET /api/post-call-jobs/dead-letter` — list dead-lettered jobs (aggregate only).
 - `POST /api/post-call-jobs/:id/replay` — requeue a single dead-lettered job after operator review.
 
-The shadow worker (`scripts/run-post-call-worker-once.js`) defaults to `handler-mode=artifact_verification` — it leases real jobs but only writes when `--confirm-db-writes` is passed. Use this mode for Phase 6 backlog-drain and provider-concurrency evidence before committing artifacts.
+The worker (`scripts/run-post-call-worker-once.js`) refuses to run without `--confirm-db-writes`. In `handler-mode=artifact_verification`, it validates existing artifacts while still mutating lease/status rows as part of the worker transaction; it is not a non-writing dry run. Use it for Phase 6 backlog-drain and provider-concurrency evidence only on an environment where those DB writes are intentional.
 
 ---
 
 ## Capacity Planning & Autoscaling (Phases 7-8)
 
-**Active files**: `scripts/phase8-capacity-plan.js`, `services/phase8-autoscaler.js`, `services/railway-scaling.js`, `routes/scale-operations.js`, `services/canary-cohort.js`, `routes/canary.js`, `scripts/phase7-canary-report.js`, `scripts/phase5-live-ab-report.js`
+**Active files**: `services/phase8-capacity-plan.js`, `services/phase8-autoscaler.js`, `services/railway-scaling.js`, `routes/scale-operations.js`, `services/canary-cohort.js`, `routes/canary.js`, `scripts/phase7-canary-daily-report.js`, `scripts/phase7-canary-rollback-check.js`, `scripts/phase7-canary-report.js`, `scripts/phase5-live-ab-report.js`
 
 Phase 7 wraps the live canary in a daily report; Phase 8 turns Pipecat replica capacity into an actuated, budget-bounded decision.
 
-**Phase 5/7 reports (PHI-free aggregates):** `scripts/phase5-live-ab-report.js` checks for duplicate outbound calls, duplicate conversations, reminder-delivery duplicates, cohort drift, caller-ID answer rate, media-start rate, and rollback timing. `scripts/phase7-canary-report.js` reuses those and adds allowlist size, 7-day continuous canary SLO, `phi_sentinel_clear`, and `no_p0_p1_incidents`. All outputs are counts/rates only — no senior IDs, phone numbers, transcripts, or reminder text.
+**Phase 5/7 reports (PHI-free aggregates):** `scripts/phase5-live-ab-report.js` checks for duplicate outbound calls, duplicate conversations, reminder-delivery duplicates, cohort drift, caller-ID answer rate, media-start rate, and rollback timing. `scripts/phase7-canary-daily-report.js` is the daily SLO report; `scripts/phase7-canary-report.js` is the aggregate exit report that reuses Phase 5 and adds allowlist size, 7-day continuous canary SLO, `phi_sentinel_clear`, and `no_p0_p1_incidents`. All outputs are counts/rates only — no senior IDs, phone numbers, transcripts, or reminder text.
 
-**Phase 8 capacity plan (`scripts/phase8-capacity-plan.js`).** Reads future `call_queue` rows for a window and live `pipecat:instance:*` heartbeats. Returns `recommendation.action ∈ {scale_up, hold, scale_down, wait_for_readiness}` plus `targetReplicas` and a list of named `checks`. The `hourly_cost_budget` check uses `cost-per-replica-hour × targetReplicas` against `hourly-budget`.
+**Phase 8 capacity plan (`services/phase8-capacity-plan.js`).** Reads future `call_queue` rows for a window and live `pipecat:instance:*` heartbeats. Returns `recommendation.action ∈ {scale_up, hold, scale_down, wait_for_readiness}` plus `targetReplicas` and a list of named `checks`. The `hourly_cost_budget` check uses `cost-per-replica-hour × targetReplicas` against `hourly-budget`.
 
 **Phase 8 autoscaler (`services/phase8-autoscaler.js`).** Wraps the planner and only applies a `scale_up` recommendation when `hourly_cost_budget` is not `failed`. Actuation goes through `services/railway-scaling.js`, which shells `railway scale REGION=REPLICAS --service <s> --environment <e> --json`. Defaults are safety-first: `PHASE8_AUTOSCALER_DRY_RUN=true` and `PHASE8_AUTOSCALER_CONFIRM_SCALE=false` mean the long-running loop is off in production until explicitly enabled. Every actuation writes an audit row with reason code `operator_override:<sanitized>` or the recommendation's reason.
 
@@ -285,11 +288,11 @@ Phase 7 wraps the live canary in a daily report; Phase 8 turns Pipecat replica c
 | `audit_logs` | HIPAA audit events | user_id, action, resource_type, created_at |
 | `prospects` | Onboarding callers (not yet seniors) | phone |
 | `senior_call_schedules` | Normalized recurring/one-time call schedules (Phase 1 of queue rollout) | senior_id, next_run_at |
-| `call_queue` | Durable outbound dispatch queue with `FOR UPDATE SKIP LOCKED` leasing | unique `dedupe_key`, `(status, priority DESC, run_after)` |
+| `call_queue` | Durable outbound dispatch queue with `FOR UPDATE SKIP LOCKED` leasing | unique `dedupe_key`, ready lease index on `(status, priority_lane, earliest_at)` |
 | `call_attempts` | Per-dispatch attempt audit trail with architecture/cohort/test_run_id | `(queue_id, attempt_number)` unique, `call_control_id` unique where not null |
-| `post_call_jobs` | Queued post-call work with attempt counts, leases, dependency DAG (`depends_on UUID[]`), and dead-letter terminal state (`dead_lettered_at`, `dead_letter_reason`) | `dedupe_key` unique, `(status, priority DESC, run_after)`, GIN on `depends_on`, partial index on `dead_lettered_at` where `status='dead_letter'` |
+| `post_call_jobs` | Queued post-call work with attempt counts, leases, dependency DAG (`depends_on UUID[]`), and dead-letter terminal state (`dead_lettered_at`, `dead_letter_reason`) | `dedupe_key` unique, lease/status priority indexes, GIN on `depends_on`, partial index on `dead_lettered_at` where `status='dead_letter'` |
 | `outbound_call_guards` | **Dial-authority guard** shared by legacy + queue paths; only one path may dial per `guard_key` | unique `guard_key`, status `active → initiating → completed/cancelled` |
-| `scheduler_shadow_comparisons` | Side-by-side legacy/queue decision audit during shadow rollout | senior_id, decided_at |
+| `scheduler_shadow_comparisons` | Side-by-side legacy/queue decision audit during shadow rollout | senior_id, created_at |
 | `canary_cohort_membership` | Source of truth for active Phase 7 queue canary members; env allowlist is emergency fallback | partial unique active senior_id index, ramp_phase, removed_at |
 
 ### Scale Roadmap Beyond 2,000 Users
@@ -342,7 +345,7 @@ pipecat/
 ├── prompts.py                  ← System prompts + phase task instructions
 ├── flows/
 │   ├── nodes.py                ← 4 call phase NodeConfigs
-│   └── tools.py                ← 2 active Claude tools + retired handlers
+│   └── tools.py                ← 3 active subscriber-call Claude tools + retired handlers; onboarding exposes web_search only
 ├── processors/
 │   ├── patterns.py             ← 250+ regex patterns, 19 categories
 │   ├── quick_observer.py       ← Layer 1: regex analysis + goodbye EndFrame

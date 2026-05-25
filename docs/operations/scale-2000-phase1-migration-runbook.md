@@ -32,7 +32,7 @@ Run this first on a production-sized clone, then staging, then production after 
    npm run phase1:backfill-delivery-keys -- --write
    ```
 
-   The command updates a bounded batch. Re-run the dry run and write command until `candidateRows` and `wouldUpdate` are both zero.
+   The command updates a bounded batch (`--limit` defaults to 5000 and is capped at 50000). After each write batch, re-run the **dry run**. Repeat write batches until a dry run reports both `candidateRows=0` and `wouldUpdate=0`; write-mode `wouldUpdate` is always `0` by design.
 
 6. Re-run the aggregate idempotency preflight:
 
@@ -43,6 +43,14 @@ Run this first on a production-sized clone, then staging, then production after 
 7. Apply concurrent idempotency indexes outside a transaction/autocommit:
    - Node path: `db/migrations/011_call_queue_concurrent_indexes.sql`
    - Pipecat/shared path: `pipecat/db/migrations/024_call_queue_concurrent_indexes.sql`
+
+8. Apply Phase 6 post-call job state-machine migrations before post-call queue evidence:
+   - Node path: `db/migrations/012_post_call_job_state_machine.sql`
+   - Pipecat/shared path: `pipecat/db/migrations/025_post_call_job_state_machine.sql`
+
+9. Apply Phase 7 canary membership before canary cohort APIs or `canary_queue` mode:
+   - Node path: `db/migrations/013_canary_cohort_membership.sql`
+   - No Pipecat mirror currently exists; Node owns this table and Pipecat hard-delete parity must be verified separately.
 
 ## Required Timing Record
 
@@ -58,6 +66,8 @@ Record elapsed time on the production-sized clone:
 | idempotency preflight before concurrent indexes | TBD | n/a | TBD |
 | `011_call_queue_concurrent_indexes.sql` | TBD | low | TBD |
 | `024_call_queue_concurrent_indexes.sql` | TBD | low | TBD |
+| `012_post_call_job_state_machine.sql` / `025_post_call_job_state_machine.sql` | TBD | TBD | TBD |
+| `013_canary_cohort_membership.sql` | TBD | TBD | TBD |
 
 ## Safety Notes
 

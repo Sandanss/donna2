@@ -54,16 +54,17 @@ This policy applies to all data stored in:
 
 ### Current Implementation Status
 
-The schedule below is the policy target. The May 5, 2026 static audit found implementation gaps: active Node/Python retention services do not yet cover every policy-scoped PHI class, and legal-hold support is not implemented end to end. Do not claim automated retention compliance until runtime jobs and tests prove coverage for each table and cache listed here.
+The schedule below is the policy target. Current code has materially more retention coverage than the May 5 static audit snapshot, but operational proof is still required per environment before claiming automated retention compliance.
 
-Known gaps to close:
+Current runtime summary:
 
-- Inactive reminder definitions are policy-scoped but not covered by the observed retention implementation.
-- Senior profile purge is policy-scoped but not fully automated.
-- `caregiver_notes` and prospect/onboarding data are PHI-bearing and need retention coverage.
+- The Node retention service covers conversation transcript/summary nulling, old conversation rows, memories, call analyses, daily context, reminder deliveries, inactive reminders, expired one-time reminders, caregiver notes, prospects, waitlist, notifications, idempotency keys, queue tables, audit logs, and legal-hold exclusions where supported.
+- The Pipecat retention service has similar core coverage but is disabled by default and does not currently cover every Node-only table such as idempotency keys or expired one-time reminders.
+- Senior profile purge remains a separate right-to-delete/hard-delete workflow rather than a routine automated retention purge.
 - Legal holds are documented as a requirement, but the required legal-hold table/checks are not complete.
-- Hard delete can leave encrypted idempotency replay rows for up to 24 hours; this is a deletion completeness gap even when payloads are encrypted.
+- Hard delete/account deletion avoids caching deletion responses in the Node idempotency middleware and deletes recent related keys, but residual replay/cache rows must still be verified during deletion drills.
 - Local/shared PHI-bearing call metadata needs TTL cleanup guarantees if terminal Telnyx webhook or WebSocket cleanup is missed.
+- Retention worker audit evidence is currently application logs/counts, not necessarily durable `audit_logs` rows for every purge batch. Treat persistent audit-log evidence as an open requirement if policy requires it.
 
 ### Database Records
 
@@ -80,8 +81,8 @@ Known gaps to close:
 | **Senior medical notes** | `seniors.medical_notes_encrypted`; legacy `medical_notes` fallback | Yes (CRITICAL) | Same as senior profile | Same as senior profile | Cleared when senior is purged |
 | **Senior family/additional profile context** | `seniors.family_info_encrypted`, `additional_info_encrypted`; legacy `family_info` / `additional_info` fallback | Yes (HIGH) | Same as senior profile | Same as senior profile | Cleared when senior is purged |
 | **Caregiver relationships** | `caregivers` | Low | Retained while linked + 90 days after unlinking | Manual unlinking date | Manual review + DELETE row |
-| **Caregiver notes** | `caregiver_notes.content_encrypted`; legacy/plaintext fallback if present | Yes (MEDIUM/HIGH) | Retained while active + 1 year after note deactivation/deletion or senior inactivity | Note status/date or senior inactivity | Automated purge target; current implementation coverage gap |
-| **Prospect/onboarding records** | `prospects.details_encrypted`, onboarding/session state, waitlist payloads where applicable | Possible/Yes | 90 days after abandoned onboarding; 1 year for waitlist unless converted | Created/updated date and conversion status | Automated purge target; current implementation coverage gap for prospects |
+| **Caregiver notes** | `caregiver_notes.content_encrypted`; legacy/plaintext fallback if present | Yes (MEDIUM/HIGH) | Retained while active + 1 year after note deactivation/deletion or senior inactivity | Note status/date or senior inactivity | Node automated purge target; verify Pipecat parity before relying on Python retention |
+| **Prospect/onboarding records** | `prospects.details_encrypted`, onboarding/session state, waitlist payloads where applicable | Possible/Yes | 90 days after abandoned onboarding; 1 year for waitlist unless converted | Created/updated date and conversion status | Node automated purge target for prospects/waitlist; verify converted-onboarding residue during deletion drills |
 | **Caregiver notifications** | `notifications.content_encrypted`, `metadata_encrypted`; legacy content/metadata fallback | Yes (MEDIUM) | 180 days from send date | `notifications.sent_at` | Automated purge job: DELETE row |
 | **Notification preferences** | `notification_preferences` | No | Retained while caregiver exists | Cascade from caregiver deletion | CASCADE DELETE |
 | **Call context snapshot** | `seniors.call_context_snapshot_encrypted`; legacy `call_context_snapshot` fallback | Yes (HIGH) | Overwritten on each call; set to NULL when senior is purged | N/A (ephemeral by design) | Set to NULL on senior purge |
@@ -89,7 +90,7 @@ Known gaps to close:
 | **Admin users** | `admin_users` | No (email/password hash) | Retained while active | Manual deactivation | DELETE row |
 | **Waitlist signups** | `waitlist.payload_encrypted`; legacy contact columns fallback | Possible (name, email, phone) | 1 year from signup | `waitlist.created_at` | Automated purge job: DELETE row |
 | **Audit logs** | `audit_logs` | Yes (references PHI) | **6 years** (HIPAA minimum) | `audit_logs.created_at` | Automated purge job: DELETE row after retention period |
-| **Idempotency replay rows** | Idempotency/replay storage for hard-delete and account operations | Possible/Yes (encrypted response payloads) | 24 hours max, or immediate cleanup on hard delete where feasible | Row creation and related deletion request | Current deletion completeness gap: encrypted replay rows can remain after hard delete until TTL expiry |
+| **Idempotency replay rows** | Idempotency/replay storage for non-delete operations | Possible/Yes (encrypted response payloads) | 24 hours max, or immediate cleanup on hard delete/account delete where feasible | Row creation and related deletion request | Node hard-delete/account-delete skips response caching and deletes recent related keys; verify residual rows during drills |
 
 ### Non-Database Data
 
@@ -147,7 +148,7 @@ Known gaps to close:
 
 - Reminder definitions can contain medication names, routines, schedules, and caregiver-provided context.
 - Policy target: retain active reminders while needed for care continuity, then purge inactive definitions and associated deliveries after the retention window.
-- Current gap: the May 5 audit found inactive reminder definitions are not covered by observed retention services.
+- Current status: Node retention covers inactive reminders and expired one-time reminders; verify Pipecat parity before relying on Python retention in isolation.
 
 ### Audit Logs (6 years)
 
@@ -159,13 +160,13 @@ Known gaps to close:
 - Senior profiles are retained as long as the senior is active (receiving calls).
 - After the last call, a 1-year grace period allows for service resumption without data loss.
 - After 1 year of inactivity, a manual review determines whether to purge or extend (e.g., if a caregiver requests continued retention).
-- Current gap: profile purge is policy-scoped, but runtime automation and legal-hold checks must be verified before claiming coverage.
+- Current status: profile purge is policy-scoped, but routine retention does not automatically delete active senior profiles. Use the hard-delete/account-delete workflow for verified deletion requests and keep legal-hold review in the process.
 
 ### Caregiver Notes And Prospects
 
 - Caregiver notes can include sensitive family, care, schedule, or medical context intended for Donna calls.
 - Prospect/onboarding records can include senior-linked contact details and care context before full account creation.
-- Current gap: these data classes need explicit retention-worker coverage and deletion tests in both Node and Python paths that read/write them.
+- Current status: Node retention covers caregiver notes and prospects, but deletion drills should still verify converted onboarding rows and Python parity where Pipecat-created records are involved.
 
 ---
 
@@ -176,7 +177,7 @@ Known gaps to close:
 Implement a scheduled purge job that runs daily during off-peak hours (e.g., 3:00 AM UTC). The job should:
 
 1. Query for records past their retention period
-2. Log what will be purged (counts, not content) to the audit log
+2. Log what will be purged (counts, not content); if durable compliance evidence is required, persist counts to `audit_logs` rather than only application logs
 3. Execute deletions in batches to avoid database performance impact
 4. Report results (records purged per table)
 
@@ -253,7 +254,7 @@ WHERE created_at < NOW() - INTERVAL '6 years';
 - [ ] Alert if purge job fails or does not run within expected window
 - [ ] Test purge job on dev/staging environments with production data copies
 - [ ] Add purge job to monitoring dashboard
-- [ ] Verify retention coverage for inactive reminders, senior profiles, caregiver notes, prospects, notifications, and idempotency replay rows
+- [ ] Verify retention coverage for inactive reminders, expired one-time reminders, senior profiles, caregiver notes, prospects/onboarding residue, notifications, queue/job tables, and idempotency replay rows
 - [ ] Ensure hard-delete flows remove or expire encrypted replay/cache rows within the deletion SLA
 - [ ] Ensure shared call metadata has TTL cleanup even if terminal webhook/WebSocket cleanup is missed
 

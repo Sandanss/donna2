@@ -1,7 +1,7 @@
 """Quick Observer — Layer 1 (0ms) regex-based analysis as a Pipecat FrameProcessor.
 
 Runs synchronously on each TranscriptionFrame before the LLM processes it.
-Injects guidance via LLMMessagesAppendFrame for the current response.
+Stores guidance for Conversation Director to inject into the current response.
 
 Pattern data lives in processors/patterns.py (268 patterns, 19 categories).
 This file contains only analysis logic and the FrameProcessor wrapper.
@@ -10,7 +10,7 @@ This file contains only analysis logic and the FrameProcessor wrapper.
 import asyncio
 from dataclasses import dataclass, field
 from loguru import logger
-from pipecat.frames.frames import EndFrame, Frame, TranscriptionFrame, LLMMessagesAppendFrame
+from pipecat.frames.frames import EndFrame, Frame, TranscriptionFrame
 from pipecat.processors.frame_processor import FrameProcessor
 
 from processors.patterns import (
@@ -317,7 +317,7 @@ def _build_token_recommendation(r: AnalysisResult) -> dict | None:
 
 class QuickObserverProcessor(FrameProcessor):
     """Pipecat FrameProcessor that runs quick_analyze on each TranscriptionFrame
-    and injects guidance into the LLM context via LLMMessagesAppendFrame.
+    and stashes guidance for Conversation Director to inject in one canonical place.
 
     When a strong goodbye is detected, schedules a forced call end after a delay
     to ensure the call actually terminates (LLM tool calls are unreliable for this).

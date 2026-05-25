@@ -39,6 +39,7 @@
 - English and Spanish are active call languages
 - Spanish calls set Deepgram STT language to `es`, inject a Spanish-only prompt instruction, and use optional Spanish ElevenLabs/Cartesia voice IDs when configured
 - Gemini post-call analysis writes caregiver-facing summaries and concern text in the configured Donna language
+- Mobile onboarding sends `familyInfo.donnaLanguage` and `topicsToAvoid`; the current website onboarding stores language/topics in local state but only submits relation/interest detail payloads to Node, so website parity still needs a small API payload follow-up.
 
 ### Senior Profile Context
 - Donna grounds every call in the senior's local timezone and profile location
@@ -120,6 +121,7 @@
 ### Reminder Delivery
 - Reminders woven naturally into conversation (Director-timed)
 - `mark_reminder_acknowledged` tool tracks senior's response
+- `create_reminder` can save senior-requested reminders during subscribed calls after Donna confirms title, date/time, recurrence, and readback
 - Undelivered reminders retried on next call
 - Caregiver visibility into delivery status
 
@@ -148,14 +150,15 @@
 - Clerk authentication for caregiver web and mobile users
 - Website/caregiver web app at `apps/website/` for public pages, onboarding, and caregiver dashboard access
 - Mobile caregiver app at `apps/mobile/` for iOS/Android dashboard, schedule, reminders, settings, and account management
-- Native iOS Sign in with Apple uses Clerk's `useSignInWithApple()` flow; Google remains browser OAuth
+- Native iOS Sign in with Apple uses `expo-apple-authentication` directly and passes the Apple identity token into Clerk (`oauth_token_apple`); Google remains browser OAuth
 - Fresh mobile onboarding starts from the visible Create Account screen and creates/links the senior through the Node `/api/onboarding` path
 - Mobile sign-in is valid only for Clerk users with an existing Donna profile; no-profile Clerk sessions are treated as incomplete setup and cleaned up through `DELETE /api/caregivers/me/incomplete-account`
 - View call summaries, engagement scores, and concern alerts
+- Website/caregiver APIs also support scheduling-assistant chat (`/api/chat`), batch reminder creation, and account deletion. Mobile adds notification history, mark-read, and Expo push-token registration.
 
 ### Caregiver Notes
-- Caregivers can leave notes for Donna to deliver during calls
-- Caregiver notes are pre-fetched at call start and injected into the system prompt
+- Backend/Pipecat support caregiver notes for Donna to deliver during calls, but current web/mobile clients do not expose a caregiver-note creation flow
+- Caregiver notes are pre-fetched at call start and injected into the system prompt when present
 - Natural delivery ("Oh, by the way, your daughter wanted me to ask about...")
 - Notes marked as delivered with call reference
 
@@ -185,9 +188,9 @@ Runs automatically after every call disconnect:
 
 ## Admin Dashboard
 
-- Senior management (CRUD, language, DOB, rich interests, additional context, topics to avoid, medical notes, timezone)
+- Senior management (CRUD for core profile fields such as name, phone, timezone/location, interests, medical notes, and memory context; richer caregiver settings like language, DOB, interest detail text, and topics to avoid are currently stronger in mobile/web onboarding than in admin)
 - Call history with transcripts and analysis
-- Reminder management (create, edit, schedule)
+- Reminder management (list/create/delete in current admin client; edit/PATCH is not wired in the admin UI)
 - Caregiver management
 - Call analysis viewer (summaries, concerns, engagement scores)
 - Manual call initiation
@@ -201,7 +204,7 @@ Runs automatically after every call disconnect:
 - JWT admin authentication + cofounder API keys
 - Labeled service API key authentication (`DONNA_API_KEYS`; legacy `DONNA_API_KEY` only outside production)
 - Telnyx webhook signature verification plus single-use `ws_token` validation for media WebSockets
-- Rate limiting (slowapi)
+- Rate limiting in both backends (`slowapi` on Pipecat, Express middleware/Redis store on Node)
 - Security headers (HSTS, X-Frame-Options)
 - Pydantic input validation
 - PII-safe logging (phone/name masking)
@@ -215,7 +218,7 @@ Runs automatically after every call disconnect:
 ### Scale Rollout
 - Legacy Node scheduler/dialer remains available as the current/rollback path
 - Queue architecture behind `CALL_ARCHITECTURE_MODE` supports shadow materialization, dry-run dispatch, canary queue dialing, queue-primary dialing, and legacy rollback
-- Durable `call_queue`, `call_attempts`, and `outbound_call_guards` prevent duplicate dialing across legacy and queue paths
+- Durable `call_queue` plus shared `outbound_call_guards` prevent duplicate dialing across legacy and queue paths; `call_attempts` records queue-dispatch attempts and Pipecat lifecycle updates when `queue_id` is present
 - Pipecat capacity heartbeats and queue reservations coordinate outbound dispatch across replicas
 - Phase 7 canary cohort membership is stored in `canary_cohort_membership`, with env allowlist as emergency fallback
 - Phase 8 capacity planner/autoscaler recommends Railway replica changes for known call windows; dry-run by default
@@ -223,7 +226,7 @@ Runs automatically after every call disconnect:
 
 ### Deployment
 - Three environments: dev, staging, production
-- CI/CD: PRs → tests → staging deploy → smoke tests → production
+- CI/CD: PRs run tests/checks; staging deploy and smoke tests are push-gated; production deploys are handled by the main deploy workflow
 - Railway (Pipecat + Node.js), Vercel (frontends)
 - Neon PostgreSQL with branch-per-environment
 

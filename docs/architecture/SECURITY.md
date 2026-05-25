@@ -114,7 +114,7 @@ Five rate limit tiers using `slowapi`, keyed by remote address:
 
 **Storage backend (multi-instance):** When `REDIS_RATE_LIMITS_ENABLED=true`, SlowAPI uses `REDIS_URL` so counters are global across replicas, with `swallow_errors=False` — a Redis outage in scaled mode fails closed (429) rather than silently degrading to per-replica in-memory limits. The Node side uses the equivalent `services/redis-rate-limit-store.js` SlowAPI-compatible store. Without `REDIS_RATE_LIMITS_ENABLED`, both fall back to in-memory storage (each replica counts independently — acceptable for single-instance dev/staging).
 
-**Service-to-service carve-out:** Requests authenticated with the labeled `dispatcher` API key are rate-limited separately from public traffic, far more loosely. Without this carve-out, the dispatcher would throttle itself at the 5/minute call-initiation limit once it crosses 600 dials in 15 minutes from a single replica. This is configured in `pipecat/api/middleware/api_auth.py` and covered by Phase 4 of the scaling rollout (see [plan §3 Phase 4](../plans/2026-05-18-scale-to-2000-users-technical-plan.md)).
+**Service-to-service carve-out:** Requests authenticated with the labeled `dispatcher` API key are rate-limited separately from public traffic, far more loosely. Without this carve-out, the dispatcher would throttle itself at the 5/minute call-initiation limit once it crosses 600 dials in 15 minutes from a single replica. This is configured through `pipecat/api/middleware/auth.py` plus the dispatcher carve-out in `pipecat/api/middleware/rate_limit.py`, and covered by Phase 4 of the scaling rollout (see [plan §3 Phase 4](../plans/2026-05-18-scale-to-2000-users-technical-plan.md)).
 
 ---
 
@@ -158,9 +158,9 @@ Caregiver/admin call initiation does not accept arbitrary client-supplied phone 
 
 ## PII Protection
 
-**File**: `pipecat/lib/sanitize.py`
+**Files**: `pipecat/lib/sanitize.py`, `lib/logger.js`
 
-All log output passes through sanitization:
+Donna has sanitization helpers, but this is not a blanket guarantee that every log line is scrubbed. Node's structured `createLogger()` sanitizes metadata, while direct `console.*` calls and some Python `loguru` error paths can still log raw `str(error)` or caller-provided text if a code path is not careful. Treat production log review as a required deployment check.
 
 | Function | Input | Output |
 |----------|-------|--------|
@@ -168,7 +168,7 @@ All log output passes through sanitization:
 | `mask_name("David Zuluaga")` | Full name | `David Z.` |
 | `truncate("long content", 30)` | Full text | `long content...` (truncated) |
 
-Used across all service modules for Railway log output.
+Use these helpers for Railway/Sentry log output and avoid logging raw transcripts, reminder bodies, medical notes, profile context, caregiver notes, search queries, WebSocket params, or `ws_token` values.
 
 ---
 
@@ -247,7 +247,7 @@ When more than one Pipecat replica runs, in-process state diverges (rate-limit c
 - `pipecat/lib/redis_client.py:require_shared_state()` raises during startup if `PIPECAT_REQUIRE_REDIS=true` and neither `REDIS_URL` nor a working Upstash REST endpoint is available.
 - Upstash REST has a 60 s circuit-breaker: a failed request flips `is_shared=False` until the cooldown elapses, so callers can detect they are running in degraded single-instance mode.
 - Telnyx stream-start dedupe, websocket token consumption, and call-metadata writes use Redis when configured; the local-memory fallback is gated by `shared_state_required()` returning false.
-- `/health` reports `shared_state.ok` and `shared_state.degraded`; readiness is 503 when `ok=False`.
+- `/health` reports shared-state and readiness details. In normal warm-up it can return HTTP 200 with `"ready": false`; the Node dispatcher relies on the capacity heartbeat's `ready` field rather than treating HTTP status alone as lease eligibility. Shared-state failures in required scaled mode still fail closed.
 
 ### Mobile Public Build Environment
 
@@ -288,19 +288,18 @@ The code and schema support encrypted-only new writes, but each deployed databas
 
 Operational lookup/display fields such as senior name, phone, timezone, city/state/ZIP, and interests remain plaintext for now. Treat them as minimized PII/operational data, not as a substitute for the encrypted PHI fields.
 
-### Current Security Gaps From May 5 Audit
+### Current Security Gaps And Operational Caveats
 
-These are known gaps, not implemented safeguards:
+These are the current code/doc gaps to keep visible:
 
-- Website onboarding stores credentials and PHI-bearing onboarding data in plaintext `localStorage` under `donna_onboarding`. This should be removed or replaced with minimized, encrypted, short-lived state.
-- Website and consumer E2E clients contain hardcoded production Railway API URLs in several places. Tests and local clients should default to mocks or non-production endpoints to avoid test/prod contamination.
-- PHI-bearing payloads or raw inputs are still logged in mobile schedule save and debug paths including caregiver, news, context-cache, website intake, and onboarding flows. Production logs must not include schedules, reminders, profile context, memory/search queries, or onboarding payloads.
-- Memory search audit metadata stores raw query text, and `q`/`limit` need validation and clamping. Audit logs are long-lived, so metadata must follow minimum-necessary rules.
-- Notification reads and schedule reads/writes lack audit events. Audit coverage remains partial until these paths are covered and tested.
-- Token revocation fails open on storage errors. High-risk auth/session checks should fail closed when revocation state cannot be checked.
-- WebSocket `ws_token` consumption is not atomic, so concurrent duplicate pipelines may be possible during races.
+- Website onboarding still needs a storage review: any credentials or PHI-bearing onboarding state in browser storage should be removed or minimized into short-lived encrypted/server-side state.
+- Production log hygiene is not guaranteed by a global sanitizer. Node structured logger metadata is sanitized, but direct `console.*` and Python `loguru` calls require review before PHI launch or scale canary promotion.
+- PHI sentinel scans are local/generated-artifact and configured-sentinel checks. They do not prove Railway logs, Sentry events, or database rows are PHI-free unless those sources are explicitly exported/scanned.
+- Audit logging coverage is broad but still needs route-level verification. Latency-sensitive paths may be best-effort; exports should fail closed if audit persistence fails, and hard-delete/account-delete paths have transactional `data_deletion_logs` plus best-effort route audit.
+- Production token revocation now fails closed when revocation state is unavailable; non-production allows compatibility fallback. Keep this distinction in runbooks/tests.
+- WebSocket token consumption and stream-start dedupe use Redis atomic operations when shared state is configured; scaled deployments must keep Redis/shared state required so they do not fall back to local locks.
 - Gemini Live remains an evaluation path unless it gains equivalent Quick Observer, Director, ephemeral stripping, and programmatic goodbye safeguards.
-- Hard delete can leave encrypted idempotency replay rows for up to 24 hours. This is a deletion completeness gap even though replay payloads are encrypted.
+- Hard delete/account deletion should be verified against idempotency/replay rows, prospect/onboarding rows, canary membership, and mirrored Node/Pipecat deletion paths. Node deletes canary membership; Pipecat hard delete currently does not.
 
 ---
 

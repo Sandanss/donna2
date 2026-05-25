@@ -20,11 +20,11 @@ Avoid hardcoding test counts in docs. The test inventory changes frequently; use
 ### Quick Start
 
 ```bash
-# Run all unit tests (no API keys needed)
-cd pipecat && uv run python -m pytest tests/ -m "not integration and not llm" -q
+# Run default Python tests (no API keys needed; excludes integration/LLM/simulation)
+cd pipecat && uv run python -m pytest tests/ -m "not integration and not llm and not llm_simulation" -q
 
 # Run with coverage
-cd pipecat && uv run python -m pytest tests/ -m "not integration and not llm" --cov=. --cov-report=term-missing
+cd pipecat && uv run python -m pytest tests/ -m "not integration and not llm and not llm_simulation" --cov=. --cov-report=term-missing
 
 # Run specific test markers
 cd pipecat && uv run python -m pytest tests/ -m regression -q
@@ -44,7 +44,7 @@ cd apps/mobile && npm run verify:assets
 
 ```
 Level 3: Call Simulation Tests        ← Full call lifecycle end-to-end
-  │  Uses: TestTransport, MockLLM, MockSTT, MockTTS, pipeline_builder
+  │  Uses: TestInputTransport/TestOutputTransport, MockLLM, MockSTT, MockTTS, pipeline_builder
   │  Tests: Complete call lifecycle, phase transitions, goodbye flow, post-call
   │
 Level 2: Pipeline Integration Tests   ← Multi-processor frame flow
@@ -157,7 +157,7 @@ Fresh onboarding starts from the visible Create Account screen. Do not sign in w
 | `MockSTTProcessor` | `mocks/mock_stt.py` | Emits TranscriptionFrames from scripted text |
 | `MockLLMProcessor` | `mocks/mock_llm.py` | Returns configurable responses, tracks tool calls |
 | `MockTTSProcessor` | `mocks/mock_tts.py` | Passes through text as audio frames |
-| `TestTransport` | `mocks/test_transport.py` | Simulates telephony WebSocket transport |
+| `TestInputTransport` / `TestOutputTransport` | `mocks/mock_transport.py` | Simulates Pipecat transport input/output |
 | `FakeDBPool` | `conftest.py` | In-memory database mock |
 
 ### LOAD_TEST_MODE
@@ -177,7 +177,7 @@ This isolates pipeline/transport/DB performance from external API latency during
 
 **Directory**: `pipecat/tests/scenarios/`
 
-YAML-based conversation scripts that simulate full calls:
+Python scenario modules that simulate full calls:
 
 | Scenario | Tests |
 |----------|-------|
@@ -243,10 +243,11 @@ bash tests/load/run_load_tests.sh db
 | `scripts/generate-phase0-cost-model.js` | 2,000-user cost projection from baseline + assumptions |
 | `scripts/validate-call-rollout-config.js` | Validate `CALL_ARCHITECTURE_MODE` and queue flags before a flip |
 | `scripts/phase5-live-ab-report.js` | Live A/B aggregate checks for legacy vs queue treatment |
-| `scripts/phase7-canary-report.js` | Daily Phase 7 canary report and 7-day SLO evidence |
-| `scripts/phase8-capacity-plan.js` | PHI-free pre-window capacity plan |
+| `scripts/phase7-canary-daily-report.js` | Daily Phase 7 canary SLO report |
+| `scripts/phase7-canary-report.js` | Aggregate Phase 7 exit report and 7-day SLO evidence |
+| `services/phase8-capacity-plan.js` | PHI-free pre-window capacity plan |
 | `scripts/run-phase8-autoscaler-once.js` | One-shot capacity actuation driver, dry-run unless confirmed |
-| `scripts/run-post-call-worker-once.js` | Phase 6 post-call worker shadow/evidence runner |
+| `scripts/run-post-call-worker-once.js` | Phase 6 post-call worker evidence runner (`--confirm-db-writes` required) |
 
 The 10,000-user path does not have a single "run this load test" proof. It is a trigger-based roadmap: prove 2,000 first, then add partitioning/ops tables, HA Redis, caller-ID pool strategy, provider sharding, and workflow-engine post-call execution when the scale plan's thresholds fire.
 
@@ -272,9 +273,10 @@ pipecat/tests/
 ├── mocks/
 │   ├── mock_stt.py                  ← MockSTTProcessor
 │   ├── mock_llm.py                  ← MockLLMProcessor
-│   └── mock_tts.py                  ← MockTTSProcessor
+│   ├── mock_tts.py                  ← MockTTSProcessor
+│   └── mock_transport.py            ← TestInputTransport/TestOutputTransport
 │
-├── scenarios/                       ← YAML regression scenarios
+├── scenarios/                       ← Python regression scenario modules
 │
 ├── load/
 │   ├── locustfile_db.py             ← Database load tests
@@ -292,7 +294,8 @@ pipecat/tests/
 ├── test_scheduler.py                ← Reminder scheduling
 ├── test_context_cache.py            ← Pre-caching logic
 ├── test_post_call.py                ← Post-call processing
-├── test_flows.py                    ← Phase transitions
+├── test_nodes.py                    ← Flow node/tool configuration
+├── test_pipeline_phase_transitions.py ← Phase transition coverage
 └── ... (50+ additional test files)
 ```
 
@@ -300,10 +303,10 @@ pipecat/tests/
 
 ## CI Integration
 
-Tests run automatically before each commit (pre-commit hook):
+Tracked CI runs Python, Node/Vitest, Tier-2 DB, frontend, mobile, and regression jobs through GitHub Actions. There is no tracked Husky/pre-commit hook in this repo. For the same default Python test filter locally:
 
 ```bash
-cd pipecat && uv run python -m pytest tests/ -m "not integration and not llm" -q --tb=short
+cd pipecat && uv run python -m pytest tests/ -m "not integration and not llm and not llm_simulation" -q --tb=short
 ```
 
 For full validation before deployment, also run:

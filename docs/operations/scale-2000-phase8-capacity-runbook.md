@@ -72,7 +72,11 @@ PHASE8_AUTOSCALER_DRY_RUN=false
 PHASE8_RAILWAY_SERVICE=donna-pipecat
 PHASE8_RAILWAY_ENVIRONMENT=production
 PHASE8_RAILWAY_REGION=us-west
+PHASE8_COST_PER_REPLICA_HOUR=0.12
+PHASE8_HOURLY_BUDGET=1.00
 ```
+
+Do not enable confirmed long-running actuation unless both budget env vars are set. If the budget inputs are missing, the code marks the budget check as skipped; only a `failed` budget check blocks scale-up.
 
 ## Scale-Up Gate
 
@@ -102,6 +106,60 @@ The admin dashboard exposes **Scale Ops** for emergency operator actions. It cal
 - `POST /api/scale-operations/phase8/override`
 
 Overrides are dry-run unless the operator checks "Apply to Railway". Scale-down is rejected while demand, active calls, reservations, or critical post-call backlog remain unless a future code change explicitly adds a reviewed force path.
+
+Example plan request:
+
+```bash
+curl -G https://donna-api-production-2450.up.railway.app/api/scale-operations/phase8/plan \
+  -H 'Authorization: Bearer <admin-jwt>' \
+  --data-urlencode 'windowStart=2035-03-18T14:00:00.000Z' \
+  --data-urlencode 'windowMinutes=15' \
+  --data-urlencode 'currentReplicas=2' \
+  --data-urlencode 'maxCallsPerReplica=50' \
+  --data-urlencode 'costPerReplicaHour=0.12' \
+  --data-urlencode 'hourlyBudget=1.00'
+```
+
+Example one-shot autoscaler body:
+
+```bash
+curl -X POST https://donna-api-production-2450.up.railway.app/api/scale-operations/phase8/autoscale-once \
+  -H 'Authorization: Bearer <admin-jwt>' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "windowStart": "2035-03-18T14:00:00.000Z",
+    "currentReplicas": 2,
+    "maxCallsPerReplica": 50,
+    "costPerReplicaHour": 0.12,
+    "hourlyBudget": 1.00,
+    "service": "donna-pipecat",
+    "environment": "production",
+    "region": "us-west",
+    "confirmScale": false,
+    "dryRun": true
+  }'
+```
+
+Example operator override body:
+
+```bash
+curl -X POST https://donna-api-production-2450.up.railway.app/api/scale-operations/phase8/override \
+  -H 'Authorization: Bearer <admin-jwt>' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "targetReplicas": 4,
+    "reason": "known_window_manual_override",
+    "windowStart": "2035-03-18T14:00:00.000Z",
+    "currentReplicas": 2,
+    "costPerReplicaHour": 0.12,
+    "hourlyBudget": 1.00,
+    "service": "donna-pipecat",
+    "environment": "production",
+    "region": "us-west",
+    "confirmScale": false,
+    "dryRun": true
+  }'
+```
 
 ## Failure Response
 

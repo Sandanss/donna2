@@ -26,11 +26,11 @@
 | Change cross-replica Pipecat capacity reporting | `pipecat/services/capacity.py` (publisher) + `services/pipecat-capacity.js` (Node reader) |
 | Change shared-state / Redis fallback behavior | `pipecat/lib/redis_client.py` (Redis + Upstash fail-closed) + `services/redis-rate-limit-store.js` (Node SlowAPI store) |
 | Change call dial-authority guard | `services/call-queue.js` (`acquireOutboundCallGuard`, `markOutboundCallGuardInitiatingIfCallable`) — guards live in `outbound_call_guards` |
-| Change post-call job workflow / DAG / provider semaphores | `services/post-call-jobs.js` (job types, dependency graph, retry policies, provider locks) + `scripts/run-post-call-worker-once.js` (shadow worker) |
+| Change post-call job workflow / DAG / provider semaphores | `services/post-call-jobs.js` (job types, dependency graph, retry policies, per-process provider locks) + `scripts/run-post-call-worker-once.js` (evidence worker; `--confirm-db-writes` required) |
 | Inspect or replay post-call dead letters | `routes/post-call-jobs.js` (`GET /api/post-call-jobs/dead-letter`, `POST /api/post-call-jobs/:id/replay`) |
-| Plan or actuate Pipecat replica capacity | `scripts/phase8-capacity-plan.js` (planner, PHI-free) + `services/phase8-autoscaler.js` (Railway actuator + operator override) + `services/railway-scaling.js` (CLI shell) |
+| Plan or actuate Pipecat replica capacity | `services/phase8-capacity-plan.js` (planner, PHI-free) + `services/phase8-autoscaler.js` (Railway actuator + operator override) + `services/railway-scaling.js` (CLI shell) |
 | Operator overrides / one-shot autoscaler / capacity plan API | `routes/scale-operations.js` (`/api/scale-operations/phase8/{plan,autoscale-once,override}`, admin-only) |
-| Run Phase 5/7 live A/B + canary reports | `scripts/phase5-live-ab-report.js`, `scripts/phase7-canary-report.js`; runbooks `docs/operations/scale-2000-phase{5,7}-*.md` |
+| Run Phase 5/7 live A/B + canary reports | `scripts/phase5-live-ab-report.js`, `scripts/phase7-canary-report.js`, `scripts/phase7-canary-daily-report.js`, `scripts/phase7-canary-rollback-check.js`; runbooks `docs/operations/scale-2000-phase{5,7}-*.md` |
 | Run scale-2000 drills / Phase 0 baseline / live Telnyx drill | `scripts/collect-phase0-scaling-baseline.js`, `scripts/run-live-telnyx-drill.js`, `pipecat/scripts/redis_shared_state_drill.py`; runbooks under `docs/operations/scale-2000-*.md` |
 | Change per-senior call settings | `pipecat/services/seniors.py` (`get_call_settings()`) |
 | Change caregiver notes delivery | `pipecat/services/caregivers.py` + `pipecat/flows/tools.py` |
@@ -123,7 +123,7 @@ pipecat/
 ├── flows/               Call state machine (Pipecat Flows)
 │   ├── nodes.py         Conditional reminder → main → winding_down → closing (+ onboarding)
 │   │                    Imports prompts from prompts.py
-│   ├── tools.py         2 active Claude tools (web_search, mark_reminder_acknowledged) + retired handlers
+│   ├── tools.py         3 active subscriber-call Claude tools (web_search, mark_reminder_acknowledged, create_reminder); onboarding exposes web_search only
 │   └── gemini_tools.py  Gemini Live tool adapter
 │
 ├── processors/          Frame processors in the audio pipeline
@@ -250,6 +250,7 @@ tests/e2e/
 ├── consumer/                    Website/caregiver app tests (legacy directory name)
 │   ├── landing.spec.ts          Landing page, FAQ (public)
 │   ├── dashboard.spec.ts        Protected route redirects (public)
+│   ├── security.spec.ts         Signup storage/PHI credential persistence + same-origin waitlist routing
 │   └── authenticated/           Clerk-authenticated tests
 │       ├── dashboard.spec.ts    Dashboard access, nav, sign out
 │       └── onboarding.spec.ts   Onboarding flow access
@@ -279,12 +280,12 @@ Config: `playwright.config.ts` (root). Guide: [`docs/guides/FRONTEND_TESTING.md`
 │   ├── run-live-telnyx-drill.js          Phase 0/5 staging live-call drill (consenting test phones only)
 │   ├── validate-call-rollout-config.js   Validate CALL_ARCHITECTURE_MODE + queue flags before flip
 │   ├── phase5-live-ab-report.js          Phase 5 live A/B report (aggregate counters, PHI-free)
-│   ├── phase7-canary-report.js           Phase 7 canary daily report (reuses Phase 5 + adds allowlist size, 7-day SLO, PHI sentinel, P0/P1 incidents)
-│   ├── phase8-capacity-plan.js           Phase 8 pre-window capacity planner (reads call_queue + heartbeats; emits scale_up/hold/scale_down/wait_for_readiness)
+│   ├── phase7-canary-daily-report.js     Phase 7 daily canary SLO report (setup latency/success, duplicates, post-call completion; p95 post-call latency is informational)
+│   ├── phase7-canary-report.js           Aggregate Phase 7 exit report (reuses Phase 5 + adds allowlist size, 7-day SLO, PHI sentinel, P0/P1 incidents)
 │   ├── run-phase8-autoscaler-once.js     Phase 8 autoscaler single-tick driver (dry-run unless `--confirm-scale`)
-│   └── run-post-call-worker-once.js      Phase 6 post-call worker shadow runner (artifact_verification mode by default; `--confirm-db-writes` to apply)
+│   └── run-post-call-worker-once.js      Phase 6 post-call worker evidence runner (`--confirm-db-writes` required; artifact_verification validates existing artifacts while mutating worker lease/status rows)
 ├── .github/workflows/
-│   ├── ci.yml                   PR pipeline: tests → staging deploy → smoke tests
+│   ├── ci.yml                   PR pipeline: tests/checks only; staging deploy + smoke tests are push-gated
 │   └── deploy.yml               Production deploy on push to main
 ```
 
@@ -317,12 +318,13 @@ Serves all API endpoints that frontends consume. Also runs the reminder schedule
 │   └── health.js, helpers.js, index.js
 │
 ├── services/            Dual implementation with pipecat/services/
-│   ├── scheduler.js     Active reminder polling + outbound calls; dual-writes to call_queue and acquires outbound guard when CALL_ARCHITECTURE_MODE != legacy_only
+│   ├── scheduler.js     Active reminder polling + outbound calls; materializes call_queue rows in shadow/canary/queue modes and acquires outbound guard outside legacy_only
 │   ├── call-queue.js    Outbound dispatcher: FOR UPDATE SKIP LOCKED leasing, lane policy, dual-path modes (shadow_materialize → shadow_dispatch → canary_queue → queue_primary), reconciler
 │   ├── call-schedules.js Materializer: normalizes preferredCallTimes → senior_call_schedules → call_queue rows
-│   ├── pipecat-capacity.js Node reader of pipecat:instance:* heartbeats (Redis/Upstash/local fallback)
+│   ├── pipecat-capacity.js Node reader of pipecat:instance:* heartbeats (Redis/Upstash/none; no local heartbeat registry fallback)
 │   ├── redis-rate-limit-store.js Distributed rate-limit store for Node SlowAPI equivalent
 │   ├── post-call-jobs.js Phase 6 post-call DAG: 8 job types, dependency graph, retry policies, provider semaphores (db/geminiFlash/openAiEmbeddings/resend), dead-letter handling
+│   ├── phase8-capacity-plan.js Phase 8 PHI-free capacity planner (call_queue demand + heartbeats + budget checks)
 │   ├── phase8-autoscaler.js Phase 8 actuator: reads capacity plan, applies Railway scale (dry-run by default), operator overrides
 │   ├── railway-scaling.js Railway CLI shell (`railway scale REGION=REPLICAS`)
 │   ├── canary-cohort.js Phase 7 canary membership source of truth; env allowlist remains emergency fallback
@@ -336,7 +338,7 @@ Serves all API endpoints that frontends consume. Also runs the reminder schedule
 │   ├── news.js          OpenAI cached news helper
 │   ├── caregivers.js    Caregiver relationships
 │   ├── seniors.js       Senior profiles
-│   ├── audit.js         Fire-and-forget HIPAA audit logging
+│   ├── audit.js         HIPAA audit logging helpers; some latency-sensitive paths are best-effort while exports/deletes have stricter persistence requirements
 │   ├── token-revocation.js  JWT token revocation (per-token + per-admin + cleanup)
 │   └── data-retention.js    HIPAA data retention purge
 │
@@ -353,7 +355,7 @@ Serves all API endpoints that frontends consume. Also runs the reminder schedule
 │   ├── schema.js        Drizzle tables for seniors, reminders, notifications, waitlist, audit logs, etc.
 │   ├── client.js        Neon PostgreSQL + Drizzle ORM init
 │   ├── setup-pgvector.js
-│   └── migrations/      Queue rollout tables/indexes: senior_call_schedules, call_queue, call_attempts, post_call_jobs, outbound_call_guards, scheduler_shadow_comparisons, canary_cohort_membership. There are byte-identical numbered compatibility copies for the queue foundation/index/job migrations; follow the Phase 1 runbook before live apply.
+│   └── migrations/      Queue rollout tables/indexes: 010 foundation, 011 concurrent indexes, 012 post-call job state machine, 013 canary cohort membership. Pipecat mirrors queue/job migrations as 023/024/025; canary membership is Node-owned.
 │
 ├── validators/schemas.js  Zod validation schemas
 ├── lib/                   logger.js, sanitize.js, encryption.js (AES-256-GCM PHI encryption)
@@ -438,7 +440,7 @@ Only load these when your task specifically requires them.
 | `pipecat/flows/nodes.py` | Subscriber/onboarding flow config and context builders |
 | `services/scheduler.js` | Active Node.js reminder polling + outbound dispatch + dual-path coexistence (legacy plan, queue shadow materialize, shadow dispatch, queue dispatch) |
 | `services/call-queue.js` | Dispatcher core: enqueue, lease, lane policy, reconciler, modes |
-| `services/pipecat-capacity.js` | Cross-replica capacity registry reader with Redis/Upstash/local fallback |
+| `services/pipecat-capacity.js` | Cross-replica capacity registry reader with Redis/Upstash/none; queue code falls back to batch-size capacity only when the registry is not required |
 | `routes/observability.js` | Call monitoring and metrics aggregation |
 
 ---
@@ -461,7 +463,8 @@ npm test
 # Frontend E2E tests (Playwright — all 3 apps)
 npm run test:e2e                  # Full suite (~15s)
 npm run test:e2e:admin            # Admin dashboard only
-npm run test:e2e:consumer         # Consumer public + authenticated
+npm run test:e2e:consumer         # Website public project only
+npx playwright test --project=clerk-setup --project=consumer-authenticated  # Website authenticated project
 npm run test:e2e:observability    # Observability dashboard only
 npx playwright test --ui          # Interactive debug mode
 ```

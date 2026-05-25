@@ -1,8 +1,9 @@
 """LLM tool definitions for Donna's voice pipeline.
 
-Active tools exposed to Claude (2 tools — Director-first architecture):
+Active subscriber-call tools exposed to Claude (3 tools — Director-first architecture):
 - web_search: Real-time web search with spoken filler UX
 - mark_reminder_acknowledged: Track reminder delivery status with post-call DB verification
+- create_reminder: Save senior-requested reminders after explicit confirmation
 
 Retired tools (handlers kept for Gemini / future use):
 - search_memories → Director injects memories as ephemeral context (500ms gate)
@@ -702,7 +703,7 @@ def make_flows_tools(session_state: dict) -> dict[str, FlowsFunctionSchema]:
 
     Returns dict mapping tool name → FlowsFunctionSchema.
 
-    IMPORTANT — only 2 tools are exposed to Claude. The others are intentionally
+    IMPORTANT — only 3 subscriber-call tools are exposed to Claude. The others are intentionally
     excluded because exposing them would cost ~4.3s per call (two sequential LLM
     round trips: one to generate the tool call, one to respond after seeing the
     result). Each excluded tool has a zero-latency alternative:
