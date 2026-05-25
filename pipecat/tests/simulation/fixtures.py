@@ -253,12 +253,18 @@ async def cleanup_test_senior(senior_id: str) -> None:
     # Child tables that have a direct senior_id column. Phase 1 queue
     # tables may not exist on every environment, so we tolerate missing
     # tables at debug level.
+    #
+    # ORDER MATTERS: conversations comes after every table that has an FK
+    # to conversations.id (post_call_jobs.conversation_id, call_attempts.
+    # conversation_id, call_metrics.conversation_id where present). Otherwise
+    # the conversations DELETE silently fails on FK violation and leaves
+    # rows behind, which then blocks the final seniors DELETE.
     senior_id_tables = [
+        # Tables that may also reference conversations.id — clear first.
         "call_metrics",
         "daily_call_context",
         "call_analyses",
         "memories",
-        "conversations",
         "caregivers",
         "call_attempts",
         "call_queue",
@@ -267,6 +273,9 @@ async def cleanup_test_senior(senior_id: str) -> None:
         "scheduler_shadow_comparisons",
         "senior_call_schedules",
         "canary_cohort_membership",
+        "senior_consents",  # ON DELETE CASCADE on seniors, but explicit is safer
+        # conversations LAST so any conversation_id FKs above are already gone.
+        "conversations",
     ]
     for table in senior_id_tables:
         try:
