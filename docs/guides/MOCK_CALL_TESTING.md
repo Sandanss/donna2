@@ -38,12 +38,13 @@ pipecat/tests/simulation/
 ├── __init__.py        # public exports (see "API quick reference" below)
 ├── caller.py          # CallerAgent — Haiku-powered senior LLM with persona + goals
 ├── fixtures.py        # TestSenior dataclass, seed/cleanup DB helpers
-├── pipeline.py        # build_live_sim_pipeline — real pipeline with mock STT/TTS
+├── pipeline.py        # build_live_sim_pipeline — real pipeline; injects TranscriptionFrame directly and mocks TTS
 ├── transport.py       # TextCallerTransport + AudioCallerTransport + ResponseCollector
 ├── scenarios.py       # scenario catalog: web_search, memory, reminder, safety, outage cases
 ├── runner.py          # run_simulated_call — orchestrates one call end-to-end
-├── concurrent.py      # run_simulated_calls_concurrent — N calls in parallel (PR #262)
-└── cohort.py          # build_cohort_report, compare_cohorts — SLO grading (PR #262)
+├── concurrent.py      # run_simulated_calls_concurrent — N calls in parallel
+├── cohort.py          # build_cohort_report, compare_cohorts — SLO grading
+└── stress.py          # advanced stress suites and stampede spec builders
 ```
 
 ### Anatomy of one call
@@ -211,7 +212,7 @@ we want to keep exercising:
 | Consent boundary | `consent_boundary_reminder_attempt` | First call drifts into regular reminder workflow |
 | Discovery boundary | `discovery_boundary_reminder_attempt` | Profile-building call becomes reminder scheduling |
 | Reminder stampede | `build_reminder_stampede_specs(count)` | Concurrent reminder calls collide on state/DB rows |
-| Post-call stampede | `build_post_call_stampede_specs(count)` | Many calls end together and saturate post-call jobs |
+| Post-call stampede | `build_post_call_stampede_specs(count)` | Many calls end together. This saturates post-call jobs only when `POST_CALL_QUEUE_ENABLED=true`; otherwise Pipecat still runs inline post-call work. Use `npm run phase6:post-call-stampede` for the separate JS worker evidence path. |
 | Parallel flake detector | `build_parallel_flake_specs(factory, repetitions=N)` | State leaks and nondeterminism across repeated concurrent runs |
 | 2,000-user infra | `scale_2000_load_test_plan()` + Locust | Load balancing/WS/DB pressure without 2,000 LLM calls |
 
@@ -457,7 +458,7 @@ from tests.simulation import (
 )
 ```
 
-The runner is `run_simulated_call(scenario, senior=None, conversation_id=None, run_post_call_processing=True) -> CallResult`. The full `CallResult` shape is documented in `transport.py` — turns, tool_calls_made, injected_memories, fillers, total_duration_ms, end_reason, post_call_completed, plus PHI-safe post-call metrics fields for whether `call_metrics` logged, which tool names were written, and whether encrypted context trace was included.
+The runner is `run_simulated_call(scenario, senior=None, conversation_id=None, run_post_call_processing=True) -> CallResult`. The full `CallResult` shape is documented in `transport.py` — turns, tool_calls_made, injected_memories, fillers, total_duration_ms, end_reason, post_call_completed, plus PHI-safe post-call metrics fields for whether `call_metrics` logged, which tool names were written, whether encrypted context trace was included, and `post_call_error_count`.
 
 ---
 
@@ -497,28 +498,29 @@ Summary
   post-call done  : True        # post-call analysis ran to completion
 ```
 
-The simulation framework prints all `[EPHEMERAL:]` injections too — useful
-when debugging *why* Donna pivoted or responded the way she did. Look for
-`[EPHEMERAL: Observer guidance]`, `[EPHEMERAL: Director guidance]`,
-`[EPHEMERAL: CONVERSATION TRACKING]`, `[EPHEMERAL: MEMORY]` in the assistant
-context.
+The simulation framework captures `[EPHEMERAL:]` injections in `CallResult`
+and the encrypted context trace. The demo CLI prints transcript and summary
+counts by default; inspect the result object or trace when debugging *why*
+Donna pivoted or responded the way she did. Look for `[EPHEMERAL: Observer
+guidance]`, `[EPHEMERAL: Director guidance]`, `[EPHEMERAL: CONVERSATION
+TRACKING]`, and `[EPHEMERAL: MEMORY]` in the captured assistant context.
 
 ---
 
 ## Real bugs the harness catches
 
-Running the harness against current dev (2026-05-24) immediately surfaced
-seven bugs — five product, two harness:
+Running the harness against dev on 2026-05-24 surfaced a historical bug set
+that drove the current regression coverage:
 
-| # | Bug | Severity | Where to fix |
+| # | Bug | Status | Where fixed/tracked |
 |---|---|---|---|
-| 1 | `cleanup_test_senior` silently leaves senior + reminder_delivery rows behind | harness | `pipecat/tests/simulation/fixtures.py` |
-| 2 | `end_reason` stays `"unknown"` when caller said goodbye but pipeline didn't fire EndFrame | harness | `pipecat/tests/simulation/runner.py` |
-| 3 | Donna called `web_search` twice in a row with the same query | product | `pipecat/flows/tools.py` |
-| 4 | Quick Observer false-positive `[SAFETY] scam` on a benign Cowboys conversation | product | `pipecat/processors/patterns.py` |
-| 5 | Response-length policy violation — Donna ran 300+ tokens with a 150-token guidance | product | Anthropic `max_tokens` cap in main flow |
-| 6 | Quick Observer guidance injected 2× per turn (progressive interim chunks each re-fire patterns) | product | `pipecat/processors/quick_observer.py` |
-| 7 | Director pivoted topics while caller's last question was unanswered | product | Director prompt + Director output schema |
+| 1 | `cleanup_test_senior` silently left senior + reminder_delivery rows behind | fixed | `pipecat/tests/simulation/fixtures.py` |
+| 2 | `end_reason` stayed `"unknown"` when caller said goodbye but pipeline did not fire EndFrame | fixed | `pipecat/tests/simulation/runner.py` |
+| 3 | Donna called `web_search` twice in a row with the same query | regression-covered | `pipecat/flows/tools.py` |
+| 4 | Quick Observer false-positive guidance on a benign sports conversation | regression-covered | `pipecat/processors/patterns.py` |
+| 5 | Response-length policy violation — Donna ran 300+ tokens with a 150-token guidance | regression-covered | Anthropic `max_tokens` cap in main flow |
+| 6 | Quick Observer guidance injected 2× per turn because progressive interim chunks re-fired patterns | fixed | `pipecat/processors/quick_observer.py` |
+| 7 | Director pivoted topics while caller's last question was unanswered | regression-covered | Director prompt + Director output schema |
 
 That's the value of the harness: every one of these is a real production
 issue that wouldn't show up in unit tests. The simulation harness reproduces

@@ -210,7 +210,7 @@ export async function queryPostCallCompletion({
     : sql`FALSE`;
 
   // For each call_sid (one per call) compute completion for the critical
-  // path jobs: analysis + reminder_recovery (Phase 6 plan calls these
+  // path jobs: metrics_finalize + reminder_recovery (Phase 6 plan calls these
   // "critical jobs p95 ≤ 5 min"). A call is "fully completed" if both
   // critical jobs reached 'completed'. Cohort assignment uses senior_id.
   const result = await database.execute(sql`
@@ -219,15 +219,15 @@ export async function queryPostCallCompletion({
         pcj.call_sid,
         pcj.senior_id,
         CASE WHEN ${isCanary} THEN 'treatment' ELSE 'control' END AS cohort,
-        bool_and(pcj.status = 'completed') FILTER (WHERE pcj.job_type IN ('analysis','reminder_recovery'))
+        bool_and(pcj.status = 'completed') FILTER (WHERE pcj.job_type IN ('metrics_finalize','reminder_recovery'))
           AS critical_all_completed,
-        max(pcj.completed_at) FILTER (WHERE pcj.job_type IN ('analysis','reminder_recovery'))
+        max(pcj.completed_at) FILTER (WHERE pcj.job_type IN ('metrics_finalize','reminder_recovery'))
           AS critical_last_completed_at,
         max(pcj.created_at) AS first_critical_created_at
       FROM post_call_jobs pcj
       WHERE pcj.created_at >= ${windowStart}
         AND pcj.created_at < ${windowEnd}
-        AND pcj.job_type IN ('analysis','reminder_recovery')
+        AND pcj.job_type IN ('metrics_finalize','reminder_recovery')
       GROUP BY pcj.call_sid, pcj.senior_id, cohort
     )
     SELECT

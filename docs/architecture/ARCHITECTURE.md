@@ -41,7 +41,7 @@ Telnyx L16/16k audio ──► FastAPIWebsocketTransport
                         │ TranscriptionFrame
                         ▼
               ┌─────────────────────┐
-              │   Quick Observer     │  Layer 1 (0ms): 250+ regex patterns
+              │   Quick Observer     │  Layer 1 (0ms): companion-call regex signals
               │   (BLOCKING)         │  Stashes guidance for Director injection
               │                      │  Strong goodbye → guarded EndFrame
               └─────────┬───────────┘
@@ -95,7 +95,7 @@ The guiding rule is: keep PCM throughout the pipeline and match active Telnyx ca
 
 ### Layer 1: Quick Observer (`processors/quick_observer.py`)
 - **Latency**: 0ms (blocking, inline)
-- **Method**: 250+ regex patterns across 19 categories (health, goodbye, emotion, cognitive, activity, etc.)
+- **Method**: active companion-call regex categories for goodbye, emotion, family, social, activity, environment, help requests, end-of-life talk, news, questions, engagement, and reminder acknowledgments. `patterns.py` still contains legacy health/safety/ADL tables for reference, but those are not imported by the active Quick Observer.
 - **Output**: Stores guidance for Director to inject on the current turn
 - **Goodbye detection**: Explicit strong goodbye → programmatic EndFrame after the minimum call-age guard and configured delay (bypasses unreliable LLM tool calls)
 
@@ -139,7 +139,7 @@ Retired handlers remain in `pipecat/flows/tools.py` for Gemini/future work, but 
 - Interest IDs plus caregiver/AI detail text from `familyInfo.interestDetails`
 - Additional caregiver context from `seniors.additional_info`
 - Topics to avoid from `familyInfo.topicsToAvoid`, falling back to `preferred_call_times.topicsToAvoid` for onboarding-created rows
-- Health notes, memory context, recent turns, last-call follow-ups, and today's same-day context
+- Profile context, memory context, recent turns, last-call summaries/takeaways, and today's same-day context
 
 Prompt context events are recorded through `services.context_trace` without logging raw PHI to application logs.
 
@@ -152,7 +152,7 @@ Runs after the telephony WebSocket disconnects. If `POST_CALL_QUEUE_ENABLED=true
 ```
 Step 1: Complete conversation (prerequisite) ───────── sequential
     │
-    ├── Step 2: Call analysis (Gemini Flash)  ─────┐
+    ├── Step 2: Call analysis (Claude Haiku)  ─────┐
     ├── Step 3: Memory extraction (OpenAI)    ─────┤  parallel
     ├── Step 5: Reminder cleanup              ─────┤
     └── Step 6: Cache clearing                ─────┘
@@ -190,7 +190,7 @@ Donna is rolling the outbound dialer off the in-process Node scheduler onto a du
 
 **Consistency model.** Postgres decides *what* runs (queue rows, leases, guards, attempts, jobs); Redis decides *what is running right now* (capacity heartbeats, dedupe TTLs, rate limits). The dispatcher reads capacity from Redis but only commits dial authority by acquiring a Postgres row.
 
-Manual caregiver/admin calls through Node `routes/calls.js` still call Pipecat `/telnyx/outbound` directly. The `manual` lane exists in queue policy, but manual `/api/call` is not queue-backed in the current runtime.
+Manual caregiver/admin calls through Node `routes/calls.js` call Pipecat `/telnyx/outbound` directly until `CALL_ARCHITECTURE_MODE=queue_primary`. In `queue_primary`, manual, consent, and discovery calls enqueue into the queue `manual` lane before dispatch.
 
 **Modes (`CALL_ARCHITECTURE_MODE`):**
 
@@ -232,12 +232,12 @@ Phase 6 lands the infrastructure for moving post-call work (analysis, memory ext
 | `interest_discovery` | `memory_extraction` | `openAiEmbeddings` |
 | `snapshot_rebuild` | `memory_extraction`, `daily_context` | `db` |
 
-**Provider semaphores (`DEFAULT_PROVIDER_LIMITS`):** `db=200`, `anthropicHaiku=1`, `geminiFlash=1`, `openAiEmbeddings=1`, `resend=1`. These are in-process semaphores, so they cap concurrency per worker process, not globally across a fleet. Limits can be overridden per process via `--{db,gemini-flash,openai-embeddings,resend}-concurrency` on `scripts/run-post-call-worker-once.js`.
+**Provider semaphores (`DEFAULT_PROVIDER_LIMITS`):** `db=200`, `anthropicHaiku=1`, `geminiFlash=1`, `openAiEmbeddings=1`, `resend=1`. These are in-process semaphores, so they cap concurrency per worker process, not globally across a fleet. The current JS worker validates artifacts instead of generating subscriber analysis; inline Pipecat analysis uses Claude Haiku. Limits can be overridden per process via `--{db,gemini-flash,openai-embeddings,resend}-concurrency` on `scripts/run-post-call-worker-once.js`.
 
 **Retry policy (`POST_CALL_RETRY_POLICIES`):** default is 5 attempts with backoff `[30, 120, 480, 1920]` seconds. `analysis` and `memory_extraction` use longer per-type backoff. After `max_attempts`, the job moves to `dead_letter` with a PHI-free `dead_letter_reason`.
 
 **Admin surface (`routes/post-call-jobs.js`, `requireAdmin`):**
-- `GET /api/post-call-jobs/dead-letter` — list dead-lettered jobs (aggregate only).
+- `GET /api/post-call-jobs/dead-letter` — list dead-lettered jobs with per-job operational fields (`id`, `call_sid`, `senior_id`, `dedupe_key`, job type/status/timestamps, and PHI-free failure reason).
 - `POST /api/post-call-jobs/:id/replay` — requeue a single dead-lettered job after operator review.
 
 The worker (`scripts/run-post-call-worker-once.js`) refuses to run without `--confirm-db-writes`. In `handler-mode=artifact_verification`, it validates existing artifacts while still mutating lease/status rows as part of the worker transaction; it is not a non-writing dry run. Use it for Phase 6 backlog-drain and provider-concurrency evidence only on an environment where those DB writes are intentional.
@@ -252,9 +252,9 @@ Phase 7 wraps the live canary in a daily report; Phase 8 turns Pipecat replica c
 
 **Phase 5/7 reports (PHI-free aggregates):** `scripts/phase5-live-ab-report.js` checks for duplicate outbound calls, duplicate conversations, reminder-delivery duplicates, cohort drift, caller-ID answer rate, media-start rate, and rollback timing. `scripts/phase7-canary-daily-report.js` is the daily SLO report; `scripts/phase7-canary-report.js` is the aggregate exit report that reuses Phase 5 and adds allowlist size, 7-day continuous canary SLO, `phi_sentinel_clear`, and `no_p0_p1_incidents`. All outputs are counts/rates only — no senior IDs, phone numbers, transcripts, or reminder text.
 
-**Phase 8 capacity plan (`services/phase8-capacity-plan.js`).** Reads future `call_queue` rows for a window and live `pipecat:instance:*` heartbeats. Returns `recommendation.action ∈ {scale_up, hold, scale_down, wait_for_readiness}` plus `targetReplicas` and a list of named `checks`. The `hourly_cost_budget` check uses `cost-per-replica-hour × targetReplicas` against `hourly-budget`.
+**Phase 8 capacity plan (`services/phase8-capacity-plan.js`).** Reads future `call_queue` rows for a window, current queue backlog, critical post-call backlog, and live `pipecat:instance:*` heartbeats. Returns `recommendation.action ∈ {scale_up, hold, scale_down, wait_for_readiness}` plus `targetReplicas` and a list of named `checks`. Budget and readiness checks gate autoscaler application; the planner can still emit the recommendation so operators can see why capacity is needed.
 
-**Phase 8 autoscaler (`services/phase8-autoscaler.js`).** Wraps the planner and only applies a `scale_up` recommendation when `hourly_cost_budget` is not `failed`. Actuation goes through `services/railway-scaling.js`, which shells `railway scale REGION=REPLICAS --service <s> --environment <e> --json`. Defaults are safety-first: `PHASE8_AUTOSCALER_DRY_RUN=true` and `PHASE8_AUTOSCALER_CONFIRM_SCALE=false` mean the long-running loop is off in production until explicitly enabled. Every actuation writes an audit row with reason code `operator_override:<sanitized>` or the recommendation's reason.
+**Phase 8 autoscaler (`services/phase8-autoscaler.js`).** Wraps the planner and applies scaling only when the recommendation, budget/readiness checks, dry-run mode, and explicit confirmation allow it. Actuation goes through `services/railway-scaling.js`, which shells `railway scale REGION=REPLICAS --service <s> --environment <e> --json`. Defaults are safety-first: `PHASE8_AUTOSCALER_DRY_RUN=true` and `PHASE8_AUTOSCALER_CONFIRM_SCALE=false` mean the long-running loop is off in production until explicitly enabled. Every actuation writes an audit row with reason code `operator_override:<sanitized>` or the recommendation's reason.
 
 **Admin surface (`routes/scale-operations.js`, `requireAdmin`):**
 - `GET /api/scale-operations/phase8/plan` — current capacity plan for a window.
@@ -318,7 +318,7 @@ The 2,000-user architecture is intentionally 10k-shaped, but the next step is no
 | Primary LLM | Anthropic Claude Haiku 4.5 | claude-haiku-4-5-20251001 |
 | Director LLM (active fast path) | Groq | gpt-oss-20b |
 | Director LLM (regular fallback helper) | Google Gemini Flash | gemini-3-flash-preview |
-| Post-Call Analysis | Google Gemini Flash | gemini-3-flash-preview |
+| Post-Call Analysis | Anthropic Claude Haiku 4.5 | claude-haiku-4-5-20251001 |
 | STT | Deepgram Nova 3 | Telnyx L16/16k reaches STT as 16kHz PCM; language follows `familyInfo.donnaLanguage` (`en`/`es`) |
 | TTS | ElevenLabs by default; Cartesia behind provider flag | Telnyx L16 calls use 16kHz PCM from TTS; optional Spanish voice IDs selected for Spanish calls |
 | VAD | Silero | confidence=0.68, start_secs=0.3, stop_secs=1.2 |
@@ -347,7 +347,7 @@ pipecat/
 │   ├── nodes.py                ← 4 call phase NodeConfigs
 │   └── tools.py                ← 3 active subscriber-call Claude tools + retired handlers; onboarding exposes web_search only
 ├── processors/
-│   ├── patterns.py             ← 250+ regex patterns, 19 categories
+│   ├── patterns.py             ← active companion-call regex patterns plus legacy inactive tables
 │   ├── quick_observer.py       ← Layer 1: regex analysis + goodbye EndFrame
 │   ├── conversation_director.py← Layer 2: Groq speculative guidance + memory/news injection
 │   ├── conversation_tracker.py ← Topic/question/advice tracking

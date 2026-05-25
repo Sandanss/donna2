@@ -48,7 +48,8 @@ real STT service between test input and the normal Donna processors.
 Use one scenario catalog, one runner shape, and one result schema.
 
 Text and voice modes should differ only at the transport and pipeline I/O
-edge. A scenario such as `multiple_reminders` should be runnable as either:
+edge. The current `run_simulated_demo.py` CLI is text-mode only; a scenario
+such as `multiple_reminders` should become runnable as either:
 
 ```bash
 uv run python scripts/run_simulated_demo.py --scenario multiple_reminders --transport text

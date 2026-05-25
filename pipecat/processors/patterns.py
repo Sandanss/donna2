@@ -1,7 +1,9 @@
-"""Quick Observer pattern and guidance data — 252 regex patterns across 19 categories.
+"""Quick Observer pattern and guidance data.
 
 This module contains ONLY data definitions (no logic). Edit patterns or guidance
 text here without needing to understand the analysis engine in quick_observer.py.
+The active Quick Observer imports companion-call categories only; older
+health/safety/ADL/cognitive pattern tables remain here for legacy reference.
 """
 
 import re
@@ -25,7 +27,7 @@ def _p(pat: str, signal: str, **kw) -> Pattern:
 
 
 # =============================================================================
-# Pattern definitions — 252 total across 19 categories
+# Pattern definitions — active companion categories plus legacy inactive tables.
 # =============================================================================
 
 # --- HEALTH (31) ---

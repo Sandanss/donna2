@@ -261,7 +261,7 @@ Telnyx is the hardest to redundancy-plan because phone numbers and caller-ID rep
 | Anthropic Claude Haiku (input + output) | ~$0.10–0.20 | Prompt caching reduces this materially |
 | Groq Director (input + output) | ~$0.01–0.03 | |
 | ElevenLabs (TTS, ~600 chars/min × 5) | ~$0.05–0.15 | Cartesia is cheaper |
-| Post-call (Gemini analysis + OpenAI memory) | ~$0.03–0.08 | |
+| Post-call (Claude Haiku analysis + OpenAI memory) | ~$0.03–0.08 | |
 | **Total per call** | **~$0.30–0.55** | |
 
 At one call/day per user, that's $110–200/user/year vs. $228 revenue. Margins exist but are not generous.

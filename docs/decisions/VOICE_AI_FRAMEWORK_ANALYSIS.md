@@ -2,8 +2,8 @@
 
 > Historical framework analysis. Donna has since migrated active live-call handling to the Pipecat service.
 > Use `DIRECTORY.md`, `docs/architecture/ARCHITECTURE.md`, and `pipecat/docs/ARCHITECTURE.md` for current architecture.
-> Embedded Twilio, Sonnet, and framework-migration examples are historical and should not be copied into current Telnyx/Claude Haiku work.
-> Statements below that say "current" or "today" refer to the analysis date, not the April 2026 runtime.
+> Embedded Twilio, Sonnet, Gemini post-call, and framework-migration examples are historical and should not be copied into current Telnyx/Claude Haiku work.
+> Statements below that say "current" or "today" refer to the analysis date, not the May 2026 runtime.
 
 > **Purpose:** Deep analysis of open-source voice AI frameworks (Pipecat, LiveKit) compared to Donna's current implementation, with SOTA best practices and a concrete migration plan.
 

@@ -1,9 +1,10 @@
 """LiveSimPipeline builder -- real Donna pipeline with test transports.
 
-Assembles the production pipeline from ``bot.py`` but replaces external
-I/O components (Twilio transport, Deepgram STT, ElevenLabs/Cartesia TTS)
-with test doubles.  Everything else -- Claude Haiku, Quick Observer,
-Conversation Director, FlowManager, tool handlers -- runs for real.
+Assembles the production pipeline from ``bot.py`` but replaces carrier I/O
+(Telnyx/WebSocket transport), Deepgram STT, and ElevenLabs/Cartesia TTS with
+test doubles. Text-mode simulation injects ``TranscriptionFrame`` directly
+and mocks TTS; everything else -- Claude Haiku, Quick Observer, Conversation
+Director, FlowManager, tool handlers -- runs for real.
 
 Usage::
 
@@ -53,8 +54,8 @@ class LiveSimComponents:
         pipeline: The assembled ``Pipeline`` instance.
         task: The ``PipelineTask`` wrapping the pipeline.
         runner: A ``PipelineRunner`` (``handle_sigint=False``).
-        input_transport: ``TestInputTransport`` replacing Twilio input.
-        output_transport: ``TestOutputTransport`` replacing Twilio output.
+        input_transport: ``TestInputTransport`` replacing carrier input.
+        output_transport: ``TestOutputTransport`` replacing carrier output.
         response_collector: ``ResponseCollector`` capturing LLM text output.
         caller_transport: ``TextCallerTransport`` for injecting utterances.
         quick_observer: Layer 1 regex observer (268 patterns).
@@ -128,7 +129,7 @@ def build_live_sim_pipeline(session_state: dict) -> LiveSimComponents:
     })
 
     # -----------------------------------------------------------------
-    # Test transports (replace Twilio)
+    # Test transports (replace carrier WebSocket I/O)
     # -----------------------------------------------------------------
     input_transport = TestInputTransport()
     output_transport = TestOutputTransport()

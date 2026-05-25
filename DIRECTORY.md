@@ -138,7 +138,7 @@ pipecat/
 │   └── gemini_tools.py  Gemini Live tool adapter
 │
 ├── processors/          Frame processors in the audio pipeline
-│   ├── patterns.py             250+ regex patterns across 19 Quick Observer categories
+│   ├── patterns.py             Companion-call regex guidance patterns plus legacy inactive pattern tables
 │   ├── quick_observer.py       Layer 1: analysis logic + goodbye detection
 │   ├── conversation_director.py Layer 2: Split Director (Query + Guidance) + memory/news injection + ephemeral context
 │   ├── conversation_tracker.py  Tracks topics/questions/advice per call
@@ -155,7 +155,7 @@ pipecat/
 │   ├── director_llm.py      Split Director LLM: Query Director (~200ms) + Guidance Director (~400ms)
 │   ├── call_snapshot.py     Pre-computed call context snapshot for seniors
 │   ├── context_cache.py     Pre-cache senior context + news at 5 AM
-│   ├── call_analysis.py     Post-call analysis via Gemini + call quality
+│   ├── call_analysis.py     Post-call analysis via Anthropic Claude Haiku forced tool-use
 │   ├── interest_discovery.py Interest extraction from conversations
 │   ├── greetings.py         Sentiment-aware greeting templates + rotation
 │   ├── conversations.py     Conversation CRUD
@@ -163,8 +163,8 @@ pipecat/
 │   ├── seniors.py           Senior profile + per-senior call_settings
 │   ├── news.py              OpenAI cached news; in-call web_search uses Tavily first, OpenAI fallback
 │   ├── caregivers.py        Caregiver relationships + notes delivery
-│   ├── data_retention.py    HIPAA data retention: batched purge of 7 tables
-│   ├── audit.py             Fire-and-forget HIPAA audit logging
+│   ├── data_retention.py    HIPAA data retention: batched purge with legal-hold exclusions
+│   ├── audit.py             HIPAA audit logging (best-effort fire-and-forget plus durable export writes)
 │   ├── token_revocation.py  JWT token revocation: per-token + per-admin + expired cleanup
 │   ├── capacity.py          Per-replica capacity heartbeat published to Redis (5s publish, 15s TTL) for Node dispatcher
 │   └── hard_delete.py       Right-to-delete cascade purge (child→parent order, post_call_jobs first)
@@ -309,7 +309,7 @@ Serves all API endpoints that frontends consume. Also runs the reminder schedule
 ├── index.js             Express server entry — CORS, middleware, GrowthBook, scheduler start
 │
 ├── routes/              Frontend-facing /api/* endpoints plus public health/waitlist
-│   ├── calls.js         /api/call — initiate manual outbound call through Pipecat /telnyx/outbound
+│   ├── calls.js         /api/call — manual outbound call; direct except queue_primary enqueues manual lane
 │   ├── seniors.js       CRUD /api/seniors
 │   ├── reminders.js     CRUD /api/reminders + delivery tracking
 │   ├── observability.js Call monitoring endpoints
@@ -334,8 +334,8 @@ Serves all API endpoints that frontends consume. Also runs the reminder schedule
 │   ├── call-schedules.js Materializer: normalizes preferredCallTimes → senior_call_schedules → call_queue rows
 │   ├── pipecat-capacity.js Node reader of pipecat:instance:* heartbeats (Redis/Upstash/none; no local heartbeat registry fallback)
 │   ├── redis-rate-limit-store.js Distributed rate-limit store for Node SlowAPI equivalent
-│   ├── post-call-jobs.js Phase 6 post-call DAG: 8 job types, dependency graph, retry policies, provider semaphores (db/geminiFlash/openAiEmbeddings/resend), dead-letter handling
-│   ├── phase8-capacity-plan.js Phase 8 PHI-free capacity planner (call_queue demand + heartbeats + budget checks)
+│   ├── post-call-jobs.js Phase 6 post-call DAG: 8 job types, dependency graph, retry policies, artifact-verification handlers, provider semaphores (db/anthropicHaiku/geminiFlash/openAiEmbeddings/resend), dead-letter handling
+│   ├── phase8-capacity-plan.js Phase 8 PHI-free capacity planner (future demand + backlog + heartbeats + budget checks)
 │   ├── phase8-autoscaler.js Phase 8 actuator: reads capacity plan, applies Railway scale (dry-run by default), operator overrides
 │   ├── railway-scaling.js Railway CLI shell (`railway scale REGION=REPLICAS`)
 │   ├── canary-cohort.js Phase 7 canary membership source of truth; env allowlist remains emergency fallback

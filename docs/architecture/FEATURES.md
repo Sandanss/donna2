@@ -38,7 +38,7 @@
 - Caregivers can configure Donna's call language per senior through `familyInfo.donnaLanguage`
 - English and Spanish are active call languages
 - Spanish calls set Deepgram STT language to `es`, inject a Spanish-only prompt instruction, and use optional Spanish ElevenLabs/Cartesia voice IDs when configured
-- Gemini post-call analysis writes caregiver-facing summaries and takeaways in the configured Donna language
+- Claude Haiku post-call analysis writes caregiver-facing summaries and takeaways in the configured Donna language
 - Mobile onboarding sends `familyInfo.donnaLanguage` and `topicsToAvoid`; the current website onboarding stores language/topics in local state but only submits relation/interest detail payloads to Node, so website parity still needs a small API payload follow-up.
 
 ### Senior Profile Context
@@ -172,7 +172,7 @@
 Runs automatically after every call disconnect:
 
 1. **Conversation completion** — Duration, status, encrypted transcript saved to DB
-2. **Call analysis** — Gemini Flash generates summary, engagement score (1-10), mood, and caregiver takeaways
+2. **Call analysis** — Anthropic Claude Haiku forced tool-use generates summary, engagement score (1-10), mood, and caregiver takeaways
 3. **Caregiver notification** — Email/in-app updates recorded for completed calls and missed reminders; SMS is inactive
 4. **Summary persistence** — Encrypted at rest; enables cross-call context and caregiver call summaries
 5. **Interest discovery** — Extracts new interests, computes engagement scores
@@ -180,7 +180,7 @@ Runs automatically after every call disconnect:
 7. **Daily context save** — Topics, advice, reminders for same-day cross-call memory
 8. **Reminder cleanup** — Marks unacknowledged reminders for retry
 9. **Cache clearing** — Clears per-senior context and reminder caches
-10. **Snapshot rebuild** — Pre-computes `call_context_snapshot` JSONB for next call
+10. **Snapshot rebuild** — Pre-computes `call_context_snapshot_encrypted` for next call; plaintext `call_context_snapshot` is legacy fallback only
 
 ---
 
@@ -208,7 +208,7 @@ Runs automatically after every call disconnect:
 - PII-safe logging (phone/name masking)
 
 ### Reliability
-- Circuit breakers for all external services (Groq, Gemini, OpenAI, Tavily/news)
+- Circuit breakers for all external services (Groq, Gemini Director fallback, Anthropic analysis, OpenAI, Tavily/news)
 - GrowthBook feature flags with safe defaults when unavailable
 - Graceful shutdown with active call tracking (7s drain on SIGTERM)
 - Enhanced /health endpoint (database + circuit breaker states)
@@ -234,7 +234,7 @@ Runs automatically after every call disconnect:
 
 ### Call Answer Speed (~700ms)
 - **Parallel DB fetches** — Senior profile, memories, news, reminders, and context all fetched concurrently via `asyncio.gather` instead of sequentially
-- **Call context snapshot** — Post-call processing pre-computes a JSONB snapshot (`seniors.call_context_snapshot`) containing last call analysis, recent summaries, recent turns, daily context, and call settings. At call time, a single column read replaces 6 separate DB queries
+- **Call context snapshot** — Post-call processing pre-computes an encrypted snapshot (`seniors.call_context_snapshot_encrypted`) containing last call analysis, recent summaries, recent turns, and daily context. At call time, a single column read replaces 6 separate DB queries; plaintext `call_context_snapshot` is a legacy fallback only.
 - **Cached news** — News fetched at 5 AM local time and stored in `seniors.cached_news`. Call answer reads it from the snapshot instead of making a 4-10s OpenAI web search
 
 ### Predictive Context Engine (Speculative Prefetch)

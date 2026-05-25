@@ -15,7 +15,7 @@ Do NOT confuse the Node.js `services/` with `pipecat/services/` — they are sep
 
 ## Project Goal
 
-**Donna** is an AI-powered companion that makes friendly phone calls to elderly individuals (70+): daily check-ins, medication reminders, companionship, and summaries/alerts for caregivers.
+**Donna** is an AI-powered companion that makes friendly phone calls to elderly individuals (70+): daily check-ins, everyday/social reminders, companionship, and caregiver summaries.
 
 
 
@@ -47,7 +47,7 @@ Telnyx → Deepgram STT → Quick Observer (regex, 0ms) → Conversation Directo
 - **Pipecat Flows** runs a 4-phase state machine for subscriber calls: opening → main → winding_down → closing. Dedicated flows live alongside it: `onboarding` (prospect/inbound), `consent` (capture call + recording permission), `discovery` (friends/hobbies/routines).
 - **Claude tools in main flow:** `web_search` (Tavily → OpenAI fallback) and `mark_reminder_acknowledged` (fire-and-forget). Everything else is Director/post-call. Other call types expose call-type-specific tools via `flows.tools.select_flows_tools`.
 - **Consent calls bypass the Director.** `ConversationDirectorProcessor.process_frame` short-circuits when `call_type == "consent"` — script-driven flow, no improvisation. Scheduler gates dispatch on `seniors.callable = true AND seniors.consent_status = 'granted'`; existing seniors are grandfathered to `granted` by migration 014.
-- **Post-call:** analysis (Gemini), memory extraction (OpenAI), interest discovery, daily-context save, JSONB snapshot rebuild. Discovery calls additionally write a caregiver-reviewable `profile_suggestions` JSONB on `conversations`. Consent declines fire-and-forget POST to `/api/notifications/trigger` with `event_type=consent_declined`.
+- **Post-call:** subscriber analysis (Claude Haiku forced tool-use), memory extraction (OpenAI), interest discovery, daily-context save, encrypted snapshot rebuild. Discovery calls additionally write a caregiver-reviewable `profile_suggestions` JSONB on `conversations`. Consent declines fire-and-forget POST to `/api/notifications/trigger` with `event_type=consent_declined`.
 
 ### Outbound Dispatch — Dual-Path Rollout (Phases 0–8 infra on `zuludev`; runtime defaults still legacy + inline post-call until canary flip)
 
@@ -64,9 +64,9 @@ Outbound dialing is mid-migration from the legacy in-process scheduler to a dura
 
 **Load-bearing primitives.** Postgres decides *what* (queue rows, leases, guards, attempts, post-call jobs); Redis decides *what is running right now* (capacity heartbeats, dedupe). `services/call-queue.js` leases via `FOR UPDATE SKIP LOCKED`. `pipecat/services/capacity.py` publishes heartbeats at `pipecat:instance:{id}` (5 s publish, 15 s TTL). `PIPECAT_REQUIRE_REDIS=true` fails closed at startup; `REDIS_RATE_LIMITS_ENABLED=true` makes SlowAPI fail closed under Redis outage. Materializer is canary-blind by design — cohort selection happens at dispatch, not at insert.
 
-**Post-call job workflow (Phase 6).** `services/post-call-jobs.js` defines the 8-job DAG (`metrics_finalize`, `reminder_recovery`, `analysis`, `memory_extraction`, `daily_context`, `caregiver_notifications`, `interest_discovery`, `snapshot_rebuild`) with per-provider semaphores (`db=200`, `geminiFlash=1`, `openAiEmbeddings=1`, `resend=1`) and per-type retry policies. Terminal failures move to `dead_letter` (migration 011 adds `depends_on`, `dead_lettered_at`, `dead_letter_reason`); admins inspect/replay via `routes/post-call-jobs.js`. **Activation is gated**: Pipecat enqueues only when `POST_CALL_QUEUE_ENABLED=true`; the Node worker has no continuous loop in `index.js` and runs via `scripts/run-post-call-worker-once.js` (shadow mode). Inline `pipecat/services/post_call.py` is still the active path until the canary flip.
+**Post-call job workflow (Phase 6).** `services/post-call-jobs.js` defines the 8-job DAG (`metrics_finalize`, `reminder_recovery`, `analysis`, `memory_extraction`, `daily_context`, `caregiver_notifications`, `interest_discovery`, `snapshot_rebuild`) with per-provider semaphores (`db=200`, `anthropicHaiku=1`, `geminiFlash=1`, `openAiEmbeddings=1`, `resend=1`) and per-type retry policies. Current JS handlers validate artifacts; inline Pipecat post-call analysis uses Claude Haiku. Terminal failures move to `dead_letter` (migration 012 adds `depends_on`, `dead_lettered_at`, `dead_letter_reason`); admins inspect/replay via `routes/post-call-jobs.js`. **Activation is gated**: Pipecat enqueues only when `POST_CALL_QUEUE_ENABLED=true`; the Node worker has no continuous loop in `index.js` and runs via `scripts/run-post-call-worker-once.js` (shadow mode). Inline `pipecat/services/post_call.py` is still the active path until the canary flip.
 
-**Capacity planning (Phase 7/8).** `scripts/phase7-canary-report.js` produces daily aggregate-only reports for the 5→10→25 live canary. `scripts/phase8-capacity-plan.js` reads future `call_queue` rows and `pipecat:instance:*` heartbeats to recommend `scale_up`/`hold`/`scale_down`/`wait_for_readiness`. `services/phase8-autoscaler.js` actuates via `services/railway-scaling.js` (`railway scale REGION=REPLICAS`); the long-running loop in `index.js` only starts when `PHASE8_AUTOSCALER_ENABLED=true` and requires `PHASE8_AUTOSCALER_CONFIRM_SCALE=true` + budget-pass to apply. Admin override at `POST /api/scale-operations/phase8/override`.
+**Capacity planning (Phase 7/8).** `scripts/phase7-canary-report.js` produces daily aggregate-only reports for the 5→10→25 live canary. `services/phase8-capacity-plan.js` reads future `call_queue` rows, current backlog, critical post-call backlog, and `pipecat:instance:*` heartbeats to recommend `scale_up`/`hold`/`scale_down`/`wait_for_readiness`. `services/phase8-autoscaler.js` actuates via `services/railway-scaling.js` (`railway scale REGION=REPLICAS`); the long-running loop in `index.js` only starts when `PHASE8_AUTOSCALER_ENABLED=true` and requires `PHASE8_AUTOSCALER_CONFIRM_SCALE=true` + budget-pass to apply. Admin override at `POST /api/scale-operations/phase8/override`.
 
 Plan and runbooks: [`docs/plans/2026-05-18-scale-to-2000-users-technical-plan.md`](docs/plans/2026-05-18-scale-to-2000-users-technical-plan.md), [`docs/operations/scale-2000-*.md`](docs/operations/) (phase 0/1/5/7/8 + live drills).
 
@@ -98,7 +98,7 @@ Plan and runbooks: [`docs/plans/2026-05-18-scale-to-2000-users-technical-plan.md
 | Dial-authority guard | `services/call-queue.js` (`acquireOutboundCallGuard` + `markOutboundCallGuardInitiatingIfCallable`) — table `outbound_call_guards` |
 | Shared-state / Redis fail-closed | `pipecat/lib/redis_client.py` (`require_shared_state`, Upstash circuit-breaker) |
 | Post-call workflow / dead letters | `services/post-call-jobs.js` (DAG + provider semaphores) + `routes/post-call-jobs.js` (dead-letter admin) + `scripts/run-post-call-worker-once.js` (shadow runner) |
-| Capacity planning / autoscaler | `scripts/phase8-capacity-plan.js` (planner) + `services/phase8-autoscaler.js` (actuator) + `services/railway-scaling.js` (CLI) + `routes/scale-operations.js` (admin) |
+| Capacity planning / autoscaler | `services/phase8-capacity-plan.js` (planner) + `services/phase8-autoscaler.js` (actuator) + `services/railway-scaling.js` (CLI) + `routes/scale-operations.js` (admin) |
 | Phase 5/7 live A/B + canary reports | `scripts/phase5-live-ab-report.js`, `scripts/phase7-canary-report.js`; runbooks in `docs/operations/scale-2000-phase{5,7}-*.md` |
 | Scale-2000 drills + runbooks | `scripts/run-live-telnyx-drill.js`, `pipecat/scripts/redis_shared_state_drill.py`; `docs/operations/scale-2000-*.md` |
 | Per-senior call settings | `pipecat/services/seniors.py` (`get_call_settings()`) |

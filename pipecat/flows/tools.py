@@ -797,8 +797,8 @@ def make_flows_tools(session_state: dict) -> dict[str, FlowsFunctionSchema]:
       ever processes the turn (500ms gate, usually 0ms on cache hit). Giving
       Claude this tool causes it to fetch memories it already has, at 4.3s cost.
 
-    - save_important_detail: EXCLUDED — post-call extract_from_conversation
-      (Gemini) extracts all important details from the full transcript after
+    - save_important_detail: EXCLUDED — post-call memory/analysis extraction
+      captures important details from the full transcript after
       the call ends. In-call saving is redundant and adds latency.
 
     - check_caregiver_notes: EXCLUDED — notes are hydrated at call start
@@ -976,13 +976,15 @@ _DISCOVERY_CATEGORY_TO_MEMORY_TYPE = {
     "hobby": "preference",
     "interest": "preference",
     "routine": "fact",
+    "biography": "fact",
 }
 
 RECORD_DISCOVERY_FACT_SCHEMA = {
     "name": "record_discovery_fact",
     "description": (
         "Capture a specific fact the senior just shared about themselves — a friend "
-        "or family member, a hobby, an interest, a routine. Use their own words for "
+        "or family member, a hobby, an interest, a routine, or a biographical detail "
+        "(where they grew up, former job, life chapter). Use their own words for "
         "content; do not paraphrase or guess. Call between turns, naturally, "
         "without pausing the conversation. Only capture things they STATED — do "
         "not call this for things you inferred."
@@ -990,11 +992,13 @@ RECORD_DISCOVERY_FACT_SCHEMA = {
     "properties": {
         "category": {
             "type": "string",
-            "enum": ["friend", "hobby", "interest", "routine", "family"],
+            "enum": ["friend", "hobby", "interest", "routine", "family", "biography"],
             "description": (
                 "What kind of fact this is. friend = someone they see socially. "
                 "family = a relative. hobby = something they actively do. "
-                "interest = a topic/thing they care about. routine = a recurring activity."
+                "interest = a topic/thing they care about. routine = a recurring activity. "
+                "biography = a stable life fact (where they grew up, former profession, "
+                "marriage, big chapter of life)."
             ),
         },
         "content": {

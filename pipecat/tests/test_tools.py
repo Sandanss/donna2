@@ -309,7 +309,7 @@ class TestDiscoveryTool:
         from flows.tools import RECORD_DISCOVERY_FACT_SCHEMA
         assert RECORD_DISCOVERY_FACT_SCHEMA["name"] == "record_discovery_fact"
         cats = RECORD_DISCOVERY_FACT_SCHEMA["properties"]["category"]["enum"]
-        assert set(cats) == {"friend", "hobby", "interest", "routine", "family"}
+        assert set(cats) == {"friend", "hobby", "interest", "routine", "family", "biography"}
         assert "category" in RECORD_DISCOVERY_FACT_SCHEMA["required"]
         assert "content" in RECORD_DISCOVERY_FACT_SCHEMA["required"]
 

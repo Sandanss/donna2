@@ -2,8 +2,8 @@
 
 > Historical migration design. Use `DIRECTORY.md`, `pipecat/docs/ARCHITECTURE.md`, and the runtime code in `pipecat/bot.py` as the current source of truth.
 > Some embedded examples predate the current audio profile, websocket token admission flow, and active Node scheduler ownership.
-> Current live calls use Telnyx L16/16k, Claude Haiku 4.5, Groq Director with Gemini fallback, ElevenLabs Flash, and email/in-app notifications only.
-> Statements below that say "current" or "today" refer to the historical migration date, not the April 2026 runtime.
+> Current live calls use Telnyx L16/16k, Claude Haiku 4.5, Groq Director with Gemini fallback, Claude Haiku post-call analysis, ElevenLabs Flash, and email/in-app notifications only.
+> Statements below that say "current" or "today" refer to the historical migration date, not the May 2026 runtime.
 
 > Complete mapping of Donna's current codebase to a Pipecat + Pipecat Flows implementation in Python.
 

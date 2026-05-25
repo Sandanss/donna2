@@ -1,6 +1,6 @@
 """Post-call processing — runs after the telephony client disconnects.
 
-    Orchestrates: conversation completion, call analysis (Gemini Flash),
+    Orchestrates: conversation completion, call analysis (Claude Haiku),
     memory extraction, daily context save, reminder cleanup, and cache clearing.
 
 Extracted from bot.py to keep the pipeline assembly module focused.
@@ -862,7 +862,7 @@ async def _mark_delivered_caregiver_notes(session_state: dict, transcript: list 
 async def _summarize_onboarding_call(transcript: list | str, call_sid: str) -> str | None:
     """Summarize an onboarding call transcript into a brief context for the next call.
 
-    Uses Gemini Flash for speed and cost. Returns a short paragraph or None on failure.
+    Uses a lightweight Gemini path for onboarding summaries. Returns a short paragraph or None on failure.
     """
     import os
     import google.generativeai as genai

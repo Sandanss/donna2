@@ -76,7 +76,8 @@ Full call lifecycle from WebSocket connect to post-call processing:
 - Happy path: greeting → conversation → goodbye
 - Goodbye detection: various goodbye phrases
 - Reminder delivery: reminder acknowledged flow
-- Emotional support: crisis detection and response
+- Emotional support: non-medical companionship response to loneliness or distress
+- LLM-vs-LLM mock calls in `pipecat/tests/simulation/` for text-first pipeline coverage and stress scenarios
 
 ---
 
@@ -183,7 +184,7 @@ Python scenario modules that simulate full calls:
 |----------|-------|
 | Happy path | Greeting → topics → natural goodbye |
 | Strong goodbye | "I gotta go" → goodbye response, minimum call-age guard, then delayed EndFrame |
-| Reminder delivery | Medication reminder → acknowledged |
+| Reminder delivery | Everyday/social reminder → acknowledged |
 | Emotional support | Distress signals → empathetic response |
 | Multiple topics | Topic switching during conversation |
 | News discussion | web_search tool call → discussion |

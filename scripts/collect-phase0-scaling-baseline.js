@@ -265,7 +265,7 @@ async function collectBaseline({ days }) {
     windowDays: days,
     phiPolicy: {
       outputContainsRawPhi: false,
-      notes: 'Aggregate counts and percentiles only. No names, phone numbers, transcripts, reminder titles, caregiver notes, or medical notes are selected.',
+      notes: 'Aggregate counts and percentiles only. No names, phone numbers, transcripts, reminder titles, caregiver notes, or profile notes are selected.',
     },
     optionalTables: {
       callAttemptsAvailable,

@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-test.describe('Consumer Protected Routes', () => {
+test.describe('Caregiver Web Protected Routes', () => {
   test('unauthenticated user is redirected from dashboard', async ({ page }) => {
     await page.goto('/dashboard', { waitUntil: 'networkidle' });
 

@@ -79,7 +79,7 @@ Fresh setup starts from the visible Create Account screen. The create-account pa
 
 A Clerk user with no Donna profile is not a valid sign-in destination. If a no-profile Clerk session appears after restart or sign-in, `AuthGuard` calls `DELETE /api/caregivers/me/incomplete-account`, clears the encrypted onboarding draft, signs out locally, and returns to landing.
 
-Native iOS Sign in with Apple uses Clerk's `useSignInWithApple()` flow. Apple auth requires:
+Native iOS Sign in with Apple uses `startAppleAuthenticationWithoutProfileScopes()` with `expo-apple-authentication`, then passes the Apple identity token to Clerk as `oauth_token_apple`. Apple auth requires:
 
 - `ios.usesAppleSignIn` in `app.json`
 - `expo-apple-authentication` in `app.json` plugins and `package.json`

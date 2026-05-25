@@ -261,11 +261,12 @@ class QuickObserverProcessor(FrameProcessor):
     """Pipecat FrameProcessor that runs quick_analyze on each TranscriptionFrame
     and stashes guidance for Conversation Director to inject in one canonical place.
 
-    When a strong goodbye is detected, schedules a forced call end after a delay
-    to ensure the call actually terminates (LLM tool calls are unreliable for this).
+    When a strong goodbye is detected, first tries a programmatic transition to
+    winding_down. If that cannot happen, it schedules a TTS-aware EndFrame
+    fallback so the call actually terminates.
     """
 
-    # Seconds to wait after goodbye detection before forcing call end.
+    # Seconds to wait before the EndFrame fallback after goodbye detection.
     # Gives the LLM time to generate and TTS to speak the goodbye audio.
     GOODBYE_DELAY_SECONDS = 5.0
     PROGRAMMATIC_GOODBYE_MIN_ELAPSED_SECONDS = 0.0
@@ -298,7 +299,7 @@ class QuickObserverProcessor(FrameProcessor):
         """Programmatically transition the flow to winding_down.
 
         Bypasses the LLM tool call (which is unreliable when the senior says
-        a weak goodbye like just 'bye'). Builds the winding_down node from
+        a strong goodbye). Builds the winding_down node from
         the cached flows_tools + session_state and asks flow_manager to
         switch. Returns True on success, False if any prerequisite is
         missing (in which case the caller should fall back to EndFrame).
@@ -490,9 +491,9 @@ class QuickObserverProcessor(FrameProcessor):
             if analysis.guidance and self._session_state is not None:
                 self._session_state["_pending_observer_guidance"] = analysis.guidance
 
-            # PROGRAMMATIC GOODBYE: When strong goodbye detected, schedule forced
-            # call end. The LLM will still generate its goodbye response normally,
-            # but we don't rely on it to call the transition tools.
+            # PROGRAMMATIC GOODBYE: When strong goodbye is detected, transition to
+            # winding_down first. The TTS-aware EndFrame path remains a fallback,
+            # so we don't rely on the LLM to call transition tools.
             #
             # Consent calls are exempt: the persona is scripted to end with a
             # warm "bye now" right after agreeing/declining, and the QO racing

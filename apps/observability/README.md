@@ -1,6 +1,8 @@
 # Donna Observability
 
-Internal-only call monitoring dashboard for Donna operators.
+Internal-only operations dashboard for Donna operators. It has History, Live,
+and Infra views for call review, active-call monitoring, and scale/queue
+health.
 
 ## Data Environments
 
@@ -15,7 +17,7 @@ Switching environments clears the selected call and requires a valid token for t
 ## Local Development
 
 ```bash
-npm --prefix apps/observability run dev
+npm --prefix apps/observability run dev -- --host localhost --port 3002
 ```
 
 Use the environment toggle on the login screen or dashboard header to choose the data source.
@@ -32,7 +34,7 @@ This avoids browser CORS failures while still keeping credentials in the browser
 The Context tab is the main debugging surface for what Donna sent into the LLM path during a call. New calls capture:
 
 - base system and flow task prompts
-- senior profile, local time, interests, health notes, caregiver notes, and reminder prompt context
+- senior profile, local time, interests, profile context, caregiver notes, and reminder prompt context
 - previous-call summaries, same-day context, initial memory context, and last-call analysis follow-up context
 - Director guidance, prefetched memory injections, web search/tool calls, tool results, and latency
 

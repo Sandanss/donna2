@@ -5,10 +5,11 @@ Port of services/context-cache.js (365 lines). Caches:
 - Critical memories (Tier 1)
 
 - Important memories (with decay)
-- Pre-generated greeting (templated with rotation)
+- Legacy templated greeting helpers (active call greetings use services.greetings)
 
 In-memory cache with 24-hour TTL. Called by scheduler hourly + at call connect.
-News is also persisted to seniors.cached_news so calls never need live web search.
+News is also persisted to seniors.cached_news for cached interest/news context.
+Live in-call web_search remains available for current user questions.
 """
 
 from __future__ import annotations

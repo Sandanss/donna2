@@ -174,11 +174,11 @@ done
 Fresh onboarding tests must create a Clerk account through the visible Create Account screen. Do not sign in with a no-profile user to start onboarding; the app now treats that as an incomplete account and cleans it up. Useful checks:
 
 ```bash
-npm run test:unit
-npm run test:auth-guard
-npm run test:e2e:onboarding
-maestro test .maestro/flows/12_incomplete_account_cleanup.yaml
-maestro test .maestro/flows/13_leave_setup_cleanup.yaml
+npm --prefix apps/mobile run test:unit
+npm --prefix apps/mobile run test:auth-guard
+npm --prefix apps/mobile run test:e2e:onboarding
+(cd apps/mobile && maestro test .maestro/flows/12_incomplete_account_cleanup.yaml)
+(cd apps/mobile && maestro test .maestro/flows/13_leave_setup_cleanup.yaml)
 ```
 
 ---

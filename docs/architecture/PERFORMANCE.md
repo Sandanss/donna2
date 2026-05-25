@@ -96,7 +96,7 @@ Publisher: `pipecat/services/capacity.py` writes to `pipecat:instance:{id}` ever
 
 Phase 6 adds a queued path for post-call work, but the active Pipecat runtime still runs the inline chain unless flags later disable it. When `POST_CALL_QUEUE_ENABLED=true`, Pipecat seeds the job DAG early and continues inline processing; `run_bot()` still awaits the post-call task before releasing active-call capacity. Jobs lease via `FOR UPDATE SKIP LOCKED` on `post_call_jobs`, respect the dependency DAG (`depends_on UUID[]` — no job leases while any prerequisite is unfinished), and execute under per-provider semaphores to limit each worker process.
 
-**Provider concurrency caps:** `db=200`, `anthropicHaiku=1`, `geminiFlash=1`, `openAiEmbeddings=1`, `resend=1`. Each post-call job type maps to exactly one provider lane (`analysis → geminiFlash`, `memory_extraction → openAiEmbeddings`, `caregiver_notifications → resend`, etc.). The semaphores are in-process JS objects, so they cap each worker process, not the whole fleet; fleet-wide caps still require operational worker-count control or a future distributed limiter.
+**Provider concurrency caps:** `db=200`, `anthropicHaiku=1`, `geminiFlash=1`, `openAiEmbeddings=1`, `resend=1`. Each post-call job type maps to one provider lane in the JS worker (`analysis` is currently an artifact-verification job lane, while Pipecat inline subscriber analysis uses Claude Haiku). The semaphores are in-process JS objects, so they cap each worker process, not the whole fleet; fleet-wide caps still require operational worker-count control or a future distributed limiter.
 
 **Retry policy:** default `maxAttempts=5` with backoff `[30, 120, 480, 1920]` seconds; `analysis` and `memory_extraction` use a longer schedule (`[60, 300, 1800, 7200]`). After `maxAttempts`, the job is moved to `dead_letter` with a PHI-free reason code; the partial index `idx_post_call_jobs_dead_letter` keeps dead-letter scans cheap.
 
@@ -108,11 +108,11 @@ Phase 6 adds a queued path for post-call work, but the active Pipecat runtime st
 
 **Active files**: `services/phase8-capacity-plan.js`, `services/phase8-autoscaler.js`, `services/railway-scaling.js`
 
-The Phase 8 planner reads future `call_queue` rows for a window plus live `pipecat:instance:*` heartbeats, and emits a single `recommendation`:
+The Phase 8 planner reads future `call_queue` rows for a window, current queue backlog, critical post-call backlog, and live `pipecat:instance:*` heartbeats, then emits a single `recommendation`:
 
 | Action | Trigger |
 |---|---|
-| `scale_up` | projected window load > current usable capacity (after lane reserves), and `hourly_cost_budget` check passes |
+| `scale_up` | projected demand or backlog exceeds current usable capacity. Budget/readiness/lane checks gate autoscaler application; the recommendation can still be emitted for operator visibility. |
 | `wait_for_readiness` | one or more current replicas have not crossed the warm-up gate yet — do not count them as usable |
 | `hold` | current count meets the window |
 | `scale_down` | current count > target + safety; only applied if operator confirms checks pass |
@@ -250,7 +250,7 @@ CLOSED ──(failure_threshold reached)──► OPEN ──(recovery_timeout e
 | `groq_speculative` | 5s | 3 | 30s | Skip same-turn speculative guidance |
 | `groq_query` | 3s | 3 | 30s | Skip query-derived memory prefetch for that turn |
 | `gemini_director` | 10s | 3 | 60s | Skip fallback Director analysis (call continues without guidance) |
-| `gemini_analysis` | 15s | 3 | 60s | Use default post-call analysis fallback |
+| `anthropic_analysis` | 15s | 3 | 60s | Use default post-call analysis fallback |
 | `openai_news` | 10s | 3 | 60s | Skip cached news fetch |
 | `tavily_search` | 8s | 3 | 60s | Fall back to OpenAI web search |
 | `openai_embedding` | 10s | 3 | 60s | Skip memory store/search for that turn |
@@ -266,7 +266,7 @@ Circuit breaker states exposed on `/health`:
     "groq_speculative": "closed",
     "groq_query": "closed",
     "gemini_director": "closed",
-    "gemini_analysis": "closed",
+    "anthropic_analysis": "closed",
     "openai_news": "closed",
     "tavily_search": "closed",
     "openai_embedding": "closed"
@@ -402,7 +402,7 @@ call metrics.
     "groq_speculative": "closed",
     "groq_query": "closed",
     "gemini_director": "closed",
-    "gemini_analysis": "closed",
+    "anthropic_analysis": "closed",
     "openai_news": "closed",
     "tavily_search": "closed",
     "openai_embedding": "closed"

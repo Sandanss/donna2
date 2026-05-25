@@ -1,9 +1,10 @@
 """Donna voice pipeline — core bot entry point.
 
 Assembles the full Pipecat pipeline for a single call session:
-  Telnyx WebSocket → Deepgram STT → Quick Observer → LLM Context →
-  Anthropic Claude → Guidance Stripper → Conversation Tracker →
-  TTS provider → Telnyx output
+  Telnyx WebSocket → preroll → Deepgram STT → Quick Observer →
+  user Conversation Tracker → Conversation Director → LLM Context →
+  Anthropic Claude + FlowManager → Guidance Stripper →
+  assistant Conversation Tracker → metrics → TTS provider → Telnyx output
 
 Called once per incoming WebSocket connection from Telnyx.
 """
@@ -452,7 +453,7 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
             - reminders_delivered: set
             - conversation_id: str | None
             - call_sid: str | None
-            - call_type: str ("check-in" | "reminder")
+            - call_type: str ("schedule" | "onboarding" | "consent" | "discovery" | subscriber/default)
             - previous_calls_summary: str | None
             - todays_context: str | None
     """
@@ -558,7 +559,7 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
             rem=bool(session_state.get("reminder_prompt")),
         )
 
-    # Also merge custom parameters from TwiML <Stream> params
+    # Also merge custom parameters from the telephony WebSocket metadata.
     body = call_data.get("body", {})
     if body.get("senior_id") and not session_state.get("senior_id"):
         session_state["senior_id"] = body["senior_id"]

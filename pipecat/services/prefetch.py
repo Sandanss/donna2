@@ -1,12 +1,12 @@
 """Predictive Context Engine — speculative memory prefetch.
 
-Extracts likely topics/entities from user speech using regex patterns
-and Director LLM analysis, then pre-fetches memories in the background
-so Donna can inject relevant context before Claude responds.
+Uses raw/interim user speech and Director LLM query analysis to pre-fetch
+memories in the background so Donna can inject relevant context before Claude
+responds.
 
 Key classes + functions:
 - PrefetchCache: TTL cache for memory results (stored in session_state)
-- extract_prefetch_queries(): regex-based topic/entity extraction
+- extract_prefetch_queries(): raw utterance to memory query candidates
 - extract_director_queries(): LLM-extracted topics from Director analysis
 - run_prefetch(): async memory search with dedup + concurrency limit
 """

@@ -396,7 +396,7 @@ async def analyze_completed_call(
     *,
     call_started_at=None,
 ) -> dict:
-    """Analyze a completed call using Gemini Flash."""
+    """Analyze a completed call using Anthropic Claude Haiku forced tool-use."""
     call_datetime = (
         format_local_datetime(
             call_started_at,

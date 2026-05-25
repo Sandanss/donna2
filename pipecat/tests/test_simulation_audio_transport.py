@@ -2,9 +2,9 @@
 
 These tests exercise the audio-frame slicing, silence appending, and
 speaking-frame emission with a STUB TTS provider so no real ElevenLabs or
-Cartesia calls happen in CI. Real audio-loop tests (text → real TTS →
-real STT → assertion) live behind the ``audio_simulation`` pytest mark and
-require ``ELEVENLABS_API_KEY`` + ``DEEPGRAM_API_KEY``.
+Cartesia calls happen in CI. End-to-end audio simulation (text → real TTS →
+real STT → assertion) is planned separately and is not registered as a pytest
+marker yet.
 """
 
 from __future__ import annotations

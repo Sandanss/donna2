@@ -236,7 +236,9 @@ Recommended key families:
 - `call:ws_token_claimed:{call_control_id}`
 - `telnyx:event:{event_id}` (TTL 10–30 min)
 - `telnyx:stream_started:{call_control_id}` (TTL = max call duration + buffer)
-- `call:reservation:{reservation_id}` (TTL 2–5 min)
+- `pipecat:reservation:{reservation_id}` (reservation payload, TTL 2–5 min)
+- `pipecat:queue-reservations:{queue_id}` (queue-to-reservation set)
+- `pipecat:reservation-slot:{instance_id}:{reservation_id}` (slot-level guard)
 - `call:pending_start:{call_control_id}`
 - `senior:cooldown:{senior_id}` (TTL 10 min)
 - `rate:{scope}:{key}`
@@ -712,7 +714,7 @@ This phase runs in parallel with Phase 2. It is a hard prerequisite for Phase 7 
 
 1. Postgres `FOR UPDATE SKIP LOCKED` lease.
 2. Lane policy + protected capacity (§2.3, includes `inbound` reserve).
-3. Capacity reservation in Redis with TTL (`call:reservation:{reservation_id}`, TTL 2–5 min).
+3. Capacity reservation in Redis with TTL (`pipecat:reservation:{reservation_id}`, queue reservation set, and slot guard keys, TTL 2–5 min).
 4. Pass `queue_id` + `reservation_id` through Node → Pipecat `/telnyx/outbound`.
 5. `call_attempts` persistence with architecture / cohort / test_run_id.
 6. Reconciler for expired leases / reservations / queue rows past `latest_at`.
@@ -739,7 +741,7 @@ This phase runs in parallel with Phase 2. It is a hard prerequisite for Phase 7 
 **Phase 4 implementation artifacts on this branch:**
 
 - Dispatcher core (Phase 2 commit, used by Phase 4): `services/call-queue.js` — `dispatchQueuedCalls`, `dryRunDispatchQueuedCalls`, `leaseQueuedCalls`, `reconcileQueueLeases`, `acquireOutboundCallGuard`, `markOutboundCallGuardInitiatingIfCallable` (senior-delete recheck inside the same transaction), `recordCallAttempt` with `{architecture, cohort, test_run_id}`.
-- Standalone dispatcher worker: `npm run phase4:dispatcher-worker` → `scripts/run-dispatcher-worker.js`. Separable from the API server per Phase 3 §9; honors `CALL_QUEUE_ROLLOUT_MODE` + `CALL_QUEUE_ALLOW_REAL_DIAL` and drains via SIGTERM through `drainQueueDispatcherReservations`.
+- Standalone dispatcher worker: `npm run phase4:dispatcher-worker` → `scripts/run-dispatcher-worker.js`. Separable from the API server per Phase 3 §9; honors `CALL_ARCHITECTURE_MODE` + `CALL_QUEUE_ALLOW_REAL_DIAL` and drains via SIGTERM through `drainQueueDispatcherReservations`.
 - Pipecat dispatcher rate-limit carve-out: `pipecat/api/middleware/rate_limit.py` exposes `service_request_key` / `public_request_key` and `SERVICE_CALL_LIMIT`. `pipecat/api/routes/telnyx.py` `telnyx_outbound_call` / `telnyx_prewarm_call` stack `@limiter.limit(CALL_LIMIT, key_func=public_request_key)` with `@limiter.limit(SERVICE_CALL_LIMIT, key_func=service_request_key)` so the labeled `dispatcher` key bypasses the public per-IP bucket.
 - Pipecat `call_attempts` lifecycle writer: `pipecat/services/call_attempts.py` updates `answered_at` / `media_started_at` / `ended_at` / `provider_error_code` from the Telnyx event stream. Wired into `_handle_call_answered`, `_record_streaming_event`, and the terminal-events branch of `telnyx_events` so the dispatcher's audit queries see the full lifecycle without Node ingesting webhooks.
 - Pipecat outbound response surfaces `instanceId` so the dispatcher records senior→replica affinity on the actual replica that handled the dial (`create_telnyx_outbound_call`).
@@ -844,8 +846,8 @@ Decision belongs to Phase 0 (Open Decisions closed in writing) — choose Tempor
    - Retention policy applies (180d default).
    - Alerts fire if dead-letter rate per job type exceeds threshold.
 5. **Per-provider concurrency caps (tied to Phase 0 vendor inventory).**
-   - Gemini Flash post-call analysis: cap at 60% of measured concurrent capacity from Phase 0.
-   - Anthropic Haiku only if a future handler config routes post-call analysis back to Anthropic.
+   - Anthropic Haiku post-call analysis: cap at 60% of measured concurrent capacity from Phase 0 when generation is in the worker.
+   - Gemini Flash lane remains only for legacy/onboarding/artifact-verification paths unless a future handler intentionally routes analysis there.
    - OpenAI embeddings: cap at 50% of measured RPM.
    - Resend notifications: cap at 50% of measured send rate.
 6. **Stampede test (rev 2 addition).** 600 simultaneous call completions against vendor stubs. Asserts:

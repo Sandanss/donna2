@@ -67,12 +67,12 @@ async def list_seniors(auth: AuthContext = Depends(require_auth)):
   - `GET /api/scale-operations/phase8/plan` — capacity recommendation for a window.
   - `POST /api/scale-operations/phase8/autoscale-once` — single-tick autoscaler; dry-run unless body opts in.
   - `POST /api/scale-operations/phase8/override` — operator override with reason code, audited with `operation=phase8_operator_override`.
-  - `GET /api/post-call-jobs/dead-letter` — list dead-lettered post-call jobs (counts + reason code only).
+  - `GET /api/post-call-jobs/dead-letter` — list dead-lettered post-call jobs with operational identifiers (`id`, `call_sid`, `senior_id`, `dedupe_key`) plus type/status/timestamps and sanitized reason code.
   - `POST /api/post-call-jobs/:id/replay` — replay a single dead-lettered job after review.
   - `GET /api/canary/members` — list active queue canary members by senior ID/ramp phase only.
   - `POST /api/canary/members` — add one or more senior IDs to a ramp phase.
   - `DELETE /api/canary/members/:seniorId` — remove one canary member with a PHI-free reason.
-- All responses are PHI-free: capacity plans emit replica/slot counts, dead-letter listings carry sanitized reason codes, canary membership returns IDs/ramp metadata only, and the operator-override reason is normalized to `[a-z0-9_.:-]{1,120}` before logging.
+- Operator responses are content-free but may include internal identifiers: capacity plans emit replica/slot counts, dead-letter listings carry job/call/senior IDs and sanitized reason codes, canary membership returns IDs/ramp metadata only, and the operator-override reason is normalized to `[a-z0-9_.:-]{1,120}` before logging.
 
 ---
 

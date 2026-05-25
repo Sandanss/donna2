@@ -49,7 +49,7 @@ from services.context_trace import record_context_event, record_latency_event
 
 
 # ---------------------------------------------------------------------------
-# Query similarity (web search cache dedup)
+# Legacy query similarity helpers retained for older cache-dedup experiments.
 # ---------------------------------------------------------------------------
 
 _NOISE_WORDS = frozenset({
@@ -228,7 +228,7 @@ class ConversationDirectorProcessor(FrameProcessor):
         """Non-blocking: inject guidance, start analysis, pass frame."""
         await super().process_frame(frame, direction)
 
-        # --- End of call: log speculative + prefetch + web search metrics ---
+        # --- End of call: stop background analysis and log speculative metrics ---
         if isinstance(frame, EndFrame):
             self._cancel_background_tasks()
             if self._speculative_attempts > 0:
@@ -690,7 +690,7 @@ class ConversationDirectorProcessor(FrameProcessor):
                 still_running += 1
                 remaining.append((source_text, task))
 
-        # Clear completed tasks, keep running ones (they build cache)
+        # Clear completed tasks and keep still-running ones for cancellation/cleanup.
         self._speculative_tasks = remaining
 
         if best_result:
@@ -700,7 +700,7 @@ class ConversationDirectorProcessor(FrameProcessor):
             self._speculative_misses += 1
             logger.info(
                 "[Director] No speculative match at final transcription "
-                "({n} still running, building cache)",
+                "({n} still running)",
                 n=still_running,
             )
         return None
@@ -908,10 +908,10 @@ class ConversationDirectorProcessor(FrameProcessor):
         Checks the prefetch cache for memories relevant to the current user
         speech and injects them as context — eliminates ~4.3s tool call latency.
 
-        300ms gate: If no cache hit yet, waits up to 300ms for in-flight
+        500ms gate: If no cache hit yet, waits up to 500ms for in-flight
         prefetch to complete. Prefetch starts on interim transcriptions while
         the user is still speaking, so most queries are cached before the final
-        arrives. The 300ms is a worst-case backstop.
+        arrives. The 500ms is a worst-case backstop.
         """
         cache = self._session_state.get("_prefetch_cache")
         if not cache:

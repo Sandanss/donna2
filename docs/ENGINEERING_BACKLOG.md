@@ -7,7 +7,7 @@ Tech-debt and refactor opportunities surfaced from periodic codebase audits. Dis
 ### `/api/calls` returns hardcoded active-call data
 - **Evidence:** `routes/calls.js:80-81` returns `{ activeCalls: 0, callSids: [] }`. Active calls live in Pipecat, not Node.
 - **Risk:** Admin/observability surfaces showing call counts are silently wrong.
-- **Suggested next step:** Proxy the call count from Pipecat (e.g., `/health` already returns `_active_calls`) or remove the stub and have callers hit Pipecat directly.
+- **Suggested next step:** Proxy the call count from Pipecat (e.g., `/health` already returns `_active_calls`) or remove the stub from Node-facing surfaces. Frontends should continue calling the Node API rather than Pipecat directly.
 
 ## P1 — Architecture and maintainability
 
