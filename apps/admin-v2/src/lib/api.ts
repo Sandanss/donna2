@@ -106,6 +106,30 @@ export const api = {
       return fetchJson<DailyContextEntry[]>(`/api/daily-context${qs ? `?${qs}` : ''}`);
     },
   },
+
+  // Post-call Jobs
+  postCallJobs: {
+    deadLetters: (limit = 100) =>
+      fetchJson<{ jobs: PostCallJob[] }>(`/api/post-call-jobs/dead-letter?limit=${limit}`),
+    replay: (id: string) =>
+      fetchJson<{ job: PostCallJob }>(`/api/post-call-jobs/${id}/replay`, { method: 'POST' }),
+  },
+
+  // Scale Operations
+  scaleOperations: {
+    phase8Plan: () =>
+      fetchJson<{ plan: Phase8CapacityPlan }>('/api/scale-operations/phase8/plan'),
+    autoscaleOnce: (data: Phase8ScaleRequest) =>
+      fetchJson<Phase8ScaleResult>('/api/scale-operations/phase8/autoscale-once', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    override: (data: Phase8ScaleRequest & { targetReplicas: number; reason?: string }) =>
+      fetchJson<Phase8ScaleResult>('/api/scale-operations/phase8/override', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+  },
 };
 
 // ===== TypeScript Types =====
@@ -222,4 +246,109 @@ export interface DailyContextEntry {
   topicsDiscussed: string[];
   remindersDelivered: string[];
   adviceGiven: string[];
+}
+
+export interface PostCallJob {
+  id: string;
+  conversationId: string | null;
+  callSid: string | null;
+  seniorId: string | null;
+  jobType: string;
+  status: string;
+  priority: number;
+  dedupeKey: string;
+  dependsOn: string[];
+  attemptCount: number;
+  maxAttempts: number;
+  leaseOwner: string | null;
+  leaseExpiresAt: string | null;
+  runAfter: string | null;
+  lastErrorCode: string | null;
+  lastErrorAt: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  deadLetteredAt: string | null;
+  deadLetterReason: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface Phase8CapacityPlan {
+  ok: boolean;
+  generatedAt: string;
+  window: {
+    start: string;
+    end: string;
+    minutes: number;
+    warmupMinutes: number;
+    readyMinutesBeforeWindow: number;
+  };
+  demand: {
+    total: number;
+    byLane: Record<string, number>;
+    byStatus: Record<string, number>;
+    unknownLane: number;
+  };
+  capacity: {
+    currentReplicas: number;
+    totalReplicas: number;
+    readyReplicas: number;
+    availableSlots: number;
+    activeCalls: number;
+    pendingReservations: number;
+    warmupGateRedReplicas: number;
+    maxCallsPerReplica: number;
+    registryError: string | null;
+  };
+  postCall: {
+    criticalBacklog: number;
+    criticalBacklogThreshold: number;
+  };
+  recommendation: {
+    action: string;
+    reason: string;
+    targetReplicas: number;
+    currentReplicas: number;
+    requiredReplicas: number;
+    scaleUpBy: number;
+    scaleDownBy: number;
+    scaleDownSafe: boolean;
+    scaleUpAt: string;
+    targetReadyAt: string;
+    cost: {
+      projectedHourlyCost: number | null;
+      hourlyBudget: number | null;
+      withinHourlyBudget: boolean | null;
+    };
+  };
+  checks: { name: string; status: string; detail?: string; reason?: string }[];
+}
+
+export interface Phase8ScaleRequest {
+  confirmScale?: boolean;
+  dryRun?: boolean;
+  currentReplicas?: number;
+  service?: string;
+  environment?: string;
+  region?: string;
+}
+
+export interface Phase8ScaleResult {
+  ok: boolean;
+  applied: boolean;
+  dryRun: boolean;
+  direction?: string;
+  targetReplicas?: number;
+  currentReplicas?: number;
+  plan: Phase8CapacityPlan;
+  scaleOperation: {
+    ok: boolean;
+    applied: boolean;
+    dryRun: boolean;
+    targetReplicas: number;
+    reason: string;
+    command?: {
+      display: string;
+    };
+  } | null;
 }

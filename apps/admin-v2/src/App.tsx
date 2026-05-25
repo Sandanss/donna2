@@ -10,6 +10,8 @@ import Reminders from '@/pages/Reminders';
 import CallAnalyses from '@/pages/CallAnalyses';
 import Caregivers from '@/pages/Caregivers';
 import DailyContext from '@/pages/DailyContext';
+import PostCallJobs from '@/pages/PostCallJobs';
+import ScaleOperations from '@/pages/ScaleOperations';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { token } = useAuth();
@@ -35,6 +37,8 @@ export default function App() {
                   <Route path="/call-analyses" element={<CallAnalyses />} />
                   <Route path="/caregivers" element={<Caregivers />} />
                   <Route path="/daily-context" element={<DailyContext />} />
+                  <Route path="/post-call-jobs" element={<PostCallJobs />} />
+                  <Route path="/scale-operations" element={<ScaleOperations />} />
                 </Routes>
               </Layout>
             </ProtectedRoute>

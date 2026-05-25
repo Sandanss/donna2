@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '@/lib/auth';
 import { cn } from '@/lib/utils';
-import { LayoutDashboard, Users, Phone, Bell, BarChart3, Heart, Calendar, LogOut } from 'lucide-react';
+import { LayoutDashboard, Users, Phone, Bell, BarChart3, Heart, Calendar, AlertTriangle, Activity, LogOut } from 'lucide-react';
 
 const tabs = [
   { path: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -11,6 +11,8 @@ const tabs = [
   { path: '/call-analyses', label: 'Call Analyses', icon: BarChart3 },
   { path: '/caregivers', label: 'Caregivers', icon: Heart },
   { path: '/daily-context', label: 'Daily Context', icon: Calendar },
+  { path: '/post-call-jobs', label: 'Post-Call Jobs', icon: AlertTriangle },
+  { path: '/scale-operations', label: 'Scale Ops', icon: Activity },
 ];
 
 export default function Layout({ children }: { children: React.ReactNode }) {

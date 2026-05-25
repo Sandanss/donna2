@@ -7,6 +7,7 @@
 
 import rateLimit from 'express-rate-limit';
 import { withRequestId } from '../lib/http-response.js';
+import { createRedisRateLimitStore } from '../services/redis-rate-limit-store.js';
 
 /**
  * Standard error response for rate limiting
@@ -27,6 +28,7 @@ const rateLimitHandler = (req, res) => {
 export const apiLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 100,
+  store: createRedisRateLimitStore({ prefix: 'node-api' }),
   standardHeaders: true, // Return rate limit info in headers
   legacyHeaders: false,
   handler: rateLimitHandler,
@@ -43,6 +45,7 @@ export const apiLimiter = rateLimit({
 export const callLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 5,
+  store: createRedisRateLimitStore({ prefix: 'node-call' }),
   standardHeaders: true,
   legacyHeaders: false,
   message: {
@@ -59,6 +62,7 @@ export const callLimiter = rateLimit({
 export const writeLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 30,
+  store: createRedisRateLimitStore({ prefix: 'node-write' }),
   standardHeaders: true,
   legacyHeaders: false,
   handler: rateLimitHandler,
@@ -71,6 +75,7 @@ export const writeLimiter = rateLimit({
 export const authLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 10,
+  store: createRedisRateLimitStore({ prefix: 'node-auth' }),
   standardHeaders: true,
   legacyHeaders: false,
   message: {
@@ -87,6 +92,7 @@ export const authLimiter = rateLimit({
 export const webhookLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 500,
+  store: createRedisRateLimitStore({ prefix: 'node-webhook' }),
   standardHeaders: true,
   legacyHeaders: false,
 });
