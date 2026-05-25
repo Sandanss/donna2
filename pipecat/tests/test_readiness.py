@@ -251,3 +251,85 @@ async def test_report_to_dict_is_serializable():
     assert parsed["total_latency_ms"] == 123
     assert parsed["checks"][1]["error"] == "TimeoutError"
     assert parsed["checks"][1]["required"] is False
+
+
+@pytest.mark.asyncio
+async def test_prepare_for_traffic_skips_primer_when_not_required(monkeypatch):
+    """I3 review fix: when READINESS_REQUIRE_PROMPT_CACHE_PRIMER=false, the
+    primer check must NOT make the real Anthropic API call. Returns a skipped
+    CheckResult instead. This is the cost-saving path."""
+
+    primer_calls = {"count": 0}
+
+    async def fake_primer() -> readiness.CheckResult:
+        primer_calls["count"] += 1
+        return True, None
+
+    async def ok_check() -> readiness.CheckResult:
+        return True, None
+
+    async def ok_pool(_n: int) -> readiness.CheckResult:
+        return True, None
+
+    monkeypatch.setattr(readiness, "check_db_pool_warm", ok_pool)
+    monkeypatch.setattr(readiness, "check_growthbook_loaded", ok_check)
+    monkeypatch.setattr(readiness, "check_anthropic_prompt_cache_primer", fake_primer)
+    monkeypatch.setattr(readiness, "check_deepgram_session", ok_check)
+    monkeypatch.setattr(readiness, "check_tts_session", ok_check)
+    monkeypatch.setattr(readiness, "check_circuit_breakers_closed", ok_check)
+
+    captured = {"ready": None}
+
+    def set_ready(v: bool) -> None:
+        captured["ready"] = v
+
+    report = await readiness.prepare_for_traffic(
+        set_ready=set_ready,
+        require_prompt_cache_primer=False,
+    )
+
+    # The primer function must NOT have been invoked (zero billable cost).
+    assert primer_calls["count"] == 0
+    # But the check must still appear in the report as skipped.
+    by_name = {c.name: c for c in report.checks}
+    primer_result = by_name["anthropic_prompt_cache_primer"]
+    assert primer_result.skipped is True
+    assert primer_result.required is False
+    assert primer_result.ok is True
+    # Gate still flips ready when all other required checks pass.
+    assert captured["ready"] is True
+    assert report.ready is True
+
+
+@pytest.mark.asyncio
+async def test_prepare_for_traffic_runs_primer_when_required(monkeypatch):
+    """Symmetric test: when the flag is on, the primer IS called."""
+
+    primer_calls = {"count": 0}
+
+    async def fake_primer() -> readiness.CheckResult:
+        primer_calls["count"] += 1
+        return True, None
+
+    async def ok_check() -> readiness.CheckResult:
+        return True, None
+
+    async def ok_pool(_n: int) -> readiness.CheckResult:
+        return True, None
+
+    monkeypatch.setattr(readiness, "check_db_pool_warm", ok_pool)
+    monkeypatch.setattr(readiness, "check_growthbook_loaded", ok_check)
+    monkeypatch.setattr(readiness, "check_anthropic_prompt_cache_primer", fake_primer)
+    monkeypatch.setattr(readiness, "check_deepgram_session", ok_check)
+    monkeypatch.setattr(readiness, "check_tts_session", ok_check)
+    monkeypatch.setattr(readiness, "check_circuit_breakers_closed", ok_check)
+
+    def set_ready(v: bool) -> None:
+        pass
+
+    await readiness.prepare_for_traffic(
+        set_ready=set_ready,
+        require_prompt_cache_primer=True,
+    )
+
+    assert primer_calls["count"] == 1

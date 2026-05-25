@@ -1157,6 +1157,26 @@ export function startScheduler(baseUrl, intervalMs = 60000) {
         }
       }
 
+      // Guard cleanup is a pure-maintenance task — it must run in
+      // legacy_rollback too so stale guards from a prior queue_primary
+      // window don't accumulate and block a future ramp back into queue
+      // mode (I8 review fix). Hoisted out of the shadow-mode gate below.
+      if (
+        callArchitecture.mode !== CALL_ARCHITECTURE_MODES.LEGACY_ONLY &&
+        callArchitecture.reconcilerEnabled !== false
+      ) {
+        try {
+          const guardCycle = await reconcileOutboundCallGuards({
+            limit: callArchitecture.dispatcherBatchSize,
+          });
+          if (guardCycle.released > 0) {
+            log.info('Outbound guard reconciliation cycle', guardCycle);
+          }
+        } catch (guardErr) {
+          log.warn('Outbound guard reconciliation failed', { error: guardErr?.message });
+        }
+      }
+
       if (
         callArchitecture.mode === CALL_ARCHITECTURE_MODES.SHADOW_MATERIALIZE ||
         callArchitecture.mode === CALL_ARCHITECTURE_MODES.SHADOW_DISPATCH ||
@@ -1189,19 +1209,6 @@ export function startScheduler(baseUrl, intervalMs = 60000) {
             });
             if (reconciled.recovered > 0 || reconciled.expired > 0) {
               log.info('Queue lease reconciliation cycle', reconciled);
-            }
-
-            // Phase 4 work item 6b: release stuck outbound guards so a
-            // crashed dispatcher cycle can't permanently block a senior.
-            try {
-              const guardCycle = await reconcileOutboundCallGuards({
-                limit: callArchitecture.dispatcherBatchSize,
-              });
-              if (guardCycle.released > 0) {
-                log.info('Outbound guard reconciliation cycle', guardCycle);
-              }
-            } catch (guardErr) {
-              log.warn('Outbound guard reconciliation failed', { error: guardErr?.message });
             }
           }
 

@@ -524,12 +524,42 @@ export function buildLaneCapacityPlan({
   };
 }
 
+// Process-level cache for resolveCallArchitectureConfig when called with
+// the default process.env (hot path: per-senior-write hook in services/seniors.js
+// + per-dispatch tick in scheduler.js + per-dispatchQueuedCalls call).
+// Production env vars don't change at runtime; tests do mutate them, so the
+// cache auto-invalidates when any tracked env value changes. The "tracked"
+// set covers every env var read by this function so we're correct by
+// construction. Callers that pass an explicit env bypass the cache entirely.
+const _ARCH_ENV_KEYS = [
+  'CALL_ARCHITECTURE_MODE', 'CALL_QUEUE_ALLOW_REAL_DIAL', 'CALL_QUEUE_SHADOW_MATERIALIZE',
+  'CALL_QUEUE_SHADOW_DISPATCH', 'CALL_QUEUE_REQUIRE_DIAL_GUARD', 'CALL_QUEUE_COMPARE_WITH_LEGACY',
+  'CALL_QUEUE_CANARY_PERCENT', 'CALL_QUEUE_COHORT_ALLOWLIST', 'CALL_QUEUE_TEST_RUN_ID',
+  'CALL_QUEUE_MATERIALIZER_LIMIT', 'CALL_QUEUE_DISPATCHER_ENABLED', 'CALL_QUEUE_RECONCILER_ENABLED',
+  'CALL_DISPATCH_MAX_BATCH_SIZE', 'CALL_DISPATCH_LEASE_SECONDS', 'CALL_DISPATCH_OVERBOOK_FACTOR',
+  'CALL_QUEUE_USE_CAPACITY_REGISTRY', 'CALL_QUEUE_REQUIRE_CAPACITY_REGISTRY',
+  'CALL_LANE_POLICY_VERSION', 'CALL_QUEUE_SHADOW_CAPACITY', 'CALL_QUEUE_ENABLED_CALL_TYPES',
+];
+let _callArchitectureConfigCache = null;
+let _callArchitectureConfigCacheKey = '';
+function envSnapshot(env) {
+  return _ARCH_ENV_KEYS.map(k => `${k}=${env[k] || ''}`).join('|');
+}
+export function resetCallArchitectureConfigCache() {
+  _callArchitectureConfigCache = null;
+  _callArchitectureConfigCacheKey = '';
+}
+
 export function resolveCallArchitectureConfig(env = process.env) {
+  if (env === process.env && _callArchitectureConfigCache) {
+    const snap = envSnapshot(env);
+    if (snap === _callArchitectureConfigCacheKey) return _callArchitectureConfigCache;
+  }
   const mode = normalizeMode(env.CALL_ARCHITECTURE_MODE);
   const requestedRealDial = parseBoolean(env.CALL_QUEUE_ALLOW_REAL_DIAL, false);
   const allowRealDial = requestedRealDial && REAL_DIAL_MODES.has(mode);
 
-  return {
+  const resolved = {
     mode,
     shadowMaterialize: mode === CALL_ARCHITECTURE_MODES.SHADOW_MATERIALIZE ||
       mode === CALL_ARCHITECTURE_MODES.SHADOW_DISPATCH ||
@@ -550,7 +580,11 @@ export function resolveCallArchitectureConfig(env = process.env) {
     reconcilerEnabled: mode === CALL_ARCHITECTURE_MODES.SHADOW_DISPATCH ||
       parseBoolean(env.CALL_QUEUE_RECONCILER_ENABLED, false),
     dispatcherBatchSize: safePositiveInteger(env.CALL_DISPATCH_MAX_BATCH_SIZE, 100, 1000),
-    dispatchLeaseSeconds: safePositiveInteger(env.CALL_DISPATCH_LEASE_SECONDS, 60, 15 * 60),
+    // Cap at 60 min (was 15 min). Dispatch batches up to ~200 rows with
+    // affinity lookups + Telnyx HTTP can take >15min in the slowest case;
+    // a longer ceiling lets operators tune the lease without recompiling.
+    // Default stays 60s for normal batches.
+    dispatchLeaseSeconds: safePositiveInteger(env.CALL_DISPATCH_LEASE_SECONDS, 60, 60 * 60),
     dispatchOverbookFactor: safePositiveNumber(env.CALL_DISPATCH_OVERBOOK_FACTOR, 1, 2),
     useCapacityRegistry: parseBoolean(env.CALL_QUEUE_USE_CAPACITY_REGISTRY, true),
     requireCapacityRegistry: parseBoolean(env.CALL_QUEUE_REQUIRE_CAPACITY_REGISTRY, false),
@@ -561,6 +595,12 @@ export function resolveCallArchitectureConfig(env = process.env) {
       .map(type => type.trim())
       .filter(Boolean),
   };
+
+  if (env === process.env) {
+    _callArchitectureConfigCache = resolved;
+    _callArchitectureConfigCacheKey = envSnapshot(env);
+  }
+  return resolved;
 }
 
 export function validateCallArchitectureConfig(env = process.env) {
@@ -942,7 +982,9 @@ export async function leaseQueuedCalls({
   canarySeniorIds = [],
 } = {}, { database = db } = {}) {
   const safeLimit = safePositiveInteger(limit, 10, 1000);
-  const safeLeaseSeconds = safePositiveInteger(leaseSeconds, 60, 15 * 60);
+  // 60 min ceiling (was 15 min) — matches dispatchLeaseSeconds cap so
+  // large batches with affinity + Telnyx HTTP latency have headroom.
+  const safeLeaseSeconds = safePositiveInteger(leaseSeconds, 60, 60 * 60);
   const owner = requireString(leaseOwner, 'leaseOwner');
   const currentTime = requireDate(now, 'now');
   const lane = priorityLane == null ? null : normalizeLane(priorityLane);

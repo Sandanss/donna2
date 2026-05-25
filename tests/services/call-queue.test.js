@@ -1468,3 +1468,34 @@ describe('queue dispatcher guard expiry (C2 review fix)', () => {
     expect(lease60.getTime() - targetAt.getTime()).toBeLessThan(60 * 60 * 1000);
   });
 });
+
+describe('resolveCallArchitectureConfig caching (D-7 review fix)', () => {
+  it('returns the same object reference on repeat calls with process.env', async () => {
+    const { resolveCallArchitectureConfig, resetCallArchitectureConfigCache } =
+      await import('../../services/call-queue.js');
+    resetCallArchitectureConfigCache();
+    const a = resolveCallArchitectureConfig();
+    const b = resolveCallArchitectureConfig();
+    expect(a).toBe(b); // cached singleton
+  });
+
+  it('always returns a fresh object when called with an explicit env (tests)', async () => {
+    const { resolveCallArchitectureConfig, resetCallArchitectureConfigCache } =
+      await import('../../services/call-queue.js');
+    resetCallArchitectureConfigCache();
+    const a = resolveCallArchitectureConfig({ CALL_ARCHITECTURE_MODE: 'legacy_only' });
+    const b = resolveCallArchitectureConfig({ CALL_ARCHITECTURE_MODE: 'legacy_only' });
+    expect(a).not.toBe(b); // no cache pollution for tests
+    expect(a.mode).toBe(b.mode);
+  });
+
+  it('resetCallArchitectureConfigCache forces a fresh read', async () => {
+    const { resolveCallArchitectureConfig, resetCallArchitectureConfigCache } =
+      await import('../../services/call-queue.js');
+    resetCallArchitectureConfigCache();
+    const a = resolveCallArchitectureConfig();
+    resetCallArchitectureConfigCache();
+    const b = resolveCallArchitectureConfig();
+    expect(a).not.toBe(b);
+  });
+});

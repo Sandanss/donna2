@@ -24,6 +24,30 @@ const AFFINITY_KEY_PREFIX = 'dispatcher:affinity:senior:';
 // Anthropic prompt-cache TTL is 5 min; affinity lifetime tracks that ceiling.
 const DEFAULT_AFFINITY_TTL_SECONDS = 5 * 60;
 
+// Module-level singleton runtime so recordReplicaAffinity reuses a single
+// Redis connection across the dispatcher batch instead of opening a new
+// TCP connection per dial (B-17 review fix). Under load (200 dials in a
+// 2s tick), the old per-call open+close pattern was 200 TCP connects to
+// Redis. Cached for the lifetime of the process; cleared on any command
+// error so a transient Redis failure doesn't permanently break affinity.
+// Tests bypass the cache by passing an explicit `command` argument.
+let _affinityRuntimeCache = null;
+
+export function resetAffinityRuntimeCache() {
+  if (_affinityRuntimeCache) {
+    const stale = _affinityRuntimeCache;
+    _affinityRuntimeCache = null;
+    Promise.resolve(stale.close?.()).catch(() => {});
+  }
+}
+
+function getOrCreateAffinityRuntime(env) {
+  if (_affinityRuntimeCache) return _affinityRuntimeCache;
+  const runtime = createPipecatRedisCommand({ env });
+  _affinityRuntimeCache = runtime;
+  return runtime;
+}
+
 function parseBoolean(value) {
   if (typeof value === 'boolean') return value;
   return ['1', 'true', 'yes', 'on'].includes(String(value || '').toLowerCase());
@@ -90,14 +114,26 @@ export async function recordReplicaAffinity(seniorId, instanceId, {
 } = {}) {
   if (!isPromptCacheAffinityEnabled(env)) return { recorded: false, reason: 'affinity_disabled' };
   if (!seniorId || !instanceId) return { recorded: false, reason: 'missing_input' };
-  const runtime = createPipecatRedisCommand({ env, command });
+  // Test callers can inject a one-shot command; production callers reuse
+  // the cached singleton runtime so 200 dials in a tick = 1 connection.
+  const runtime = command
+    ? createPipecatRedisCommand({ env, command })
+    : getOrCreateAffinityRuntime(env);
   if (!runtime.configured) return { recorded: false, reason: 'no_shared_state' };
   const ttl = parsePositiveInteger(ttlSeconds, resolveAffinityTtlSeconds(env));
   try {
     await runtime.command('SET', affinityKey(seniorId), String(instanceId), 'EX', ttl);
     return { recorded: true, ttlSeconds: ttl };
+  } catch (error) {
+    // Clear the cached runtime so the next call gets a fresh connection.
+    // Without this, a transient Redis blip would permanently break
+    // affinity until the process restarts.
+    if (!command) resetAffinityRuntimeCache();
+    throw error;
   } finally {
-    await runtime.close();
+    // Only close one-shot runtimes (test injections). The cached singleton
+    // stays open across calls — that's the entire point of this fix.
+    if (command) await runtime.close();
   }
 }
 
