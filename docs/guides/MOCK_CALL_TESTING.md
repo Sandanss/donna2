@@ -571,6 +571,8 @@ cannot: STT misrecognition, codec mismatches, sample-rate drift, VAD
 boundary issues. Use audio mode for a **small** number of calls in
 addition to text-mode breadth.
 
+Implementation plan: `docs/plans/2026-05-25-audio-mock-call-testing-plan.md`.
+
 ---
 
 ## Cost
