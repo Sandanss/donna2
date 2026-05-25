@@ -8,8 +8,8 @@ import { COLORS } from "@/src/constants/theme";
 import { useOnboardingStore } from "@/src/stores/onboarding";
 
 const LANGUAGES = [
-  { code: "en" as const, label: "English", flag: "\ud83c\uddfa\ud83c\uddf8" },
-  { code: "es" as const, label: "Spanish", flag: "\ud83c\uddf2\ud83c\uddfd" },
+  { code: "en" as const, label: "English", badge: "En" },
+  { code: "es" as const, label: "Spanish", badge: "Es" },
 ];
 
 export default function LanguageScreen() {
@@ -64,7 +64,19 @@ export default function LanguageScreen() {
                 accessibilityLabel={lang.label}
                 style={{ minHeight: 56 }}
               >
-                <Text className="text-[24px] mr-4">{lang.flag}</Text>
+                <View
+                  className={`w-10 h-10 rounded-full items-center justify-center mr-4 ${
+                    isSelected ? "bg-sage" : "bg-beige"
+                  }`}
+                >
+                  <Text
+                    className={`text-[14px] font-semibold ${
+                      isSelected ? "text-white" : "text-charcoal"
+                    }`}
+                  >
+                    {lang.badge}
+                  </Text>
+                </View>
                 <Text
                   className={`text-[17px] font-medium ${
                     isSelected ? "text-sage" : "text-charcoal"

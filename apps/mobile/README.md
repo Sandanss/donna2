@@ -29,6 +29,50 @@ done
 
 Expected output for every environment is `apiUrlPresent: true`, `clerkKeyPresent: true`, and `ok: true`. If a check fails, update that EAS environment and rebuild; OTA JavaScript cannot fix a binary built without required Expo public config.
 
+## Running on iOS Simulator
+
+Happy path:
+
+```bash
+cd apps/mobile
+npm run ios            # expo start --ios, picks the booted sim
+```
+
+`expo run:ios` requires the dev client (`expo-dev-client`, already a dep) and a working simulator. Boot one first with `open -a Simulator` if none is running.
+
+### Fallback: xcodebuild directly
+
+`npx expo run:ios` can pick the wrong target on a Mac with both a connected iPhone and a stale `devicectl`. Symptoms: `Unexpected devicectl JSON version output` warning followed by `CommandError: No code signing certificates are available to use.` even when you pass `--device <simulator-uuid>`. The CLI commits to the physical-device build path before resolving the simulator UUID, so the flag does not redirect it.
+
+When that happens, skip the Expo wrapper and drive Xcode directly:
+
+```bash
+cd apps/mobile
+
+# 1. List simulators, pick the UUID of the one you want.
+xcrun simctl list devices booted
+
+# 2. Build for that simulator without signing — fastest path that launches.
+SIM_UDID=9FE1AE58-EB90-4D0E-94C3-70AAD6212FDE   # replace with yours
+xcodebuild \
+  -workspace ios/Donna.xcworkspace \
+  -scheme Donna \
+  -configuration Debug \
+  -sdk iphonesimulator \
+  -destination "platform=iOS Simulator,id=$SIM_UDID" \
+  -derivedDataPath ios/build \
+  CODE_SIGNING_ALLOWED=NO \
+  build
+
+# 3. Install onto the booted simulator and start Metro.
+xcrun simctl install booted ios/build/Build/Products/Debug-iphonesimulator/Donna.app
+npx expo start --dev-client
+```
+
+Then launch the app from the simulator home screen — Metro attaches automatically.
+
+**Apple Sign In does not work in this build, by design.** See [`LEARNINGS.md`](LEARNINGS.md) → "Native Sign in with Apple Needs a Real Provisioning Profile". For sim dev work, exercise email/password and Google flows; test Apple Sign In on a physical device or TestFlight build.
+
 ## Auth And Onboarding
 
 Fresh setup starts from the visible Create Account screen. The create-account path marks a runtime pending-onboarding session before Donna profile creation.

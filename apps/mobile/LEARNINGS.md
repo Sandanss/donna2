@@ -135,3 +135,38 @@
 **Fix:** `.maestro/subflows/dismiss_ios_account_prompt.yaml` now handles both prompt titles, taps "Not Now" when present, and falls back to returning to Donna or tapping the top-left escape area.
 
 **Rule:** Include the prompt-dismissal subflow immediately after app launch in mobile auth/onboarding flows that can run on a fresh simulator.
+
+## `expo run:ios` Routes Through Physical-Device Path When `devicectl` Is Broken
+
+**Date:** 2026-05-24
+
+**Problem:** On a Mac with a connected iPhone and a broken `devicectl` (Xcode/CoreDevice mismatch), `npx expo run:ios` warns `Unexpected devicectl JSON version output from devicectl` and then fails with `CommandError: No code signing certificates are available to use.` — even with `--device <simulator-uuid>`. The CLI commits to the physical-device build path before it resolves the simulator UUID, so the flag does not redirect it.
+
+**Workaround:** Drive Xcode directly with `xcodebuild -sdk iphonesimulator -destination "platform=iOS Simulator,id=<UUID>"`, then `xcrun simctl install booted` and `npx expo start --dev-client`. Full recipe lives in `apps/mobile/README.md` under "Running on iOS Simulator → Fallback: xcodebuild directly".
+
+**Rule:** If `expo run:ios` complains about code signing on a sim build, do not chase it with more `--device` flags. Skip the wrapper and use `xcodebuild` directly until the host's `devicectl` is repaired.
+
+## Native Sign in with Apple Needs a Real Provisioning Profile — Even on Simulator
+
+**Date:** 2026-05-24
+
+**Problem:** Building the simulator app without a real signing identity breaks native Sign in with Apple. Two failure modes, depending on how you "skip" signing:
+
+1. `CODE_SIGNING_ALLOWED=NO` → app launches, but `codesign -d --entitlements -` is empty, Apple Sign In errors at runtime, and Metro logs show `[expo-notifications] ... Keychain access failed: A required entitlement isn't present`.
+2. Ad-hoc (`CODE_SIGN_IDENTITY="-"`) plus `codesign -f --deep --entitlements Donna.entitlements` to force the entitlement in → `simctl launch` is refused by SpringBoard with `denied by service delegate (SBMainWorkspace)`. No process actually starts.
+
+**Root cause:** `com.apple.developer.applesignin` is a *restricted* entitlement. On iOS 17+, including iOS 26 simulators, SpringBoard requires the entitlement to be backed by a valid provisioning profile. Ad-hoc signing cannot claim restricted entitlements — embedding the key into the binary makes the launch worse, not better. `CODE_SIGNING_ALLOWED=NO` strips the key entirely, so the app starts but the native Apple flow fails the entitlement check at runtime.
+
+**EAS simulator builds do not solve this.** Confirmed 2026-05-24 against build `ef45a5d9-0bb1-4b23-9575-9c89bf451109`: `eas build --profile development --platform ios` (with `ios.simulator: true`) produces an ad-hoc-signed `.app` with an *empty* entitlements dict, identical in this respect to the `xcodebuild` output. EAS strips restricted entitlements from sim builds because the simulator runtime would refuse to launch the app otherwise.
+
+**What actually works to test Apple Sign In:**
+
+- **Run on a physical device with a Personal Team.** Open `ios/Donna.xcworkspace`, target Donna → Signing & Capabilities, set Team to your Apple ID, plug in an iPhone, build & run from Xcode. Xcode generates a real development provisioning profile and Apple Sign In is wired through Apple ID + iCloud on the device.
+- **Use the EAS preview/production build on a physical device.** TestFlight or internal distribution. Real Apple Developer provisioning profile.
+
+**Workarounds while developing in the simulator:**
+
+- Use email/password or Google sign-in flows for sim testing.
+- If you must exercise the post-Apple-Sign-In code path, stub `useSignInWithApple()` behind a dev flag, or seed a Clerk session directly.
+
+**Rule:** Do not try to fix native Sign in with Apple inside an iOS simulator dev build — it cannot be made to work without a real Apple Developer provisioning profile, and Apple does not issue those for simulator-only distribution. Test Apple Sign In on a physical device.

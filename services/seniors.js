@@ -332,6 +332,9 @@ export const seniorService = {
       const [shadowCount] = (await tx.execute(sql`SELECT COUNT(*)::int AS count FROM scheduler_shadow_comparisons WHERE senior_id = ${id}`)).rows;
       counts.scheduler_shadow_comparisons = shadowCount?.count || 0;
 
+      const [canaryCount] = (await tx.execute(sql`SELECT COUNT(*)::int AS count FROM canary_cohort_membership WHERE senior_id = ${id}`)).rows;
+      counts.canary_cohort_membership = canaryCount?.count || 0;
+
       // 2. DELETE in dependency order (deepest children first)
       await tx.execute(sql`
         DELETE FROM post_call_jobs
@@ -339,6 +342,7 @@ export const seniorService = {
            OR conversation_id IN (SELECT id FROM conversations WHERE senior_id = ${id})
       `);
       await tx.execute(sql`DELETE FROM scheduler_shadow_comparisons WHERE senior_id = ${id}`);
+      await tx.execute(sql`DELETE FROM canary_cohort_membership WHERE senior_id = ${id}`);
       await tx.execute(sql`DELETE FROM outbound_call_guards WHERE senior_id = ${id}`);
       await tx.execute(sql`DELETE FROM call_attempts WHERE senior_id = ${id}`);
       await tx.execute(sql`DELETE FROM call_queue WHERE senior_id = ${id}`);
