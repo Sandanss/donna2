@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   getSchedulerStartupDecision,
+  isSchedulerConsentGateEnabled,
   isSchedulerProductionEnv,
 } from '../../lib/scheduler-config.js';
 
@@ -73,5 +74,34 @@ describe('scheduler startup config', () => {
       enabled: false,
       reason: 'SCHEDULER_ENABLED=false',
     });
+  });
+});
+
+describe('isSchedulerConsentGateEnabled', () => {
+  it('defaults to false when env var is missing', () => {
+    expect(isSchedulerConsentGateEnabled({})).toBe(false);
+  });
+
+  it('defaults to false even in production', () => {
+    expect(isSchedulerConsentGateEnabled({
+      RAILWAY_ENVIRONMENT_NAME: 'production',
+    })).toBe(false);
+  });
+
+  it('returns true only for explicit truthy values', () => {
+    expect(isSchedulerConsentGateEnabled({ SCHEDULER_REQUIRE_CONSENT: 'true' })).toBe(true);
+    expect(isSchedulerConsentGateEnabled({ SCHEDULER_REQUIRE_CONSENT: '1' })).toBe(true);
+    expect(isSchedulerConsentGateEnabled({ SCHEDULER_REQUIRE_CONSENT: 'yes' })).toBe(true);
+    expect(isSchedulerConsentGateEnabled({ SCHEDULER_REQUIRE_CONSENT: 'on' })).toBe(true);
+  });
+
+  it('is case-insensitive and tolerates whitespace', () => {
+    expect(isSchedulerConsentGateEnabled({ SCHEDULER_REQUIRE_CONSENT: ' TRUE ' })).toBe(true);
+    expect(isSchedulerConsentGateEnabled({ SCHEDULER_REQUIRE_CONSENT: 'YES' })).toBe(true);
+  });
+
+  it('treats unrelated strings as false (fail-safe)', () => {
+    expect(isSchedulerConsentGateEnabled({ SCHEDULER_REQUIRE_CONSENT: 'maybe' })).toBe(false);
+    expect(isSchedulerConsentGateEnabled({ SCHEDULER_REQUIRE_CONSENT: '' })).toBe(false);
   });
 });

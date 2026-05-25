@@ -168,7 +168,7 @@ Donna has sanitization helpers, but this is not a blanket guarantee that every l
 | `mask_name("David Zuluaga")` | Full name | `David Z.` |
 | `truncate("long content", 30)` | Full text | `long content...` (truncated) |
 
-Use these helpers for Railway/Sentry log output and avoid logging raw transcripts, reminder bodies, medical notes, profile context, caregiver notes, search queries, WebSocket params, or `ws_token` values.
+Use these helpers for Railway/Sentry log output and avoid logging raw transcripts, reminder bodies, profile notes, profile context, caregiver notes, search queries, WebSocket params, or `ws_token` values. (The legacy `medical_notes` column has been deprecated by migration 014/026 + renamed by 016/028 — but historical log-discipline guidance still applies if any legacy values surface.)
 
 ---
 
@@ -272,7 +272,7 @@ Before deploying any public Railway environment, including staging and productio
 - Verify the EAS `development`, `preview`, and `production` environments include `EXPO_PUBLIC_API_URL` and `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY` before building mobile binaries.
 - Set `REDIS_URL` before running more than one Pipecat instance.
 - Set Pipecat `LOG_LEVEL=INFO` for Railway dev/staging/prod before smoke testing or promotion.
-- Verify Railway logs do not contain prompt context, transcripts, medical notes, caregiver notes, raw WebSocket parameters, or `ws_token` values.
+- Verify Railway logs do not contain prompt context, transcripts, profile notes, caregiver notes, raw WebSocket parameters, or `ws_token` values.
 - Smoke test real Telnyx webhook signatures, `/ws` token rejection/reuse, inbound audio, outbound audio, and a call longer than five minutes.
 
 ### PHI Encryption Migration Runbook

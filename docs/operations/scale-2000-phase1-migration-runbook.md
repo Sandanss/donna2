@@ -75,4 +75,4 @@ Record elapsed time on the production-sized clone:
 - The delivery-key backfill performs a full-table collision preflight before it updates any limited batch.
 - `CREATE INDEX CONCURRENTLY` must not be run through a migration runner that wraps files in `BEGIN/COMMIT`.
 - `call_metrics.call_sid` is Pipecat-owned and gets a unique concurrent index in the Pipecat concurrent migration. The post-call writer tolerates duplicate retries by updating the existing metrics row after a unique violation.
-- Backfill and migration logs must not include reminder titles, user responses, names, phone numbers, transcripts, or medical notes.
+- Backfill and migration logs must not include reminder titles, user responses, names, phone numbers, transcripts, or profile notes.

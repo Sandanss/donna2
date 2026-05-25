@@ -21,6 +21,7 @@ import {
   resolveCallArchitectureConfig,
 } from './call-queue.js';
 import { materializeDueNormalizedSchedules } from './call-schedules.js';
+import { isSchedulerConsentGateEnabled } from '../lib/scheduler-config.js';
 import { readPipecatCapacityRegistry } from './pipecat-capacity.js';
 import { resolveMergedCanarySeniorIds } from './canary-cohort.js';
 import {
@@ -919,8 +920,9 @@ export const schedulerService = {
              s.call_context_snapshot_encrypted AS "callContextSnapshotEncrypted"
       FROM seniors s
       WHERE s.is_active = true
-        AND s.callable = true
-        AND s.consent_status = 'granted'
+        ${isSchedulerConsentGateEnabled()
+          ? sql`AND s.callable = true AND s.consent_status = 'granted'`
+          : sql``}
     `);
     const allSeniors = (results.rows || []).map(decryptSeniorPhi);
 
@@ -1055,8 +1057,9 @@ export const schedulerService = {
              s.call_context_snapshot_encrypted AS "callContextSnapshotEncrypted"
       FROM seniors s
       WHERE s.is_active = true
-      AND s.callable = true
-      AND s.consent_status = 'granted'
+      ${isSchedulerConsentGateEnabled()
+        ? sql`AND s.callable = true AND s.consent_status = 'granted'`
+        : sql``}
       AND NOT EXISTS (
         SELECT 1 FROM conversations c
         WHERE c.senior_id = s.id

@@ -47,7 +47,7 @@ For scaled-mode readiness, the Redis drill must report `shared=true` and `availa
 
 ## PHI Boundary
 
-The Phase 0 baseline collector selects only aggregate counts and percentiles. It must not select or print senior names, phone numbers, transcripts, reminder titles, reminder descriptions, caregiver notes, medical notes, raw prompts, or raw search queries.
+The Phase 0 baseline collector selects only aggregate counts and percentiles. It must not select or print senior names, phone numbers, transcripts, reminder titles, reminder descriptions, caregiver notes, profile notes, raw prompts, or raw search queries.
 
 The sentinel scanner intentionally does not print matched lines. Findings report file path, sentinel label, and count only.
 
@@ -112,7 +112,7 @@ Each scenario needs detection signal, immediate response, rollback criteria, and
 
 - BAA completion is not required to run staging drills when founders explicitly accept that scope, but BAA status remains a production/commercial rollout gate.
 - Live outbound call drills require a dummy or explicitly consenting test phone. Do not call an arbitrary active staging senior just because the record has a callable phone number.
-- Drill artifacts and logs must not include senior names, phone numbers, transcripts, reminder text, caregiver notes, medical notes, prompt context, or `ws_token` values.
+- Drill artifacts and logs must not include senior names, phone numbers, transcripts, reminder text, caregiver notes, profile notes, prompt context, or `ws_token` values.
 
 ## Database Partitioning Note
 

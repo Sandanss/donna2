@@ -58,6 +58,6 @@ These are lower-risk correctness and maintenance items.
 
 - Work P0 in order unless the first available engineer can take a later item with no overlap.
 - Keep PRs narrow. Do not mix retention schema changes with frontend storage or scheduler behavior.
-- Use dummy data only. Do not add real transcripts, reminder text, names, phone numbers, caregiver notes, or medical notes to fixtures, screenshots, logs, or PR descriptions.
+- Use dummy data only. Do not add real transcripts, reminder text, names, phone numbers, caregiver notes, or profile notes to fixtures, screenshots, logs, or PR descriptions.
 - If a fix touches shared privacy/security behavior, inspect both Node and Python implementations for parity before claiming the issue is closed.
 - Prefer local and mocked validation first. Use Railway dev deploys only for live Telnyx/audio/environment wiring.

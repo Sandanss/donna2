@@ -36,6 +36,6 @@
 ## Documentation Rules
 
 - Prefer runtime code and `DIRECTORY.md` when docs disagree.
-- Keep current docs free of raw PHI, real phone numbers, transcripts, medical notes, caregiver notes, and production secrets.
+- Keep current docs free of raw PHI, real phone numbers, transcripts, profile notes, caregiver notes, and production secrets.
 - Put future work in `docs/plans/`; keep `docs/README.md` as an index.
 - Mark historical or superseded references explicitly instead of silently deleting useful context.

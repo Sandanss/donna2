@@ -1108,7 +1108,7 @@ Each drill records elapsed time from flag flip to legacy fully owning dispatch. 
 
 - `LOG_LEVEL=INFO` in all public Railway environments (verified in Phase 0).
 - Senior IDs truncated or hashed in external observability (Sentry already does this).
-- No senior names, phone numbers, reminder titles, medical notes, transcripts, caregiver notes, or prompt context in scheduler / dispatcher / worker logs.
+- No senior names, phone numbers, reminder titles, profile notes, transcripts, caregiver notes, or prompt context in scheduler / dispatcher / worker logs.
 
 ### Sentinel scanning
 

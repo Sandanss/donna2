@@ -2,7 +2,7 @@
 
 > Active architecture and compliance references live in [`../architecture/`](../architecture/), [`../compliance/`](../compliance/), [`../../DIRECTORY.md`](../../DIRECTORY.md), and [`../../pipecat/docs/`](../../pipecat/docs/). Dated files under `docs/plans/` are historical unless their own status says otherwise.
 
-This backlog tracks the work needed before Donna is tested with real prototype users. Use dummy test accounts until the pilot starts, and never put real transcripts, reminder text, medical notes, phone numbers, names, or caregiver data in logs, fixtures, screenshots, or PR notes.
+This backlog tracks the work needed before Donna is tested with real prototype users. Use dummy test accounts until the pilot starts, and never put real transcripts, reminder text, profile notes, phone numbers, names, or caregiver data in logs, fixtures, screenshots, or PR notes.
 
 ## Priority Definitions
 

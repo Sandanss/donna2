@@ -9,6 +9,7 @@ import { canAccessSenior, routeError } from './helpers.js';
 import { logAudit, authToRole } from '../services/audit.js';
 import { sendError } from '../lib/http-response.js';
 import { endTelnyxCall, initiateTelnyxOutboundCall } from '../services/telnyx.js';
+import { isSchedulerConsentGateEnabled } from '../lib/scheduler-config.js';
 import {
   CALL_ARCHITECTURE_MODES,
   PRIORITY_LANES,
@@ -65,9 +66,11 @@ router.post('/api/call', requireAuth, validateBody(initiateCallSchema), idempote
     // Consent / discovery calls are exempt from the consent_status gate
     // (consent calls are how the senior moves from pending → granted; discovery
     // is a caregiver-initiated follow-up that may also run during pending).
-    // For all other callTypes, fail closed: the caller must have granted
-    // consent before scheduled / manual check-in calls can go out.
-    if (!isConsentCall && !isDiscoveryCall) {
+    // For all other callTypes, fail closed only when SCHEDULER_REQUIRE_CONSENT
+    // is on — same flag the scheduler uses, so the manual call path can't be
+    // stricter than the auto-dispatcher. Default OFF preserves existing
+    // behavior; flip to true once prod is verified.
+    if (!isConsentCall && !isDiscoveryCall && isSchedulerConsentGateEnabled()) {
       if (senior.consentStatus !== 'granted' || senior.callable === false) {
         return sendError(res, 409, {
           error: 'Senior has not granted consent for calls',
