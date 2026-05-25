@@ -7,7 +7,7 @@
 | Last Updated | May 5, 2026 |
 | Owner | TBD |
 | Review Cadence | Quarterly |
-| Related Docs | [BAA Tracker](BAA_TRACKER.md), [Breach Notification](BREACH_NOTIFICATION.md), [Data Retention](DATA_RETENTION_POLICY.md), [Vendor Security](VENDOR_SECURITY_EVALUATION.md), [May 5 Audit](../audits/2026-05-05-codebase-audit.md) |
+| Related Docs | [BAA Tracker](BAA_TRACKER.md), [Breach Notification](BREACH_NOTIFICATION.md), [Data Retention](DATA_RETENTION_POLICY.md), [Vendor Security](VENDOR_SECURITY_EVALUATION.md), [Data-at-rest hardening plan](../plans/2026-05-25-data-at-rest-encryption-hardening-plan.md), [May 5 Audit](../audits/2026-05-05-codebase-audit.md) |
 
 ---
 
@@ -151,7 +151,7 @@ PHI is any individually identifiable health information. In Donna's system, the 
 | Automatic logoff | Partial | JWT tokens expire (configurable). No forced session termination. |
 | Encryption and decryption | Partial | TLS in transit. Neon AES-256 at rest. New PHI writes use app-level field encryption for the main PHI tables; legacy plaintext rows remain until the per-environment migration/backfill/nulling runbook is completed. |
 
-**Gap: complete application-level encryption rollout.** The code now writes encrypted companion columns for high-risk PHI fields and reads prefer encrypted data with plaintext fallbacks for legacy rows. The remaining rollout work is operational: apply the migration, run the encrypted backfill, verify application behavior, and then clear legacy plaintext columns in every deployed database.
+**Gap: complete application-level encryption rollout.** The code now writes encrypted companion columns for high-risk PHI fields and reads prefer encrypted data with plaintext fallbacks for legacy rows. The remaining rollout work is operational: apply the migration, run the encrypted backfill, verify application behavior, and then clear legacy plaintext columns in every deployed database. The broader follow-up plan for plaintext cleanup, direct identifier encryption, key rotation, embedding/metadata handling, and release gates is tracked in [Data At Rest Encryption Hardening Plan](../plans/2026-05-25-data-at-rest-encryption-hardening-plan.md).
 
 **Remediation:**
 1. Apply `db/migrations/002_encrypt_remaining_phi.sql` or `pipecat/db/migrations/009_encrypt_remaining_phi.sql`, then run `node scripts/backfill-encrypted-phi.js --write` followed by `--write --null-plaintext` after verification.

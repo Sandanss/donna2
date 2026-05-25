@@ -288,6 +288,8 @@ The code and schema support encrypted-only new writes, but each deployed databas
 
 Operational lookup/display fields such as senior name, phone, timezone, city/state/ZIP, and interests remain plaintext for now. Treat them as minimized PII/operational data, not as a substitute for the encrypted PHI fields.
 
+The follow-up plan to remove remaining plaintext risk, add identifier lookup hashes, introduce key rotation, and add privacy release gates is tracked in [`docs/plans/2026-05-25-data-at-rest-encryption-hardening-plan.md`](../plans/2026-05-25-data-at-rest-encryption-hardening-plan.md).
+
 ### Current Security Gaps And Operational Caveats
 
 These are the current code/doc gaps to keep visible:

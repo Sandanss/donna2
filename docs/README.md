@@ -16,6 +16,7 @@
 | Frontend E2E | [`guides/FRONTEND_TESTING.md`](guides/FRONTEND_TESTING.md) |
 | Feature backlog | [`FEATURE_BACKLOG.md`](FEATURE_BACKLOG.md) |
 | Current audit findings | [`audits/2026-05-05-codebase-audit.md`](audits/2026-05-05-codebase-audit.md) |
+| Data-at-rest hardening | [`plans/2026-05-25-data-at-rest-encryption-hardening-plan.md`](plans/2026-05-25-data-at-rest-encryption-hardening-plan.md) |
 | Current remediation plan | [`plans/2026-05-05-engineering-remediation-plan.md`](plans/2026-05-05-engineering-remediation-plan.md) |
 | Prototype pilot backlog | [`plans/PROTOTYPE_PILOT_BACKLOG.md`](plans/PROTOTYPE_PILOT_BACKLOG.md) |
 | Historical plans | [`plans/README.md`](plans/README.md) |
