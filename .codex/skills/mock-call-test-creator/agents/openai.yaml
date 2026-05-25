@@ -1,0 +1,4 @@
+interface:
+  display_name: "Mock Call Test Creator"
+  short_description: "Create Donna voice simulation test scenarios"
+  default_prompt: "Use $mock-call-test-creator to add mock-call simulation tests for this Donna voice feature."

@@ -100,11 +100,13 @@ Read `DIRECTORY.md` before writing code. It is the navigation map for active vs.
 
 ## Repo-Local Skills
 
-Donna-specific Codex skills live under `.codex/skills/`:
+Donna-specific Codex skills live under `.codex/skills/`.
+Claude-facing mirrors live under `.claude/skills/` where present.
 
 - `accessibility-audit`
 - `privacy-audit`
 - `senior-ux-review`
 - `donna-pipecat-debug`
+- `mock-call-test-creator`
 
-Use them when the task is explicitly an audit/review or a Pipecat debugging investigation.
+Use them when the task is explicitly an audit/review, a Pipecat debugging investigation, or adding mock-call coverage for voice features.
