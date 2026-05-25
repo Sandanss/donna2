@@ -518,3 +518,56 @@ class TestConsentFlow:
         assert node["name"] == "consent_closing"
         assert node.get("post_actions") == [{"type": "end_conversation"}]
         assert node["functions"] == []
+
+
+class TestDiscoveryFlow:
+    """Discovery call flow (call_type='discovery')."""
+
+    def _discovery_state(self, **overrides):
+        state = {
+            "senior_id": "test-senior-discovery",
+            "senior": {"name": "Mary Johnson", "interests": ["gardening"], "timezone": "America/New_York"},
+            "memory_context": None,
+            "news_context": None,
+            "conversation_id": "conv-disco-1",
+            "call_type": "discovery",
+            "is_outbound": True,
+        }
+        state.update(overrides)
+        return state
+
+    def test_initial_node_routes_to_discovery_when_call_type_discovery(self):
+        from flows.tools import make_discovery_flows_tools
+        state = self._discovery_state()
+        tools = make_discovery_flows_tools(state)
+        node = build_initial_node(state, tools)
+        assert node["name"] == "discovery"
+
+    def test_discovery_node_exposes_fact_and_search_tools(self):
+        from flows.nodes import build_discovery_node
+        from flows.tools import make_discovery_flows_tools
+        state = self._discovery_state()
+        tools = make_discovery_flows_tools(state)
+        node = build_discovery_node(state, tools)
+        fn_names = {f.name for f in node["functions"]}
+        assert "record_discovery_fact" in fn_names
+        assert "web_search" in fn_names
+        assert "transition_to_discovery_closing" in fn_names
+
+    def test_discovery_node_includes_senior_context_in_system_prompt(self):
+        from flows.nodes import build_discovery_node
+        from flows.tools import make_discovery_flows_tools
+        state = self._discovery_state()
+        tools = make_discovery_flows_tools(state)
+        node = build_discovery_node(state, tools)
+        system = node["role_messages"][0]["content"]
+        assert "Donna" in system
+        assert "Mary" in system  # senior context block injects the name
+
+    def test_discovery_closing_node_ends_conversation(self):
+        from flows.nodes import build_discovery_closing_node
+        state = self._discovery_state()
+        node = build_discovery_closing_node(state)
+        assert node["name"] == "discovery_closing"
+        assert node.get("post_actions") == [{"type": "end_conversation"}]
+        assert node["functions"] == []

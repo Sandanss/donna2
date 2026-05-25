@@ -411,3 +411,22 @@ async def get_recent(limit: int = 20) -> list[dict]:
            LIMIT $1""",
         limit,
     )
+
+
+async def save_profile_suggestions(conversation_id: str, payload: dict) -> dict | None:
+    """Write the discovery-call profile_suggestions payload to conversations.
+
+    Caregiver-review surface reads this column. See migration 015 / docs/plans/
+    2026-05-24-consent-and-discovery-call-flows.md.
+    """
+    if not conversation_id:
+        return None
+    row = await query_one(
+        """UPDATE conversations
+           SET profile_suggestions = $1::jsonb
+           WHERE id = $2
+           RETURNING id, profile_suggestions""",
+        json.dumps(payload),
+        conversation_id,
+    )
+    return row

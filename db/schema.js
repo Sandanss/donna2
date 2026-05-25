@@ -67,6 +67,9 @@ export const conversations = pgTable('conversations', {
   transcriptTextEncrypted: text('transcript_text_encrypted'),
   callMetrics: json('call_metrics'),
   voicemailDetected: boolean('voicemail_detected').default(false),
+  // Discovery-call output (migration 015). Caregiver-reviewable list of
+  // proposed profile facts; null on non-discovery calls.
+  profileSuggestions: jsonb('profile_suggestions'),
   createdAt: timestamp('created_at').defaultNow(),
 });
 

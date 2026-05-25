@@ -35,6 +35,9 @@ from prompts import (
     CONSENT_SYSTEM_PROMPT,
     CONSENT_TASK_TEMPLATE,
     CONSENT_CLOSING_TASK_TEMPLATE,
+    DISCOVERY_SYSTEM_PROMPT,
+    DISCOVERY_TASK_TEMPLATE,
+    DISCOVERY_CLOSING_TASK_TEMPLATE,
 )
 from services.context_trace import record_context_event
 
@@ -1003,6 +1006,94 @@ def build_consent_closing_node(session_state: dict) -> NodeConfig:
 
 
 # ---------------------------------------------------------------------------
+# Discovery nodes (call_type="discovery" — friends, hobbies, interests)
+# ---------------------------------------------------------------------------
+
+def _make_transition_to_discovery_closing(session_state: dict):
+    """Create transition function: discovery → discovery_closing."""
+
+    async def transition_to_discovery_closing(args: dict, flow_manager) -> tuple[dict, NodeConfig]:
+        logger.info("Transitioning: discovery → discovery_closing")
+        _record_phase_transition(session_state, "discovery_closing")
+        return (
+            {"status": "success"},
+            build_discovery_closing_node(session_state),
+        )
+
+    return transition_to_discovery_closing
+
+
+def build_discovery_node(session_state: dict, flows_tools: dict) -> NodeConfig:
+    """Build the discovery node — friends, hobbies, routines, family.
+
+    Full subscriber stack (Director on, memories on, web_search on). Tools:
+    record_discovery_fact, web_search, transition_to_discovery_closing.
+    """
+    senior = session_state.get("senior") or {}
+    first_name = (senior.get("name") or "").split(" ")[0] or "there"
+
+    # Reuse the standard senior context block so Donna knows location, time,
+    # any prior memories, etc. Discovery is a normal conversational call.
+    senior_ctx = _build_senior_context(session_state)
+    task = DISCOVERY_TASK_TEMPLATE.format(first_name=first_name)
+
+    functions: list = list(flows_tools.values())
+    functions.append(FlowsFunctionSchema(
+        name="transition_to_discovery_closing",
+        description=(
+            "Call this when the conversation has covered enough ground "
+            "(friends, hobbies, routines, family) and the goodbye feels "
+            "natural — typically 8-12 minutes in. Moves into the closing phase."
+        ),
+        properties={},
+        required=[],
+        handler=_make_transition_to_discovery_closing(session_state),
+    ))
+
+    system_content = DISCOVERY_SYSTEM_PROMPT + "\n\n" + senior_ctx
+    _record_node_prompts(
+        session_state,
+        node_name="discovery",
+        system_prompt=DISCOVERY_SYSTEM_PROMPT,
+        task_prompt=task,
+        prompt_variant="discovery",
+    )
+
+    return NodeConfig(
+        name="discovery",
+        role_messages=[{"role": "system", "content": system_content}],
+        task_messages=[{"role": "user", "content": task}],
+        functions=functions,
+        context_strategy=ContextStrategyConfig(strategy=ContextStrategy.APPEND),
+        respond_immediately=True,
+    )
+
+
+def build_discovery_closing_node(session_state: dict) -> NodeConfig:
+    """Build the discovery closing node — warm goodbye referencing specifics."""
+    senior = session_state.get("senior") or {}
+    first_name = (senior.get("name") or "").split(" ")[0] or "there"
+
+    closing_task = DISCOVERY_CLOSING_TASK_TEMPLATE.format(first_name=first_name)
+    _record_node_prompts(
+        session_state,
+        node_name="discovery_closing",
+        task_prompt=closing_task,
+        prompt_variant="discovery",
+    )
+
+    return NodeConfig(
+        name="discovery_closing",
+        role_messages=[],
+        task_messages=[{"role": "user", "content": closing_task}],
+        functions=[],
+        post_actions=[{"type": "end_conversation"}],
+        context_strategy=ContextStrategyConfig(strategy=ContextStrategy.APPEND),
+        respond_immediately=False,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -1015,6 +1106,7 @@ def build_consent_closing_node(session_state: dict) -> NodeConfig:
 CALL_TYPE_INITIAL_NODES = {
     "onboarding": ("onboarding", build_onboarding_node),
     "consent": ("consent", build_consent_node),
+    "discovery": ("discovery", build_discovery_node),
 }
 
 

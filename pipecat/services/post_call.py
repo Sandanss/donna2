@@ -188,6 +188,34 @@ def _infer_reminder_ack_from_transcript(session_state: dict, transcript: list | 
     return None
 
 
+async def _save_discovery_profile_suggestions(
+    session_state: dict,
+    conversation_id: str | None,
+) -> None:
+    """Snapshot the in-call _discovery_facts buffer to conversations.profile_suggestions.
+
+    Skipped quietly if there's nothing to save or no conversation_id — both
+    are normal (very short discovery call, or a test harness without DB).
+    """
+    if not conversation_id:
+        return
+    facts = session_state.get("_discovery_facts") or []
+    if not facts:
+        return
+    from services.conversations import save_profile_suggestions
+    from datetime import datetime, timezone
+    payload = {
+        "captured_at": datetime.now(timezone.utc).isoformat(),
+        "facts": facts,
+    }
+    await save_profile_suggestions(conversation_id, payload)
+    logger.info(
+        "[discovery] Saved {n} profile_suggestions for conversation {cid}",
+        n=len(facts),
+        cid=str(conversation_id)[:8],
+    )
+
+
 async def run_post_call(
     session_state: dict,
     conversation_tracker,
@@ -249,6 +277,20 @@ async def run_post_call(
     except Exception as e:
         post_call_error_steps.append("caregiver note delivery check")
         logger.error("[{cs}] Post-call caregiver note delivery check failed: {err}", cs=call_sid, err=str(e))
+
+    # Discovery calls: persist captured facts as caregiver-reviewable
+    # profile_suggestions. The in-call tool also writes to memories
+    # (fire-and-forget) so the next call has the facts; this column is for
+    # the caregiver-review surface.
+    if session_state.get("call_type") == "discovery":
+        try:
+            await _save_discovery_profile_suggestions(session_state, conversation_id)
+        except Exception as e:
+            post_call_error_steps.append("save discovery profile suggestions")
+            logger.error(
+                "[{cs}] Post-call save discovery profile suggestions failed: {err}",
+                cs=call_sid, err=str(e),
+            )
 
     # --- Parallel group: independent steps (2, 3, 5, 6) ---
     async def _step2_analysis():

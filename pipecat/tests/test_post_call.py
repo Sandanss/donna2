@@ -13,6 +13,58 @@ from unittest.mock import AsyncMock, patch
 from processors.conversation_tracker import ConversationTrackerProcessor
 
 
+class TestDiscoveryProfileSuggestions:
+    """Discovery call post-call writer (services.post_call._save_discovery_profile_suggestions)."""
+
+    @pytest.mark.asyncio
+    async def test_writes_payload_when_facts_present(self):
+        from services.post_call import _save_discovery_profile_suggestions
+        state = {
+            "call_type": "discovery",
+            "_discovery_facts": [
+                {"category": "friend", "content": "Eleanor — bridge Thursdays", "confidence": "stated"},
+                {"category": "hobby", "content": "Loves crochet", "confidence": "stated"},
+            ],
+        }
+        with patch(
+            "services.conversations.save_profile_suggestions",
+            new_callable=AsyncMock,
+            return_value={"id": "conv-1"},
+        ) as mock_save:
+            await _save_discovery_profile_suggestions(state, conversation_id="conv-1")
+        mock_save.assert_awaited_once()
+        cid, payload = mock_save.await_args.args
+        assert cid == "conv-1"
+        assert len(payload["facts"]) == 2
+        assert "captured_at" in payload
+
+    @pytest.mark.asyncio
+    async def test_skips_when_no_facts(self):
+        from services.post_call import _save_discovery_profile_suggestions
+        with patch(
+            "services.conversations.save_profile_suggestions",
+            new_callable=AsyncMock,
+        ) as mock_save:
+            await _save_discovery_profile_suggestions(
+                {"call_type": "discovery", "_discovery_facts": []},
+                conversation_id="conv-1",
+            )
+        mock_save.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_skips_when_no_conversation_id(self):
+        from services.post_call import _save_discovery_profile_suggestions
+        with patch(
+            "services.conversations.save_profile_suggestions",
+            new_callable=AsyncMock,
+        ) as mock_save:
+            await _save_discovery_profile_suggestions(
+                {"call_type": "discovery", "_discovery_facts": [{"category": "friend", "content": "x"}]},
+                conversation_id=None,
+            )
+        mock_save.assert_not_awaited()
+
+
 class TestPostCallProcessing:
     @pytest.mark.asyncio
     async def test_full_post_call_sequence(self, session_state):

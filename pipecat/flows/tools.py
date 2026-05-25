@@ -888,3 +888,145 @@ def make_consent_flows_tools(session_state: dict) -> dict[str, FlowsFunctionSche
         handler=handle_record_consent,
     )
     return schemas
+
+
+# ---------------------------------------------------------------------------
+# Discovery call tools (call_type="discovery")
+# See docs/plans/2026-05-24-consent-and-discovery-call-flows.md
+# ---------------------------------------------------------------------------
+
+# Map discovery categories → memories.type values. Source-of-truth list lives
+# in db/schema.js (memories.type = fact|preference|event|concern|relationship).
+_DISCOVERY_CATEGORY_TO_MEMORY_TYPE = {
+    "friend": "relationship",
+    "family": "relationship",
+    "hobby": "preference",
+    "interest": "preference",
+    "routine": "fact",
+}
+
+RECORD_DISCOVERY_FACT_SCHEMA = {
+    "name": "record_discovery_fact",
+    "description": (
+        "Capture a specific fact the senior just shared about themselves — a friend "
+        "or family member, a hobby, an interest, a routine. Use their own words for "
+        "content; do not paraphrase or guess. Call between turns, naturally, "
+        "without pausing the conversation. Only capture things they STATED — do "
+        "not call this for things you inferred."
+    ),
+    "properties": {
+        "category": {
+            "type": "string",
+            "enum": ["friend", "hobby", "interest", "routine", "family"],
+            "description": (
+                "What kind of fact this is. friend = someone they see socially. "
+                "family = a relative. hobby = something they actively do. "
+                "interest = a topic/thing they care about. routine = a recurring activity."
+            ),
+        },
+        "content": {
+            "type": "string",
+            "description": (
+                "The fact in 1-2 short sentences, using the senior's words where "
+                "possible. Example: \"Plays bridge every Thursday at the church with "
+                "Eleanor and two other friends.\""
+            ),
+        },
+        "confidence": {
+            "type": "string",
+            "enum": ["stated", "inferred"],
+            "description": (
+                "stated = the senior directly said this. inferred = you read between "
+                "the lines. Prefer stated; only use inferred for clear context like "
+                "\"my husband Frank\" → spouse relationship."
+            ),
+        },
+    },
+    "required": ["category", "content"],
+}
+
+
+def make_discovery_flows_tools(session_state: dict) -> dict[str, FlowsFunctionSchema]:
+    """Create FlowsFunctionSchema for discovery calls.
+
+    Returns: record_discovery_fact + web_search. No reminder/memory-search
+    tools — Director handles memory retrieval; web_search lets Donna riff on
+    things the senior brings up (weather, news, etc.).
+    """
+    subscriber_handlers = make_tool_handlers(session_state)
+    captured_facts = session_state.setdefault("_discovery_facts", [])
+
+    async def handle_record_discovery_fact(args: dict) -> dict:
+        from services.memory import store
+
+        senior_id = session_state.get("senior_id")
+        if not senior_id:
+            logger.warning("record_discovery_fact called with no senior_id")
+            return {"status": "error", "result": "Continue naturally."}
+
+        category = (args.get("category") or "").strip().lower()
+        if category not in _DISCOVERY_CATEGORY_TO_MEMORY_TYPE:
+            return {
+                "status": "error",
+                "result": f"Invalid category: {category}.",
+            }
+
+        content = (args.get("content") or "").strip()
+        if not content:
+            return {"status": "error", "result": "Empty content — skipped."}
+
+        confidence = (args.get("confidence") or "stated").strip().lower()
+        if confidence not in ("stated", "inferred"):
+            confidence = "stated"
+
+        # Buffered for post-call profile_suggestions extractor. Memory write
+        # is fire-and-forget — Donna shouldn't wait on embeddings.
+        captured_facts.append({
+            "category": category,
+            "content": content,
+            "confidence": confidence,
+            "captured_at_turn": session_state.get("_current_turn_sequence"),
+        })
+
+        async def _background_store():
+            try:
+                # stated → importance 80, inferred → 60. Caregiver review
+                # surface should weight these similarly when proposing
+                # profile updates.
+                importance = 80 if confidence == "stated" else 60
+                await store(
+                    senior_id=senior_id,
+                    type_=_DISCOVERY_CATEGORY_TO_MEMORY_TYPE[category],
+                    content=content,
+                    source=session_state.get("conversation_id") or "discovery",
+                    importance=importance,
+                    metadata={
+                        "discovery_category": category,
+                        "discovery_confidence": confidence,
+                    },
+                )
+            except Exception as e:
+                logger.error("record_discovery_fact background store failed: {err}", err=str(e))
+
+        asyncio.create_task(_background_store())
+        return {"status": "success", "result": f"Captured {category}: {content[:60]}"}
+
+    schemas: dict[str, FlowsFunctionSchema] = {}
+    schemas["record_discovery_fact"] = FlowsFunctionSchema(
+        name=RECORD_DISCOVERY_FACT_SCHEMA["name"],
+        description=RECORD_DISCOVERY_FACT_SCHEMA["description"],
+        properties=RECORD_DISCOVERY_FACT_SCHEMA["properties"],
+        required=RECORD_DISCOVERY_FACT_SCHEMA["required"],
+        handler=handle_record_discovery_fact,
+    )
+
+    web_search_schema = get_web_search_schema(session_state)
+    schemas["web_search"] = FlowsFunctionSchema(
+        name=web_search_schema["name"],
+        description=web_search_schema["description"],
+        properties=web_search_schema["properties"],
+        required=web_search_schema["required"],
+        handler=subscriber_handlers["web_search"],
+    )
+
+    return schemas

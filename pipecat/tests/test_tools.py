@@ -293,3 +293,76 @@ class TestConsentTool:
             "consent_type": "call_permission", "granted": True,
         })
         assert res["status"] == "error"
+
+
+class TestDiscoveryTool:
+    def test_record_discovery_fact_schema_valid(self):
+        from flows.tools import RECORD_DISCOVERY_FACT_SCHEMA
+        assert RECORD_DISCOVERY_FACT_SCHEMA["name"] == "record_discovery_fact"
+        cats = RECORD_DISCOVERY_FACT_SCHEMA["properties"]["category"]["enum"]
+        assert set(cats) == {"friend", "hobby", "interest", "routine", "family"}
+        assert "category" in RECORD_DISCOVERY_FACT_SCHEMA["required"]
+        assert "content" in RECORD_DISCOVERY_FACT_SCHEMA["required"]
+
+    def test_make_discovery_flows_tools_returns_fact_and_search(self):
+        from flows.tools import make_discovery_flows_tools
+        tools = make_discovery_flows_tools({"senior_id": "sen-1"})
+        assert set(tools) == {"record_discovery_fact", "web_search"}
+
+    @pytest.mark.asyncio
+    async def test_record_discovery_fact_buffers_and_fires_store(self):
+        from flows.tools import make_discovery_flows_tools
+        session_state = {"senior_id": "sen-1", "conversation_id": "conv-1"}
+        tools = make_discovery_flows_tools(session_state)
+        with patch(
+            "services.memory.store",
+            new_callable=AsyncMock,
+            return_value={"id": "mem-1"},
+        ) as mock_store:
+            res = await tools["record_discovery_fact"].handler({
+                "category": "friend",
+                "content": "Plays bridge with Eleanor on Thursdays",
+                "confidence": "stated",
+            })
+            # Background task is created — give the loop one tick to run it.
+            await asyncio.sleep(0)
+        assert res["status"] == "success"
+        facts = session_state["_discovery_facts"]
+        assert len(facts) == 1
+        assert facts[0]["category"] == "friend"
+        assert facts[0]["confidence"] == "stated"
+        mock_store.assert_awaited_once()
+        kwargs = mock_store.await_args.kwargs
+        # friend → relationship
+        assert kwargs["type_"] == "relationship"
+        assert kwargs["importance"] == 80
+
+    @pytest.mark.asyncio
+    async def test_record_discovery_fact_inferred_lower_importance(self):
+        from flows.tools import make_discovery_flows_tools
+        session_state = {"senior_id": "sen-1"}
+        tools = make_discovery_flows_tools(session_state)
+        with patch(
+            "services.memory.store",
+            new_callable=AsyncMock,
+            return_value=None,
+        ) as mock_store:
+            await tools["record_discovery_fact"].handler({
+                "category": "hobby",
+                "content": "Likes gardening",
+                "confidence": "inferred",
+            })
+            await asyncio.sleep(0)
+        kwargs = mock_store.await_args.kwargs
+        assert kwargs["importance"] == 60
+        assert kwargs["type_"] == "preference"
+
+    @pytest.mark.asyncio
+    async def test_record_discovery_fact_rejects_invalid_category(self):
+        from flows.tools import make_discovery_flows_tools
+        tools = make_discovery_flows_tools({"senior_id": "sen-1"})
+        res = await tools["record_discovery_fact"].handler({
+            "category": "medication",
+            "content": "Takes lisinopril",
+        })
+        assert res["status"] == "error"
