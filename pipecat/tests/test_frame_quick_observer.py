@@ -162,6 +162,22 @@ class TestQuickObserverGoodbyeEndFrame:
         assert session_state.get("_goodbye_in_progress") is True
 
     @pytest.mark.asyncio
+    async def test_consent_call_goodbye_does_not_force_end(self, session_state):
+        """Consent calls should let the consent flow end the call after recording."""
+        session_state["call_type"] = "consent"
+        processor = QuickObserverProcessor(session_state=session_state)
+        processor.GOODBYE_DELAY_SECONDS = 0.1
+
+        await run_processor_test(
+            processors=[processor],
+            frames_to_inject=[make_transcription("Yes, I agree. Bye now")],
+            pre_end_delay=0.3,
+        )
+
+        assert processor._goodbye_task is None
+        assert session_state.get("_goodbye_in_progress") is not True
+
+    @pytest.mark.asyncio
     async def test_early_strong_goodbye_forces_end(self, session_state, frame_capture):
         """A clear goodbye should not be blocked by an arbitrary minimum call age."""
         import time

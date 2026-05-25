@@ -891,6 +891,12 @@ def make_consent_flows_tools(session_state: dict) -> dict[str, FlowsFunctionSche
     async def handle_record_consent(args: dict) -> dict:
         from services.seniors import record_consent
 
+        # Match make_tool_handlers' tracking so the live-sim runner can see
+        # this fired (it reads session_state["_tools_used"]).
+        tools_used = session_state.setdefault("_tools_used", [])
+        if "record_consent_response" not in tools_used:
+            tools_used.append("record_consent_response")
+
         senior_id = session_state.get("senior_id")
         if not senior_id:
             logger.warning("record_consent_response called with no senior_id")
@@ -1024,6 +1030,12 @@ def make_discovery_flows_tools(session_state: dict) -> dict[str, FlowsFunctionSc
 
     async def handle_record_discovery_fact(args: dict) -> dict:
         from services.memory import store
+
+        # Match make_tool_handlers' tracking so the live-sim runner can see
+        # this fired (it reads session_state["_tools_used"]).
+        tools_used = session_state.setdefault("_tools_used", [])
+        if "record_discovery_fact" not in tools_used:
+            tools_used.append("record_discovery_fact")
 
         senior_id = session_state.get("senior_id")
         if not senior_id:

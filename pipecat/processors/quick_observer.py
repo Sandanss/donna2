@@ -357,7 +357,18 @@ class QuickObserverProcessor(FrameProcessor):
             # PROGRAMMATIC GOODBYE: When strong goodbye detected, schedule forced
             # call end. The LLM will still generate its goodbye response normally,
             # but we don't rely on it to call the transition tools.
-            if analysis.goodbye_signals and self._goodbye_task is None:
+            #
+            # Consent calls are exempt: the persona is scripted to end with a
+            # warm "bye now" right after agreeing/declining, and the QO racing
+            # ahead can force the call to end before Donna calls
+            # record_consent_response — losing the senior's answer entirely.
+            # The consent closing node handles call termination via its
+            # end_conversation post_action.
+            call_type = (self._session_state or {}).get("call_type")
+            if call_type == "consent":
+                # Skip the entire programmatic-goodbye block for consent calls.
+                pass
+            elif analysis.goodbye_signals and self._goodbye_task is None:
                 has_strong = any(g["strength"] == "strong" for g in analysis.goodbye_signals)
                 if has_strong:
                     settings = (self._session_state or {}).get("call_settings") or {}
