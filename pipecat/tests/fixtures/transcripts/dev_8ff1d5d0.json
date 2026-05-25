@@ -1,0 +1,35 @@
+{
+  "fixture_version": 1,
+  "source": "dev",
+  "source_conversation_id": "8ff1d5d0-5475-4b9a-99d6-abf868a43f98",
+  "source_duration_seconds": 76,
+  "source_started_at": "2026-05-25T13:51:33.417100",
+  "senior_context": {
+    "name": "SENIOR_NAME",
+    "timezone": "America/Chicago",
+    "family": []
+  },
+  "transcript": [
+    {
+      "role": "user",
+      "content": "5127 02:08",
+      "sequence": 0,
+      "timestamp": "2026-05-25T13:51:46.873106+00:00",
+      "timestamp_offset_ms": 8888
+    }
+  ],
+  "expected_traits": {
+    "sentiment_enum_member": "neutral",
+    "engagement_min": 1,
+    "engagement_max": 3,
+    "summary_min_chars": 40,
+    "summary_max_chars": 600,
+    "topics_min_count": 0,
+    "topics_max_count": 8,
+    "caregiver_sms_max_chars": 280,
+    "concerns_must_be_empty": true,
+    "follow_up_suggestions_must_be_empty": true,
+    "recommended_caregiver_action_must_be_empty_string": true
+  },
+  "name_map_size": 3
+}

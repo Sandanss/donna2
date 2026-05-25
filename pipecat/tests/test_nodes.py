@@ -26,7 +26,7 @@ def _make_session_state(**overrides):
         "memory_context": "Tier 1: Has arthritis in hands",
         "news_context": None,
         "greeting": "Good morning, Margaret!",
-        "reminder_prompt": "Remind Margaret to take her blood pressure medication at 2pm.",
+        "reminder_prompt": "Remind Margaret to water the porch plants at 2pm.",
         "reminder_delivery": None,
         "reminders_delivered": set(),
         "conversation_id": "conv-1",
@@ -155,13 +155,13 @@ class TestReminderContext:
     def test_includes_reminder_prompt(self):
         state = _make_session_state()
         ctx = _build_reminder_context(state)
-        assert "blood pressure" in ctx
+        assert "porch plants" in ctx
 
     def test_delivered_reminders_shown(self):
-        state = _make_session_state(reminders_delivered={"Take Lisinopril"})
+        state = _make_session_state(reminders_delivered={"Water the porch plants"})
         ctx = _build_reminder_context(state)
         assert "ALREADY DELIVERED" in ctx
-        assert "Lisinopril" in ctx
+        assert "porch plants" in ctx
 
     def test_empty_when_no_reminders(self):
         state = _make_session_state(reminder_prompt=None)
@@ -340,7 +340,7 @@ class TestReminderNode:
         tools = make_flows_tools(state)
         node = build_reminder_node(state, tools)
         task_content = node["task_messages"][0]["content"]
-        assert "blood pressure" in task_content
+        assert "porch plants" in task_content
 
     def test_uses_append_strategy(self):
         state = _make_session_state()
@@ -385,7 +385,7 @@ class TestReminderNode:
 class TestConditionalRouting:
     def test_routes_to_reminder_when_reminders_pending(self):
         state = _make_session_state(
-            reminder_prompt="Take blood pressure medication at 2pm.",
+            reminder_prompt="Water the porch plants at 2pm.",
             reminders_delivered=set(),
         )
         tools = make_flows_tools(state)
@@ -403,8 +403,8 @@ class TestConditionalRouting:
 
     def test_routes_to_main_when_reminders_already_delivered(self):
         state = _make_session_state(
-            reminder_prompt="Take blood pressure medication at 2pm.",
-            reminders_delivered={"Take blood pressure medication"},
+            reminder_prompt="Water the porch plants at 2pm.",
+            reminders_delivered={"Water the porch plants"},
         )
         tools = make_flows_tools(state)
         node = build_initial_node(state, tools)
@@ -429,7 +429,7 @@ class TestInitialNode:
 
     def test_returns_reminder_with_pending_reminders(self):
         state = _make_session_state(
-            reminder_prompt="Take medication",
+            reminder_prompt="Water the porch plants",
             reminders_delivered=set(),
         )
         tools = make_flows_tools(state)
@@ -455,3 +455,119 @@ class TestInitialNode:
         node = build_initial_node(state, tools)
         task_content = node["task_messages"][0]["content"]
         assert "Hello Margaret!" in task_content
+
+
+class TestConsentFlow:
+    """Consent call flow (call_type='consent')."""
+
+    def _consent_state(self, **overrides):
+        state = {
+            "senior_id": "test-senior-consent",
+            "senior": {"name": "Mary Johnson"},
+            "_caregivers": [{"name": "Sarah Johnson", "relation": "daughter"}],
+            "conversation_id": "conv-consent-1",
+            "call_type": "consent",
+            "is_outbound": True,
+        }
+        state.update(overrides)
+        return state
+
+    def test_initial_node_routes_to_consent_when_call_type_consent(self):
+        from flows.tools import make_consent_flows_tools
+        state = self._consent_state()
+        tools = make_consent_flows_tools(state)
+        node = build_initial_node(state, tools)
+        assert node["name"] == "consent"
+
+    def test_consent_node_exposes_only_consent_and_transition_tools(self):
+        from flows.nodes import build_consent_node
+        from flows.tools import make_consent_flows_tools
+        state = self._consent_state()
+        tools = make_consent_flows_tools(state)
+        node = build_consent_node(state, tools)
+        fn_names = {f.name for f in node["functions"]}
+        assert fn_names == {"record_consent_response", "transition_to_consent_closing"}
+
+    def test_consent_node_interpolates_caregiver_intro(self):
+        from flows.nodes import build_consent_node
+        from flows.tools import make_consent_flows_tools
+        state = self._consent_state()
+        tools = make_consent_flows_tools(state)
+        node = build_consent_node(state, tools)
+        task = node["task_messages"][0]["content"]
+        # "Sarah, your daughter," renders from _caregivers
+        assert "Sarah, your daughter" in task
+        # No literal Python placeholders left behind
+        assert "{caregiver_intro}" not in task
+        assert "{first_name}" not in task
+
+    def test_consent_node_caregiver_intro_falls_back(self):
+        from flows.nodes import build_consent_node
+        from flows.tools import make_consent_flows_tools
+        # No caregivers + no family_info → neutral fallback
+        state = self._consent_state(_caregivers=[], senior={"name": "Mary Johnson"})
+        tools = make_consent_flows_tools(state)
+        node = build_consent_node(state, tools)
+        task = node["task_messages"][0]["content"]
+        assert "someone in your family" in task
+
+    def test_consent_closing_node_ends_conversation(self):
+        from flows.nodes import build_consent_closing_node
+        state = self._consent_state()
+        node = build_consent_closing_node(state)
+        assert node["name"] == "consent_closing"
+        assert node.get("post_actions") == [{"type": "end_conversation"}]
+        assert node["functions"] == []
+
+
+class TestDiscoveryFlow:
+    """Discovery call flow (call_type='discovery')."""
+
+    def _discovery_state(self, **overrides):
+        state = {
+            "senior_id": "test-senior-discovery",
+            "senior": {"name": "Mary Johnson", "interests": ["gardening"], "timezone": "America/New_York"},
+            "memory_context": None,
+            "news_context": None,
+            "conversation_id": "conv-disco-1",
+            "call_type": "discovery",
+            "is_outbound": True,
+        }
+        state.update(overrides)
+        return state
+
+    def test_initial_node_routes_to_discovery_when_call_type_discovery(self):
+        from flows.tools import make_discovery_flows_tools
+        state = self._discovery_state()
+        tools = make_discovery_flows_tools(state)
+        node = build_initial_node(state, tools)
+        assert node["name"] == "discovery"
+
+    def test_discovery_node_exposes_fact_and_search_tools(self):
+        from flows.nodes import build_discovery_node
+        from flows.tools import make_discovery_flows_tools
+        state = self._discovery_state()
+        tools = make_discovery_flows_tools(state)
+        node = build_discovery_node(state, tools)
+        fn_names = {f.name for f in node["functions"]}
+        assert "record_discovery_fact" in fn_names
+        assert "web_search" in fn_names
+        assert "transition_to_discovery_closing" in fn_names
+
+    def test_discovery_node_includes_senior_context_in_system_prompt(self):
+        from flows.nodes import build_discovery_node
+        from flows.tools import make_discovery_flows_tools
+        state = self._discovery_state()
+        tools = make_discovery_flows_tools(state)
+        node = build_discovery_node(state, tools)
+        system = node["role_messages"][0]["content"]
+        assert "Donna" in system
+        assert "Mary" in system  # senior context block injects the name
+
+    def test_discovery_closing_node_ends_conversation(self):
+        from flows.nodes import build_discovery_closing_node
+        state = self._discovery_state()
+        node = build_discovery_closing_node(state)
+        assert node["name"] == "discovery_closing"
+        assert node.get("post_actions") == [{"type": "end_conversation"}]
+        assert node["functions"] == []

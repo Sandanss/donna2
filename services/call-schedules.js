@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { encrypt } from '../lib/encryption.js';
 import { createLogger } from '../lib/logger.js';
+import { isSchedulerConsentGateEnabled } from '../lib/scheduler-config.js';
 
 const log = createLogger('CallSchedules');
 import {
@@ -331,6 +332,9 @@ async function materializeDueNormalizedSchedulesUnlocked({
     JOIN seniors s ON s.id = scs.senior_id
     WHERE scs.is_active = true
       AND s.is_active = true
+      ${isSchedulerConsentGateEnabled()
+        ? sql`AND s.callable = true AND s.consent_status = 'granted'`
+        : sql``}
       AND scs.next_run_at <= ${horizon}
       AND NOT EXISTS (
         SELECT 1

@@ -99,6 +99,11 @@ class TestCallResult:
         assert result.total_duration_ms == 0.0
         assert result.end_reason == "unknown"
         assert result.post_call_completed is False
+        assert result.post_call_metrics_logged is False
+        assert result.post_call_logged_tools == []
+        assert result.post_call_context_event_count == 0
+        assert result.post_call_context_trace_encrypted is False
+        assert result.post_call_error_count == 0
 
     def test_populated_result(self):
         result = CallResult(
@@ -109,11 +114,18 @@ class TestCallResult:
             total_duration_ms=45000,
             end_reason="goodbye",
             post_call_completed=True,
+            post_call_metrics_logged=True,
+            post_call_logged_tools=["web_search"],
+            post_call_context_event_count=2,
+            post_call_context_trace_encrypted=True,
+            post_call_error_count=0,
         )
         assert len(result.turns) == 1
         assert result.tool_calls_made == ["web_search"]
         assert result.end_reason == "goodbye"
         assert result.post_call_completed is True
+        assert result.post_call_metrics_logged is True
+        assert result.post_call_logged_tools == ["web_search"]
 
 
 # ---------------------------------------------------------------------------

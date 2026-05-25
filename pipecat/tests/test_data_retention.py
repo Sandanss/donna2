@@ -71,6 +71,22 @@ async def test_purge_table_no_rows():
 
 
 @pytest.mark.asyncio
+async def test_purge_table_call_queue_waits_for_fk_children():
+    """call_queue parent rows must not purge while queue child rows remain."""
+    from services.data_retention import _purge_table
+
+    with patch("services.data_retention.query_one", new_callable=AsyncMock) as mock_q:
+        mock_q.return_value = {"count": 0}
+
+        await _purge_table("call_queue", "created_at", 90)
+
+    sql = mock_q.call_args[0][0]
+    assert "FROM call_attempts ca WHERE ca.queue_id = target.id" in sql
+    assert "FROM outbound_call_guards ocg WHERE ocg.queue_id = target.id" in sql
+    assert "FROM scheduler_shadow_comparisons ssc WHERE ssc.queue_id = target.id" in sql
+
+
+@pytest.mark.asyncio
 async def test_purge_table_none_result():
     """When query_one returns None, treat as 0 deleted."""
     from services.data_retention import _purge_table
@@ -123,6 +139,10 @@ async def test_purge_expired_data_calls_all_tables():
     assert "canary_cohort_membership" in tables_purged
     assert "waitlist" in tables_purged
     assert "audit_logs" in tables_purged
+    table_order = [call.args[0] for call in mock_purge.call_args_list]
+    assert table_order.index("call_attempts") < table_order.index("call_queue")
+    assert table_order.index("outbound_call_guards") < table_order.index("call_queue")
+    assert table_order.index("scheduler_shadow_comparisons") < table_order.index("call_queue")
 
 
 @pytest.mark.asyncio

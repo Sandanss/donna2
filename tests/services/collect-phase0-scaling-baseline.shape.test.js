@@ -96,7 +96,7 @@ function literalSqlOf(query) {
 // query. These are stricter than the broad PHI_KEY_REGEX because we're
 // matching against real SQL identifiers, not output keys.
 const FORBIDDEN_PHI_COLUMN_REGEX =
-  /\b(name|phone|transcript|reminder_title|reminder_description|caregiver_note|medical_notes|content|prompt|summary_text)\b/i;
+  /\b(name|phone|transcript|reminder_title|reminder_description|caregiver_note|profile_notes|content|prompt|summary_text)\b/i;
 
 beforeEach(() => {
   mocks.execute.mockReset();

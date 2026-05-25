@@ -34,11 +34,9 @@ _TOPIC_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"\b(tv|television|show(?:s)?|movie(?:s)?|watch(?:ing)?)\b", re.I), "tv/movies"),
     (re.compile(r"\b(grandkid(?:s)?|grandchild(?:ren)?|grandson|granddaughter)\b", re.I), "grandchildren"),
     (re.compile(r"\b(son|daughter|brother|sister|husband|wife|family)\b", re.I), "family"),
-    (re.compile(r"\b(doctor|hospital|appointment|medication|medicine|pill(?:s)?)\b", re.I), "medical"),
     (re.compile(r"\b(weather|rain(?:ing)?|snow(?:ing)?|sunny|cold|hot)\b", re.I), "weather"),
     (re.compile(r"\b(sleep(?:ing)?|nap|rest(?:ing)?|tired)\b", re.I), "sleep"),
     (re.compile(r"\b(friend(?:s)?|neighbor(?:s)?|visitor(?:s)?|company)\b", re.I), "social"),
-    (re.compile(r"\b(pain|ache|hurt(?:ing)?|sore|dizzy|fall|fell)\b", re.I), "health concerns"),
     (re.compile(r"\b(bird(?:s)?|cat(?:s)?|dog(?:s)?|pet(?:s)?)\b", re.I), "pets"),
     (re.compile(r"\b(music|sing(?:ing)?|radio|song(?:s)?)\b", re.I), "music"),
     (re.compile(r"\b(craft(?:s)?|knit(?:ting)?|sew(?:ing)?|puzzle(?:s)?)\b", re.I), "crafts"),
@@ -99,10 +97,6 @@ def track_topics_from_signals(analysis_result, topics: list[str]) -> list[str]:
         analysis_result: AnalysisResult from quick_observer.quick_analyze()
         topics: Existing topics list (mutated in place and returned)
     """
-    if getattr(analysis_result, "health_signals", None):
-        if "health" not in topics:
-            topics.append("health")
-
     if getattr(analysis_result, "family_signals", None):
         if "family" not in topics:
             topics.append("family")

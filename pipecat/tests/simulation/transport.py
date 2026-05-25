@@ -78,6 +78,14 @@ class CallResult:
         end_reason: Human-readable reason the call ended (e.g. ``"goodbye"``,
             ``"max_turns"``, ``"timeout"``).
         post_call_completed: Whether post-call processing ran to completion.
+        post_call_metrics_logged: Whether post-call call_metrics persisted.
+        post_call_logged_tools: Tool names written into post-call metrics.
+        post_call_context_event_count: Number of encrypted context trace events
+            present when post-call metrics persisted.
+        post_call_context_trace_encrypted: Whether the metrics write included
+            encrypted context trace payload.
+        conversation_id: DB conversation row created for the simulated call.
+        initial_donna_text: Donna's opening response before the first caller turn.
     """
 
     turns: list[dict] = field(default_factory=list)
@@ -89,6 +97,13 @@ class CallResult:
     total_duration_ms: float = 0.0
     end_reason: str = "unknown"
     post_call_completed: bool = False
+    post_call_metrics_logged: bool = False
+    post_call_logged_tools: list[str] = field(default_factory=list)
+    post_call_context_event_count: int = 0
+    post_call_context_trace_encrypted: bool = False
+    post_call_error_count: int = 0
+    conversation_id: str | None = None
+    initial_donna_text: str | None = None
 
 
 # ---------------------------------------------------------------------------

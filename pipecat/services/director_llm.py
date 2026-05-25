@@ -136,6 +136,8 @@ Reminders: natural pauses + high engagement only. Never during emotions/low enga
 Low engagement: suggest personal questions, memories, or one uplifting news item if Has news=true.
 News: if Has news=true and tone is neutral/positive, suggest it during lulls, low/medium engagement, or topic wind-down. Avoid news during sadness, health/safety concerns, or active reminders.
 Onboarding calls (call_type="onboarding"): no reminders, no re-engage signals, focus on discovery.
+Discovery calls (call_type="discovery"): no reminders, no news pivots; one question per turn; reference what the senior just shared (a name, a routine, a hobby) before asking the next thing. Pacing note: time_to_close once 8-10 minutes in or after 3+ topics covered.
+Consent calls (call_type="consent"): the Director is bypassed for these calls — you will not be invoked. If you somehow are, return minimal guidance and do NOT inject reminders/news/memories.
 
 CRITICAL: Donna must answer the senior's most recent question before pivoting. If the senior's last turn contains a question (ends with "?", or asks "did/do/can/will/is/are/what/when/where/why/how"), set stay_or_shift="stay" and put the answer guidance in specific_instruction. Only set "transition" once the question has been acknowledged in a prior assistant turn. This rule overrides news/reminder suggestions for one turn.
 
@@ -294,7 +296,7 @@ def format_director_guidance(direction: dict) -> str | None:
     """Format Director output into compact guidance string for LLM injection.
 
     Returns a single-line string like:
-        main/medium/warm | REMIND: Take medication | (concerned)
+        main/medium/warm | REMIND: Call Emma | (engaged)
     """
     if not direction:
         return None

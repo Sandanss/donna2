@@ -32,12 +32,14 @@ from prompts import (
     ONBOARDING_TASK_FIRST_CALL,
     ONBOARDING_TASK_RETURN_CALLER,
     ONBOARDING_CLOSING_TASK,
+    CONSENT_SYSTEM_PROMPT,
+    CONSENT_TASK_TEMPLATE,
+    CONSENT_CLOSING_TASK_TEMPLATE,
+    DISCOVERY_SYSTEM_PROMPT,
+    DISCOVERY_TASK_TEMPLATE,
+    DISCOVERY_CLOSING_TASK_TEMPLATE,
 )
 from services.context_trace import record_context_event
-
-
-_EMPATHY_KEYWORDS = {"pain", "hurt", "ache", "sore", "discomfort", "bothering", "bother",
-                      "tired", "exhausted", "dizzy", "fell", "fall", "swollen", "stiff"}
 
 
 def _record_prompt_event(
@@ -74,8 +76,7 @@ def _line_item_count(text: str | None) -> int | None:
 
 
 def _format_analysis_insights(analysis: dict) -> str | None:
-    """Format follow-ups, positive observations, and empathy-relevant concerns
-    from the last call analysis into a prompt section."""
+    """Format non-clinical follow-ups and positive observations from analysis."""
     lines: list[str] = []
 
     # Follow-up suggestions — highest signal for personalization
@@ -98,24 +99,6 @@ def _format_analysis_insights(analysis: dict) -> str | None:
         lines.append("What went well last time:")
         for po in positives[:3]:
             lines.append(f"- {po}")
-
-    # Concerns — only emotional or pain/discomfort (empathetic, not clinical)
-    concerns = analysis.get("concerns") or []
-    empathy_concerns: list[str] = []
-    for c in concerns:
-        if not isinstance(c, dict):
-            continue
-        ctype = (c.get("type") or "").lower()
-        desc = c.get("description") or ""
-        desc_lower = desc.lower()
-        if ctype == "emotional":
-            empathy_concerns.append(desc)
-        elif ctype == "health" and any(kw in desc_lower for kw in _EMPATHY_KEYWORDS):
-            empathy_concerns.append(desc)
-    if empathy_concerns:
-        lines.append("They shared something that might still be on their mind:")
-        for ec in empathy_concerns[:2]:
-            lines.append(f"- {ec}")
 
     return "\n".join(lines) if lines else None
 
@@ -272,17 +255,17 @@ def _build_senior_context(session_state: dict) -> str:
             dedupe_key="senior_context:topics_to_avoid",
         )
 
-    medical = senior.get("medical_notes") or senior.get("medicalNotes")
-    if medical:
-        medical_text = f"Health notes: {medical}"
-        parts.append(medical_text)
+    profile_notes = senior.get("profile_notes") or senior.get("profileNotes")
+    if profile_notes:
+        profile_text = f"Profile notes: {profile_notes}"
+        parts.append(profile_text)
         _record_prompt_event(
             session_state,
-            source="medical_notes",
-            label="Health notes",
-            content=medical_text,
+            source="profile_notes",
+            label="Profile notes",
+            content=profile_text,
             provider="seniors",
-            dedupe_key="senior_context:medical_notes",
+            dedupe_key="senior_context:profile_notes",
         )
 
     # Profile authority: explicit profile data overrides conversation memories
@@ -503,10 +486,75 @@ def _record_node_prompts(
 # Transition functions
 # ---------------------------------------------------------------------------
 
+def _reminders_missing_acknowledgement(session_state: dict) -> list[dict]:
+    """Return pending reminders that have not been acknowledged this call."""
+    pending = session_state.get("_pending_reminders") or []
+    delivered = session_state.get("reminders_delivered") or set()
+    if not pending:
+        if session_state.get("reminder_prompt") and not session_state.get("_reminder_ack_attempted"):
+            delivery = session_state.get("reminder_delivery") or {}
+            return [delivery] if delivery else [{"id": "", "title": ""}]
+        return []
+
+    missing: list[dict] = []
+    for reminder in pending:
+        if not isinstance(reminder, dict):
+            continue
+        keys = {
+            reminder.get("id"),
+            reminder.get("reminder_id"),
+            reminder.get("title"),
+        }
+        if not any(key and key in delivered for key in keys):
+            missing.append(reminder)
+    return missing
+
+
 def _make_transition_reminder_to_main(session_state: dict, flows_tools: dict):
     """Create transition function: reminder → main."""
 
     async def transition_to_main(args: dict, flow_manager) -> tuple[dict, NodeConfig]:
+        missing_reminders = _reminders_missing_acknowledgement(session_state)
+        if (
+            session_state.get("reminder_prompt")
+            and missing_reminders
+            and "mark_reminder_acknowledged" in flows_tools
+        ):
+            logger.info(
+                "Recording reminder acknowledgement before transitioning to main"
+            )
+            try:
+                for reminder in missing_reminders:
+                    reminder_id = (
+                        reminder.get("reminder_id")
+                        or reminder.get("id")
+                        or reminder.get("title")
+                        or ""
+                    )
+                    await flows_tools["mark_reminder_acknowledged"].handler({
+                        "reminder_id": reminder_id,
+                        "status": "acknowledged",
+                        "user_response": (
+                            "Senior responded to the reminder before Donna moved "
+                            "into the main conversation."
+                        ),
+                    })
+            except Exception as exc:
+                logger.error(
+                    "Reminder acknowledgement failed before transition: {err}",
+                    err=str(exc),
+                )
+                return (
+                    {
+                        "status": "needs_acknowledgement",
+                        "message": (
+                            "Before moving on, call mark_reminder_acknowledged "
+                            "for the reminder the senior just responded to."
+                        ),
+                    },
+                    build_reminder_node(session_state, flows_tools),
+                )
+
         logger.info("Transitioning: reminder → main")
         _record_phase_transition(session_state, "main")
         _update_tracking_context(session_state)
@@ -573,7 +621,8 @@ def build_reminder_node(
         greeting_task = _build_greeting_task(session_state)
         reminder_task = (
             greeting_task
-            + " After they respond to your greeting, move to the reminders promptly."
+            + " In this opening greeting, naturally include every pending "
+            + "reminder instead of waiting for a later turn."
             + "\n\n" + reminder_task
         )
 
@@ -587,7 +636,12 @@ def build_reminder_node(
 
     functions.append(FlowsFunctionSchema(
         name="transition_to_main",
-        description="Call this after all reminders have been delivered and acknowledged, to move into the main conversation.",
+        description=(
+            "Call this only after all reminders have been delivered and "
+            "mark_reminder_acknowledged has already been called for each reminder. "
+            "If the senior just responded to a reminder, call "
+            "mark_reminder_acknowledged before this transition."
+        ),
         properties={},
         required=[],
         handler=_make_transition_reminder_to_main(session_state, flows_tools),
@@ -883,24 +937,273 @@ def build_onboarding_closing_node(session_state: dict) -> NodeConfig:
 
 
 # ---------------------------------------------------------------------------
+# Consent nodes (call_type="consent" — outbound permission + AI disclosure)
+# ---------------------------------------------------------------------------
+
+def _build_consent_caregiver_intro(session_state: dict) -> str:
+    """Render the caregiver introduction snippet for the consent prompt.
+
+    Falls back to a neutral phrase when caregiver info isn't available — never
+    leaves a literal placeholder in the spoken prompt.
+    """
+    senior = session_state.get("senior") or {}
+    caregivers = session_state.get("_caregivers") or []
+    if caregivers:
+        cg = caregivers[0]
+        name = (cg.get("name") or "").strip().split(" ")[0]
+        relation = (cg.get("relation") or "").strip().lower()
+        if name and relation:
+            return f"{name}, your {relation},"
+        if name:
+            return f"{name}"
+        if relation:
+            return f"your {relation}"
+    family_info = senior.get("family_info") or senior.get("familyInfo") or {}
+    if isinstance(family_info, dict):
+        rel = (family_info.get("caregiverRelation") or "").strip().lower()
+        if rel:
+            return f"your {rel}"
+    return "someone in your family"
+
+
+def _make_transition_to_consent_closing(session_state: dict):
+    """Create transition function: consent → consent_closing.
+
+    Belt-and-braces guard: refuse to transition if record_consent_response
+    hasn't been called yet. Without this, a prompt slip-up (warm ack before
+    tool call) can leak into the Quick Observer's goodbye detection and end
+    the call before the consent row lands — losing the senior's answer.
+    """
+
+    async def transition_to_consent_closing(args: dict, flow_manager) -> tuple[dict, NodeConfig]:
+        if not session_state.get("_consent_captured"):
+            logger.warning(
+                "transition_to_consent_closing called before record_consent_response — "
+                "rejecting; the consent answer must be captured first."
+            )
+            return (
+                {
+                    "status": "error",
+                    "result": (
+                        "You must call record_consent_response with the senior's "
+                        "yes/no answer BEFORE transitioning to the closing. The "
+                        "consent answer hasn't been captured yet — call "
+                        "record_consent_response now, then call this transition."
+                    ),
+                },
+                # Stay on the consent node so Donna can correct course.
+                build_consent_node(session_state, session_state.get("_flow_tools") or {}),
+            )
+
+        logger.info("Transitioning: consent → consent_closing")
+        _record_phase_transition(session_state, "consent_closing")
+        return (
+            {"status": "success"},
+            build_consent_closing_node(session_state),
+        )
+
+    return transition_to_consent_closing
+
+
+def build_consent_node(session_state: dict, flows_tools: dict) -> NodeConfig:
+    """Build the consent node — capture combined call+recording permission.
+
+    Stripped flow: no web search, no memory, no caregiver notes.
+    Tools: record_consent_response + transition_to_consent_closing.
+    """
+    # Stash the tool set so the transition handler can rebuild this node if
+    # it has to reject a premature transition (consent not captured yet).
+    session_state["_flow_tools"] = flows_tools
+
+    senior = session_state.get("senior") or {}
+    first_name = (senior.get("name") or "").split(" ")[0] or "there"
+    caregiver_intro = _build_consent_caregiver_intro(session_state)
+
+    task = CONSENT_TASK_TEMPLATE.format(
+        first_name=first_name,
+        caregiver_intro=caregiver_intro,
+    )
+
+    functions: list = []
+    if "record_consent_response" in flows_tools:
+        functions.append(flows_tools["record_consent_response"])
+    functions.append(FlowsFunctionSchema(
+        name="transition_to_consent_closing",
+        description=(
+            "Call ONLY AFTER record_consent_response has been called with the "
+            "senior's yes/no answer. Moves into the warm goodbye phase. The "
+            "closing node speaks the goodbye, so do not say goodbye yourself "
+            "before calling this — just call it."
+        ),
+        properties={},
+        required=[],
+        handler=_make_transition_to_consent_closing(session_state),
+    ))
+
+    system_content = CONSENT_SYSTEM_PROMPT
+    _record_node_prompts(
+        session_state,
+        node_name="consent",
+        system_prompt=CONSENT_SYSTEM_PROMPT,
+        task_prompt=task,
+        prompt_variant="consent",
+    )
+
+    return NodeConfig(
+        name="consent",
+        role_messages=[{"role": "system", "content": system_content}],
+        task_messages=[{"role": "user", "content": task}],
+        functions=functions,
+        context_strategy=ContextStrategyConfig(strategy=ContextStrategy.APPEND),
+        respond_immediately=True,  # Donna initiated the call; she speaks first.
+    )
+
+
+def build_consent_closing_node(session_state: dict) -> NodeConfig:
+    """Build the consent closing node — warm goodbye and end conversation."""
+    senior = session_state.get("senior") or {}
+    first_name = (senior.get("name") or "").split(" ")[0] or "there"
+
+    closing_task = CONSENT_CLOSING_TASK_TEMPLATE.format(first_name=first_name)
+    _record_node_prompts(
+        session_state,
+        node_name="consent_closing",
+        task_prompt=closing_task,
+        prompt_variant="consent",
+    )
+
+    return NodeConfig(
+        name="consent_closing",
+        role_messages=[],
+        task_messages=[{"role": "user", "content": closing_task}],
+        functions=[],
+        post_actions=[{"type": "end_conversation"}],
+        context_strategy=ContextStrategyConfig(strategy=ContextStrategy.APPEND),
+        respond_immediately=False,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Discovery nodes (call_type="discovery" — friends, hobbies, interests)
+# ---------------------------------------------------------------------------
+
+def _make_transition_to_discovery_closing(session_state: dict):
+    """Create transition function: discovery → discovery_closing."""
+
+    async def transition_to_discovery_closing(args: dict, flow_manager) -> tuple[dict, NodeConfig]:
+        logger.info("Transitioning: discovery → discovery_closing")
+        _record_phase_transition(session_state, "discovery_closing")
+        return (
+            {"status": "success"},
+            build_discovery_closing_node(session_state),
+        )
+
+    return transition_to_discovery_closing
+
+
+def build_discovery_node(session_state: dict, flows_tools: dict) -> NodeConfig:
+    """Build the discovery node — friends, hobbies, routines, family.
+
+    Full subscriber stack (Director on, memories on, web_search on). Tools:
+    record_discovery_fact, web_search, transition_to_discovery_closing.
+    """
+    senior = session_state.get("senior") or {}
+    first_name = (senior.get("name") or "").split(" ")[0] or "there"
+
+    # Reuse the standard senior context block so Donna knows location, time,
+    # any prior memories, etc. Discovery is a normal conversational call.
+    senior_ctx = _build_senior_context(session_state)
+    task = DISCOVERY_TASK_TEMPLATE.format(first_name=first_name)
+
+    functions: list = list(flows_tools.values())
+    functions.append(FlowsFunctionSchema(
+        name="transition_to_discovery_closing",
+        description=(
+            "Call this when the conversation has covered enough ground "
+            "(friends, hobbies, routines, family) and the goodbye feels "
+            "natural — typically 8-12 minutes in. Moves into the closing phase."
+        ),
+        properties={},
+        required=[],
+        handler=_make_transition_to_discovery_closing(session_state),
+    ))
+
+    system_content = DISCOVERY_SYSTEM_PROMPT + "\n\n" + senior_ctx
+    _record_node_prompts(
+        session_state,
+        node_name="discovery",
+        system_prompt=DISCOVERY_SYSTEM_PROMPT,
+        task_prompt=task,
+        prompt_variant="discovery",
+    )
+
+    return NodeConfig(
+        name="discovery",
+        role_messages=[{"role": "system", "content": system_content}],
+        task_messages=[{"role": "user", "content": task}],
+        functions=functions,
+        context_strategy=ContextStrategyConfig(strategy=ContextStrategy.APPEND),
+        respond_immediately=True,
+    )
+
+
+def build_discovery_closing_node(session_state: dict) -> NodeConfig:
+    """Build the discovery closing node — warm goodbye referencing specifics."""
+    senior = session_state.get("senior") or {}
+    first_name = (senior.get("name") or "").split(" ")[0] or "there"
+
+    closing_task = DISCOVERY_CLOSING_TASK_TEMPLATE.format(first_name=first_name)
+    _record_node_prompts(
+        session_state,
+        node_name="discovery_closing",
+        task_prompt=closing_task,
+        prompt_variant="discovery",
+    )
+
+    return NodeConfig(
+        name="discovery_closing",
+        role_messages=[],
+        task_messages=[{"role": "user", "content": closing_task}],
+        functions=[],
+        post_actions=[{"type": "end_conversation"}],
+        context_strategy=ContextStrategyConfig(strategy=ContextStrategy.APPEND),
+        respond_immediately=False,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+
+# Call types with a dedicated entry-node builder. Register new flows here
+# (consent, discovery, etc.) instead of growing the if-chain in
+# build_initial_node. Each entry is (phase_name, builder). Subscriber default
+# path — reminder vs main, gated by `schedule` — is NOT in this dict; it
+# stays inline because it routes on session state (pending reminders) in
+# addition to call_type.
+CALL_TYPE_INITIAL_NODES = {
+    "onboarding": ("onboarding", build_onboarding_node),
+    "consent": ("consent", build_consent_node),
+    "discovery": ("discovery", build_discovery_node),
+}
+
 
 def build_initial_node(session_state: dict, flows_tools: dict) -> NodeConfig:
     """Build the initial node for a new call.
 
-    Routes to onboarding flow for unsubscribed callers, or the standard
-    subscriber flow (reminder or main) for known seniors.
+    Routes via CALL_TYPE_INITIAL_NODES for dedicated flows (onboarding,
+    consent, discovery, …) or the standard subscriber flow (reminder vs main).
     """
-    # Onboarding flow for unsubscribed callers
-    if session_state.get("call_type") == "onboarding":
-        logger.info("Initial node: onboarding (unsubscribed caller)")
-        _record_phase_transition(session_state, "onboarding")
-        return build_onboarding_node(session_state, flows_tools)
+    call_type = session_state.get("call_type", "")
+
+    if call_type in CALL_TYPE_INITIAL_NODES:
+        phase_name, builder = CALL_TYPE_INITIAL_NODES[call_type]
+        logger.info("Initial node: {phase} (call_type={ct})", phase=phase_name, ct=call_type)
+        _record_phase_transition(session_state, phase_name)
+        return builder(session_state, flows_tools)
 
     reminder_prompt = session_state.get("reminder_prompt")
     reminders_delivered = session_state.get("reminders_delivered") or set()
-    call_type = session_state.get("call_type", "")
 
     # Scheduled calls always go to main node — reminders are mentioned naturally
     # during conversation, not as a dedicated delivery phase.

@@ -13,6 +13,58 @@ from unittest.mock import AsyncMock, patch
 from processors.conversation_tracker import ConversationTrackerProcessor
 
 
+class TestDiscoveryProfileSuggestions:
+    """Discovery call post-call writer (services.post_call._save_discovery_profile_suggestions)."""
+
+    @pytest.mark.asyncio
+    async def test_writes_payload_when_facts_present(self):
+        from services.post_call import _save_discovery_profile_suggestions
+        state = {
+            "call_type": "discovery",
+            "_discovery_facts": [
+                {"category": "friend", "content": "Eleanor — bridge Thursdays", "confidence": "stated"},
+                {"category": "hobby", "content": "Loves crochet", "confidence": "stated"},
+            ],
+        }
+        with patch(
+            "services.conversations.save_profile_suggestions",
+            new_callable=AsyncMock,
+            return_value={"id": "conv-1"},
+        ) as mock_save:
+            await _save_discovery_profile_suggestions(state, conversation_id="conv-1")
+        mock_save.assert_awaited_once()
+        cid, payload = mock_save.await_args.args
+        assert cid == "conv-1"
+        assert len(payload["facts"]) == 2
+        assert "captured_at" in payload
+
+    @pytest.mark.asyncio
+    async def test_skips_when_no_facts(self):
+        from services.post_call import _save_discovery_profile_suggestions
+        with patch(
+            "services.conversations.save_profile_suggestions",
+            new_callable=AsyncMock,
+        ) as mock_save:
+            await _save_discovery_profile_suggestions(
+                {"call_type": "discovery", "_discovery_facts": []},
+                conversation_id="conv-1",
+            )
+        mock_save.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_skips_when_no_conversation_id(self):
+        from services.post_call import _save_discovery_profile_suggestions
+        with patch(
+            "services.conversations.save_profile_suggestions",
+            new_callable=AsyncMock,
+        ) as mock_save:
+            await _save_discovery_profile_suggestions(
+                {"call_type": "discovery", "_discovery_facts": [{"category": "friend", "content": "x"}]},
+                conversation_id=None,
+            )
+        mock_save.assert_not_awaited()
+
+
 class TestPostCallProcessing:
     @pytest.mark.asyncio
     async def test_full_post_call_sequence(self, session_state):
@@ -64,6 +116,92 @@ class TestPostCallProcessing:
             mock_daily.assert_awaited_once()
             # 6. Caches cleared
             mock_cache_clear.assert_called_once_with("senior-test-001")
+
+    @pytest.mark.asyncio
+    async def test_post_call_analysis_persists_tool_metrics_and_trace_logging(self, session_state):
+        """Mock-call post-call path should record tool names and encrypted trace metadata."""
+        from services.context_trace import record_context_event
+
+        session_state["_transcript"] = [
+            {"role": "user", "content": "Can you check craft fair hours?"},
+            {"role": "assistant", "content": "I found the fair starts at 10 tomorrow."},
+            {"role": "user", "content": "Please remind me to water the porch plants."},
+            {"role": "assistant", "content": "I saved that reminder for tomorrow morning."},
+        ]
+        session_state["_tools_used"] = ["web_search", "create_reminder"]
+        record_context_event(
+            session_state,
+            source="tool",
+            action="called",
+            label="web_search called",
+            provider="llm_tool",
+            metadata={
+                "tool": "web_search",
+                "arguments": {"query": "2026 local craft fair hours"},
+            },
+        )
+        record_context_event(
+            session_state,
+            source="tool",
+            action="called",
+            label="create_reminder called",
+            provider="llm_tool",
+            metadata={
+                "tool": "create_reminder",
+                "arguments": {"title": "Water the porch plants"},
+            },
+        )
+
+        tracker = ConversationTrackerProcessor(session_state=session_state)
+        tracker.state.topics_discussed = ["craft fair", "porch plants"]
+        tracker.state.advice_given = []
+
+        with patch("services.post_call_jobs.maybe_enqueue_post_call_job_graph", new_callable=AsyncMock), \
+             patch("services.conversations.complete", new_callable=AsyncMock), \
+             patch("services.call_analysis.analyze_completed_call", new_callable=AsyncMock) as mock_analyze, \
+             patch("services.call_analysis.save_call_analysis", new_callable=AsyncMock) as mock_save_analysis, \
+             patch("services.conversations.update_summary", new_callable=AsyncMock), \
+             patch("services.memory.extract_from_conversation", new_callable=AsyncMock), \
+             patch("services.interest_discovery.discover_new_interests", return_value=[]), \
+             patch("services.interest_discovery.compute_interest_scores", new_callable=AsyncMock, return_value={}), \
+             patch("services.interest_discovery.update_interest_scores", new_callable=AsyncMock), \
+             patch("services.daily_context.save_call_context", new_callable=AsyncMock), \
+             patch("services.context_cache.clear_cache"), \
+             patch("services.scheduler.clear_reminder_context_async", new_callable=AsyncMock), \
+             patch("services.call_snapshot.build_snapshot", new_callable=AsyncMock, return_value={"status": "ok"}), \
+             patch("services.call_snapshot.save_snapshot", new_callable=AsyncMock), \
+             patch("services.post_call._trigger_caregiver_notification", new_callable=AsyncMock), \
+             patch("lib.growthbook.is_on", return_value=True), \
+             patch("lib.encryption.encrypt_json", return_value="encrypted-context-trace"), \
+             patch("db.client.execute", new_callable=AsyncMock) as mock_execute:
+
+            mock_analyze.return_value = {
+                "summary": "Margaret asked about a craft fair and set a porch plant reminder.",
+                "sentiment": "positive",
+            }
+
+            from services.post_call import run_post_call
+            await run_post_call(session_state, tracker, duration_seconds=90)
+
+        mock_analyze.assert_awaited_once()
+        mock_save_analysis.assert_awaited_once()
+
+        metrics_calls = [
+            call.args
+            for call in mock_execute.await_args_list
+            if "INSERT INTO call_metrics" in call.args[0]
+        ]
+        assert len(metrics_calls) == 1
+        args = metrics_calls[0]
+        assert args[10] == ["web_search", "create_reminder"]
+        assert args[13] == "encrypted-context-trace"
+
+        persisted = session_state["_post_call_metrics_persisted"]
+        assert persisted["persisted"] is True
+        assert persisted["tools_used"] == ["web_search", "create_reminder"]
+        assert persisted["context_event_count"] == 2
+        assert persisted["context_trace_encrypted"] is True
+        assert "craft fair hours" not in json.dumps(persisted)
 
     @pytest.mark.asyncio
     async def test_post_call_enqueues_job_graph_when_enabled(self, session_state, monkeypatch):
@@ -137,9 +275,9 @@ class TestPostCallProcessing:
     async def test_post_call_rechecks_reminder_status_even_when_locally_delivered(self, reminder_session_state):
         """Local reminder tracking should not suppress DB retry cleanup."""
         reminder_session_state["_transcript"] = [
-            {"role": "assistant", "content": "Remember to take your metformin."},
+            {"role": "assistant", "content": "Remember to water the porch plants after dinner."},
         ]
-        reminder_session_state["reminders_delivered"] = {"rem-001", "Take metformin"}
+        reminder_session_state["reminders_delivered"] = {"rem-001", "Water the porch plants"}
 
         tracker = ConversationTrackerProcessor(session_state=reminder_session_state)
 
@@ -163,7 +301,7 @@ class TestPostCallProcessing:
     async def test_post_call_recovers_reminder_ack_from_transcript(self, reminder_session_state):
         """If Claude misses the tool, transcript evidence can still persist the ack."""
         reminder_session_state["_transcript"] = [
-            {"role": "assistant", "content": "Remember to take your metformin with dinner tonight."},
+            {"role": "assistant", "content": "Remember to water the porch plants after dinner tonight."},
             {"role": "user", "content": "Okay, I will do that."},
         ]
 
@@ -201,7 +339,7 @@ class TestPostCallProcessing:
     async def test_post_call_waits_for_reminder_ack_task_before_status_check(self, reminder_session_state):
         """A no-latency tool ack still gets a brief post-call settlement window."""
         reminder_session_state["_transcript"] = [
-            {"role": "assistant", "content": "Remember to take your metformin."},
+            {"role": "assistant", "content": "Remember to water the porch plants after dinner."},
         ]
 
         async def finished_ack():
@@ -234,15 +372,15 @@ class TestPostCallProcessing:
         session_state["_caregiver_notes_content"] = [
             {
                 "id": "note-001",
-                "content": "Sarah asked about your knee pain.",
+                "content": "Sarah asked about the bridge club schedule.",
             }
         ]
         session_state["_transcript"] = [
             {
                 "role": "assistant",
-                "content": "Before I forget, Sarah wanted me to ask about your knee pain.",
+                "content": "Before I forget, Sarah wanted me to ask about the bridge club schedule.",
             },
-            {"role": "user", "content": "It's better today."},
+            {"role": "user", "content": "It's on Thursday afternoon."},
         ]
 
         tracker = ConversationTrackerProcessor(session_state=session_state)
@@ -262,22 +400,16 @@ class TestPostCallProcessing:
 
             mock_note.assert_awaited_once_with("note-001", "CA-test-001")
 
-    def test_format_concern_for_notification_uses_node_expected_string(self):
-        from services.post_call import _format_concern_for_notification
+    def test_note_delivery_requires_meaningful_overlap(self):
+        from services.post_call import _note_was_delivered
 
-        concern = {
-            "severity": "high",
-            "description": "Margaret reported feeling dizzy.",
-            "recommended_action": "Caregiver should check in today.",
-            "evidence": "Full transcript evidence should not be needed here.",
-        }
+        note = {"content": "Sarah asked about the bridge club schedule."}
 
-        text = _format_concern_for_notification(concern)
-
-        assert "dizzy" in text
-        assert "check in" in text
-        assert "Full transcript" not in text
-        assert len(text) <= 300
+        assert _note_was_delivered(
+            note,
+            "Before I forget, Sarah asked about the bridge club schedule.",
+        )
+        assert not _note_was_delivered(note, "Sarah asked about the garden.")
 
     @pytest.mark.asyncio
     async def test_caregiver_notification_requires_node_api_url(self, monkeypatch):

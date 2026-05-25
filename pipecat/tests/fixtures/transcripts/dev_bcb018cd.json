@@ -1,0 +1,364 @@
+{
+  "fixture_version": 1,
+  "source": "dev",
+  "source_conversation_id": "bcb018cd-8f40-4754-8140-adea7e663bed",
+  "source_duration_seconds": 354,
+  "source_started_at": "2026-05-25T21:27:34.055862",
+  "senior_context": {
+    "name": "SENIOR_NAME",
+    "timezone": "America/Chicago",
+    "family": []
+  },
+  "transcript": [
+    {
+      "role": "assistant",
+      "content": "Hey SENIOR_NAME! Donna here. Having a good day so far?",
+      "sequence": 0,
+      "timestamp": "2026-05-25T21:27:48.234607+00:00",
+      "timestamp_offset_ms": 1582
+    },
+    {
+      "role": "user",
+      "content": "Yeah. I'm having a great day.",
+      "sequence": 1,
+      "timestamp": "2026-05-25T21:27:55.982817+00:00",
+      "timestamp_offset_ms": 9330
+    },
+    {
+      "role": "assistant",
+      "content": "That's wonderful to hear! PERSON_1 like things are going well. How's your girlfriend doing with her recovery \u2014 is she feeling a bit better today?",
+      "sequence": 2,
+      "timestamp": "2026-05-25T21:27:57.944951+00:00",
+      "timestamp_offset_ms": 11292
+    },
+    {
+      "role": "user",
+      "content": "Yeah. She's doing really great.",
+      "sequence": 3,
+      "timestamp": "2026-05-25T21:28:10.904519+00:00",
+      "timestamp_offset_ms": 24252
+    },
+    {
+      "role": "user",
+      "content": "What can I tell you?",
+      "sequence": 4,
+      "timestamp": "2026-05-25T21:28:12.705538+00:00",
+      "timestamp_offset_ms": 26053
+    },
+    {
+      "role": "user",
+      "content": "She feels good, looks good.",
+      "sequence": 5,
+      "timestamp": "2026-05-25T21:28:16.476786+00:00",
+      "timestamp_offset_ms": 29824
+    },
+    {
+      "role": "assistant",
+      "content": "That's great to hear \u2014 I'm so glad she's bouncing back well. And it sounds like having her there with you has been really nice, especially with all",
+      "sequence": 6,
+      "timestamp": "2026-05-25T21:28:18.382389+00:00",
+      "timestamp_offset_ms": 31730
+    },
+    {
+      "role": "user",
+      "content": "Yeah. Overall, really great.",
+      "sequence": 7,
+      "timestamp": "2026-05-25T21:28:19.810304+00:00",
+      "timestamp_offset_ms": 33158
+    },
+    {
+      "role": "assistant",
+      "content": "That's really great to hear, SENIOR_NAME \u2014 I'm so glad she's bouncing back well. You two must be enjoying having all that extra time together at home. Are you getting out to do things together, or mostly keeping it low-key while she recovers?",
+      "sequence": 8,
+      "timestamp": "2026-05-25T21:28:22.777702+00:00",
+      "timestamp_offset_ms": 36125
+    },
+    {
+      "role": "user",
+      "content": "Honestly, I have a really good",
+      "sequence": 9,
+      "timestamp": "2026-05-25T21:28:42.536510+00:00",
+      "timestamp_offset_ms": 55884
+    },
+    {
+      "role": "user",
+      "content": "time. We're getting outside the house. I feel like",
+      "sequence": 10,
+      "timestamp": "2026-05-25T21:28:43.825647+00:00",
+      "timestamp_offset_ms": 57173
+    },
+    {
+      "role": "user",
+      "content": "you get frustrated after recovery just staying in too much. But, honestly,",
+      "sequence": 11,
+      "timestamp": "2026-05-25T21:28:48.820711+00:00",
+      "timestamp_offset_ms": 62168
+    },
+    {
+      "role": "user",
+      "content": "honestly, realizing and staying on a quiet time together.",
+      "sequence": 12,
+      "timestamp": "2026-05-25T21:28:51.852574+00:00",
+      "timestamp_offset_ms": 65200
+    },
+    {
+      "role": "assistant",
+      "content": "That makes so much sense \u2014 you're striking that balance, getting out when you can but also honoring the quiet time she needs to really heal. It sounds like you're being really thoughtful about what works best for her right now. What kind of things are you two doing when you get outside?",
+      "sequence": 13,
+      "timestamp": "2026-05-25T21:28:54.194139+00:00",
+      "timestamp_offset_ms": 67541
+    },
+    {
+      "role": "user",
+      "content": "You know, we've been grocery shopping. We've been to the store and just",
+      "sequence": 14,
+      "timestamp": "2026-05-25T21:29:20.412335+00:00",
+      "timestamp_offset_ms": 93760
+    },
+    {
+      "role": "user",
+      "content": "you know, relaxing and and spending quality time together, honestly.",
+      "sequence": 15,
+      "timestamp": "2026-05-25T21:29:24.084835+00:00",
+      "timestamp_offset_ms": 97432
+    },
+    {
+      "role": "assistant",
+      "content": "That's lovely \u2014 just the everyday stuff that brings you closer, you know? Grocery shopping together, relaxing at home. PERSON_1 like you're really making the most of this time while she's recovering. Earlier today you mentioned you've been keeping busy with some coding projects and chores too \u2014 how's that going?",
+      "sequence": 16,
+      "timestamp": "2026-05-25T21:29:26.383218+00:00",
+      "timestamp_offset_ms": 99730
+    },
+    {
+      "role": "user",
+      "content": "You know, that's really great. I've been making a lot of progress on my work.",
+      "sequence": 17,
+      "timestamp": "2026-05-25T21:29:53.357631+00:00",
+      "timestamp_offset_ms": 126705
+    },
+    {
+      "role": "assistant",
+      "content": "That's awesome, SENIOR_NAME \u2014 I'm glad you're moving forward on it. What kind of project are you working on, if you don't mind me asking?",
+      "sequence": 18,
+      "timestamp": "2026-05-25T21:29:55.668013+00:00",
+      "timestamp_offset_ms": 129015
+    },
+    {
+      "role": "user",
+      "content": "And landing",
+      "sequence": 19,
+      "timestamp": "2026-05-25T21:29:56.688870+00:00",
+      "timestamp_offset_ms": 130036
+    },
+    {
+      "role": "user",
+      "content": "what I think will be a really great product.",
+      "sequence": 20,
+      "timestamp": "2026-05-25T21:29:58.629128+00:00",
+      "timestamp_offset_ms": 131976
+    },
+    {
+      "role": "assistant",
+      "content": "That's fantastic, SENIOR_NAME \u2014 sounds like you're really in a good rhythm with it. What kind of product are you building, if you don't mind me asking?",
+      "sequence": 21,
+      "timestamp": "2026-05-25T21:30:00.540580+00:00",
+      "timestamp_offset_ms": 133888
+    },
+    {
+      "role": "user",
+      "content": "It's an AI assistant for elderly people, actually.",
+      "sequence": 22,
+      "timestamp": "2026-05-25T21:30:15.975477+00:00",
+      "timestamp_offset_ms": 149323
+    },
+    {
+      "role": "assistant",
+      "content": "Oh, that's really meaningful work, SENIOR_NAME \u2014 especially given everything you're experiencing right now with your girlfriend's recovery and just life in general. An AI assistant for elderly people... tell me more about what you're building. What does it do?",
+      "sequence": 23,
+      "timestamp": "2026-05-25T21:30:18.589813+00:00",
+      "timestamp_offset_ms": 151937
+    },
+    {
+      "role": "user",
+      "content": "That's such a great question, Donna.",
+      "sequence": 24,
+      "timestamp": "2026-05-25T21:30:41.384780+00:00",
+      "timestamp_offset_ms": 174732
+    },
+    {
+      "role": "user",
+      "content": "Well, it provides companionship for elderly people, if that makes sense. And",
+      "sequence": 25,
+      "timestamp": "2026-05-25T21:30:46.036248+00:00",
+      "timestamp_offset_ms": 179383
+    },
+    {
+      "role": "user",
+      "content": "they can ask it for web search and help them with a few task.",
+      "sequence": 26,
+      "timestamp": "2026-05-25T21:30:49.704946+00:00",
+      "timestamp_offset_ms": 183052
+    },
+    {
+      "role": "assistant",
+      "content": "That's really thoughtful, SENIOR_NAME \u2014 companionship and practical help all in one. So they can have a conversation with it, ask it questions, get things looked up for them. That's honestly such a valuable thing, especially for people who might feel isolated or just need someone to talk to. How did you come up with the idea for this?",
+      "sequence": 27,
+      "timestamp": "2026-05-25T21:30:51.945023+00:00",
+      "timestamp_offset_ms": 185292
+    },
+    {
+      "role": "user",
+      "content": "Right. That's exactly the idea.",
+      "sequence": 28,
+      "timestamp": "2026-05-25T21:31:18.033614+00:00",
+      "timestamp_offset_ms": 211381
+    },
+    {
+      "role": "user",
+      "content": "I think there are a lot of lonely, elderly people, and",
+      "sequence": 29,
+      "timestamp": "2026-05-25T21:31:19.690776+00:00",
+      "timestamp_offset_ms": 213038
+    },
+    {
+      "role": "user",
+      "content": "this really helps get them",
+      "sequence": 30,
+      "timestamp": "2026-05-25T21:31:21.604196+00:00",
+      "timestamp_offset_ms": 214951
+    },
+    {
+      "role": "user",
+      "content": "them company and",
+      "sequence": 31,
+      "timestamp": "2026-05-25T21:31:23.102964+00:00",
+      "timestamp_offset_ms": 216450
+    },
+    {
+      "role": "user",
+      "content": "and companionship. You know?",
+      "sequence": 32,
+      "timestamp": "2026-05-25T21:31:24.690885+00:00",
+      "timestamp_offset_ms": 218038
+    },
+    {
+      "role": "assistant",
+      "content": "Absolutely, I hear you \u2014 loneliness is real for so many people, and having someone or something to talk to, to check in with, to feel heard... that changes things. It sounds like you really care about solving that problem. Have you talked to any elderly people directly to understand what they need most?",
+      "sequence": 33,
+      "timestamp": "2026-05-25T21:31:27.054277+00:00",
+      "timestamp_offset_ms": 220402
+    },
+    {
+      "role": "user",
+      "content": "Yeah.",
+      "sequence": 34,
+      "timestamp": "2026-05-25T21:31:54.958358+00:00",
+      "timestamp_offset_ms": 248306
+    },
+    {
+      "role": "user",
+      "content": "I think they just want someone to talk to. I feel like they feel very lonely.",
+      "sequence": 35,
+      "timestamp": "2026-05-25T21:31:57.992202+00:00",
+      "timestamp_offset_ms": 251339
+    },
+    {
+      "role": "user",
+      "content": "So that's definitely number one.",
+      "sequence": 36,
+      "timestamp": "2026-05-25T21:31:58.444266+00:00",
+      "timestamp_offset_ms": 251792
+    },
+    {
+      "role": "assistant",
+      "content": "That's such an important insight, SENIOR_NAME \u2014 just having someone who listens and cares enough to check in. You're really building something that matters. By the way, I know you mentioned the Spurs game coming up on Thursday \u2014 are you still planning to go, or has that changed with your girlfriend's recovery?",
+      "sequence": 37,
+      "timestamp": "2026-05-25T21:32:01.278078+00:00",
+      "timestamp_offset_ms": 254625
+    },
+    {
+      "role": "user",
+      "content": "You know, I think I'm gonna go with",
+      "sequence": 38,
+      "timestamp": "2026-05-25T21:32:27.358636+00:00",
+      "timestamp_offset_ms": 280706
+    },
+    {
+      "role": "user",
+      "content": "a friend, not necessarily with her.",
+      "sequence": 39,
+      "timestamp": "2026-05-25T21:32:28.680905+00:00",
+      "timestamp_offset_ms": 282028
+    },
+    {
+      "role": "user",
+      "content": "I'm not sure if she wants to, like, get out the house for that long yet, you know.",
+      "sequence": 40,
+      "timestamp": "2026-05-25T21:32:31.854163+00:00",
+      "timestamp_offset_ms": 285201
+    },
+    {
+      "role": "assistant",
+      "content": "That makes total sense \u2014 she's still in recovery, and you're being smart about not pushing it too much. Going with a friend sounds perfect though, you get to enjoy the game and she gets the rest she needs. You two really do have a good thing going.",
+      "sequence": 41,
+      "timestamp": "2026-05-25T21:32:34.300159+00:00",
+      "timestamp_offset_ms": 287647
+    },
+    {
+      "role": "user",
+      "content": "A 100%. Right? That's that's what I feel too.",
+      "sequence": 42,
+      "timestamp": "2026-05-25T21:32:57.096630+00:00",
+      "timestamp_offset_ms": 310444
+    },
+    {
+      "role": "assistant",
+      "content": "Well, SENIOR_NAME, it's been really great talking with you today \u2014 hearing about your girlfriend's recovery going so well, your coding project that's going to help so many people, and just seeing how thoughtful you are about balancing everything. You've got a lot of good things happening. PERSON_2 that game on Thursday with your friend!",
+      "sequence": 43,
+      "timestamp": "2026-05-25T21:32:59.618208+00:00",
+      "timestamp_offset_ms": 312965
+    },
+    {
+      "role": "user",
+      "content": "Donna. I actually have to go, you know.",
+      "sequence": 44,
+      "timestamp": "2026-05-25T21:33:10.070080+00:00",
+      "timestamp_offset_ms": 323417
+    },
+    {
+      "role": "assistant",
+      "content": "Of course, SENIOR_NAME \u2014 thanks so much for chatting with me today. PERSON_2 that time with your girlfriend and have a great rest of your evening!",
+      "sequence": 45,
+      "timestamp": "2026-05-25T21:33:12.255923+00:00",
+      "timestamp_offset_ms": 325603
+    },
+    {
+      "role": "user",
+      "content": "Bye, Donna. Thank you.",
+      "sequence": 46,
+      "timestamp": "2026-05-25T21:33:24.954756+00:00",
+      "timestamp_offset_ms": 338302
+    },
+    {
+      "role": "assistant",
+      "content": "Take care, SENIOR_NAME \u2014 talk to you soon!",
+      "sequence": 47,
+      "timestamp": "2026-05-25T21:33:26.766302+00:00",
+      "timestamp_offset_ms": 340114
+    }
+  ],
+  "expected_traits": {
+    "sentiment_enum_member": "positive",
+    "engagement_min": 7,
+    "engagement_max": 10,
+    "summary_min_chars": 40,
+    "summary_max_chars": 600,
+    "topics_min_count": 0,
+    "topics_max_count": 8,
+    "caregiver_sms_max_chars": 280,
+    "concerns_must_be_empty": true,
+    "follow_up_suggestions_must_be_empty": true,
+    "recommended_caregiver_action_must_be_empty_string": true
+  },
+  "name_map_size": 5
+}

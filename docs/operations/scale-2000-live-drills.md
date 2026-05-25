@@ -54,7 +54,7 @@ BAA completion is not a blocker for staging drills when founders explicitly acce
    railway logs --service donna-api --environment staging --since 10m --lines 200
    ```
 
-   Expected: logs include `Node graceful shutdown complete`, `dispatcherDrain.remaining` is `0`, and no senior names, phone numbers, reminder titles, transcripts, caregiver notes, medical notes, prompt context, or raw rate-limit keys appear.
+   Expected: logs include `Node graceful shutdown complete`, `dispatcherDrain.remaining` is `0`, and no senior names, phone numbers, reminder titles, transcripts, caregiver notes, profile notes, prompt context, or raw rate-limit keys appear.
 
 ## Dual-Path Scheduler Smoke
 
@@ -118,7 +118,7 @@ Use this before any live queue-owned call. The goal is to prove both paths can r
    railway logs --service donna-pipecat --environment staging --since 10m --lines 200
    ```
 
-   Check for successful Telnyx callback/media events, post-call completion, and absence of raw names, phone numbers, transcripts, reminder text, caregiver notes, medical notes, prompt context, or `ws_token` values in logs.
+   Check for successful Telnyx callback/media events, post-call completion, and absence of raw names, phone numbers, transcripts, reminder text, caregiver notes, profile notes, prompt context, or `ws_token` values in logs.
 
 ## Phase 6 Post-Call Queue Shadow Smoke
 

@@ -7,7 +7,7 @@
 - Analysis was static/read-only except one repo-hygiene check that ran pytest collect-only.
 - No full test suite, live Telnyx call, Railway deploy, EAS build, Maestro run, Playwright run, or end-to-end reminder flow was executed.
 - Treat runtime code as the source of truth if it disagrees with this summary.
-- Avoid adding real names, phone numbers, transcripts, reminder text, medical notes, or caregiver data to tickets, fixtures, logs, screenshots, or follow-up docs.
+- Avoid adding real names, phone numbers, transcripts, reminder text, profile notes, or caregiver data to tickets, fixtures, logs, screenshots, or follow-up docs.
 
 ## Launch Blockers
 

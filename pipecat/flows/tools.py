@@ -38,7 +38,7 @@ SEARCH_MEMORIES_SCHEMA = {
     "properties": {
         "query": {
             "type": "string",
-            "description": "What to search for (e.g., 'gardening', 'grandson birthday', 'medication')",
+            "description": "What to search for (e.g., 'gardening', 'grandson birthday', 'favorite music')",
         },
     },
     "required": ["query"],
@@ -64,8 +64,9 @@ def _web_search_schema(today_date: date | None = None) -> dict:
             "Use this whenever the senior asks about news, weather, sports, facts, "
             "or anything you're unsure about. Always include the current year in "
             "queries about recent events, scores, or elections. "
-            "Never include names, phone numbers, addresses, caregiver names, or private "
-            "medical history in the query. Use anonymous general wording for health questions. "
+            "Never include names, phone numbers, addresses, caregiver names, private "
+            "history, or medical history in the query. Do not use this tool for medical, medication, "
+            "diagnosis, symptom, or emergency questions. "
             "IMPORTANT: Before calling this tool, always say a brief natural filler "
             "like 'Let me look that up for you', 'One moment while I check on that', "
             "or 'Hmm, let me find out'. This gives the senior something to hear while "
@@ -80,7 +81,8 @@ def _web_search_schema(today_date: date | None = None) -> dict:
                 "type": "string",
                 "description": (
                     f"What to search for (include {today_date.year} for recent events). "
-                    "Do not include personal names, phone numbers, addresses, or private history."
+                    "Do not include personal names, phone numbers, addresses, private history, "
+                    "or medical questions."
                 ),
             },
         },
@@ -94,6 +96,26 @@ def get_web_search_schema(session_state: dict | None = None, today_date: date | 
 
 WEB_SEARCH_SCHEMA = get_web_search_schema()
 
+
+def _record_tool_call(session_state: dict, name: str, args: dict | None) -> int | None:
+    """Track an LLM tool call for metrics and encrypted context trace."""
+    turn_sequence = session_state.get("_current_turn_sequence")
+    tools_used = session_state.setdefault("_tools_used", [])
+    if name not in tools_used:
+        tools_used.append(name)
+    logger.info("Tool CALL: {name}", name=name)
+    record_context_event(
+        session_state,
+        source="tool",
+        action="called",
+        label=f"{name} called",
+        provider="llm_tool",
+        turn_sequence=turn_sequence,
+        metadata={"tool": name, "arguments": args or {}},
+    )
+    return turn_sequence
+
+
 CREATE_REMINDER_SCHEMA = {
     "name": "create_reminder",
     "description": (
@@ -105,16 +127,16 @@ CREATE_REMINDER_SCHEMA = {
         "<frequency> — does that sound right?') and only call this tool after they confirm. "
         "Compute scheduled_time in the senior's local timezone (from system prompt 'Current time') "
         "and emit ISO 8601 WITH offset. AFTER the tool returns success, briefly confirm aloud "
-        "(e.g., 'Got it — I saved that and I'll call you at that time'). Do NOT use this for "
-        "medication reminders the family already manages — only when the senior themselves asks."
+        "(e.g., 'Got it — I saved that and I'll call you at that time'). Use this for "
+        "everyday routines and social tasks only."
     ),
     "properties": {
         "title": {
             "type": "string",
             "description": (
                 "Short human-readable title (max 200 chars), in the same language the "
-                "senior is speaking. Examples: 'Doctor appointment', 'Cita con el médico', "
-                "'Take blood pressure pill', 'Llamar a María'. Do NOT include the date/time "
+                "senior is speaking. Examples: 'Water the porch plants', 'Llamar a María', "
+                "'Put out the trash'. Do NOT include the date/time "
                 "in the title — that goes in scheduled_time."
             ),
         },
@@ -130,12 +152,8 @@ CREATE_REMINDER_SCHEMA = {
         },
         "type": {
             "type": "string",
-            "enum": ["medication", "appointment", "custom", "wellness", "social"],
-            "description": (
-                "Category. Use 'medication' for pills/meds, 'appointment' for doctor/dentist/"
-                "salon visits, 'social' for calls/visits to family/friends, 'wellness' for "
-                "exercise/water/walks, 'custom' otherwise."
-            ),
+            "enum": ["custom", "social"],
+            "description": "Category. Use 'social' for calls/visits to family/friends, 'custom' otherwise.",
         },
         "description": {
             "type": "string",
@@ -190,7 +208,7 @@ MARK_REMINDER_SCHEMA = {
 
 SAVE_DETAIL_SCHEMA = {
     "name": "save_important_detail",
-    "description": "Save an important detail the senior mentioned that should be remembered for future calls. Use for significant life events, health changes, new interests, family updates, or emotional state changes.",
+    "description": "Save an important detail the senior mentioned that should be remembered for future calls. Use for significant life events, new interests, family updates, or emotional state changes.",
     "properties": {
         "detail": {
             "type": "string",
@@ -198,7 +216,7 @@ SAVE_DETAIL_SCHEMA = {
         },
         "category": {
             "type": "string",
-            "enum": ["health", "family", "preference", "life_event", "emotional", "activity"],
+            "enum": ["family", "preference", "life_event", "emotional", "activity"],
             "description": "Category of the detail",
         },
     },
@@ -226,6 +244,15 @@ _ADDRESS_RE = re.compile(
     re.I,
 )
 _SPACE_RE = re.compile(r"\s+")
+_MEDICAL_SEARCH_RE = re.compile(
+    r"\b("
+    r"medicine|medication|pill|prescription|pharmacy|dose|dosage|"
+    r"metformin|lisinopril|symptom|side effect|diagnos|doctor|hospital|"
+    r"urgent care|emergency|911|pain|dizzy|dizziness|blood pressure|"
+    r"diabetes|insulin|chest pain|shortness of breath"
+    r")\b",
+    re.I,
+)
 _MAX_WEB_SEARCH_QUERY_CHARS = 240
 
 
@@ -288,8 +315,7 @@ def sanitize_web_search_query(query: str, session_state: dict | None = None) -> 
     for term in sorted(_known_private_terms(session_state), key=len, reverse=True):
         sanitized = re.sub(rf"\b{re.escape(term)}\b", "", sanitized, flags=re.I)
 
-    # Genericize first-person health phrasing. This still lets Donna answer a
-    # general medication/symptom question without exposing whose question it is.
+    # Legacy privacy guard for any medical wording that reaches this sanitizer.
     if re.search(r"\b(medicine|medication|pill|metformin|lisinopril|dizzy|pain|doctor|symptom|side effect)\b", sanitized, re.I):
         for term in sorted(_known_location_terms(session_state), key=len, reverse=True):
             sanitized = re.sub(rf"\b{re.escape(term)}\b", "", sanitized, flags=re.I)
@@ -318,6 +344,59 @@ def make_tool_handlers(session_state: dict) -> dict:
     Returns:
         Dict mapping tool name → async handler function.
     """
+
+    def _find_reminder_delivery(deliveries: list, reminder_id: str) -> dict | None:
+        needle = str(reminder_id or "").strip().lower()
+        if not needle:
+            return None
+
+        def _normalize(value: str) -> str:
+            return "".join(ch for ch in str(value or "").lower() if ch.isalnum())
+
+        def _tokens(value: str) -> set[str]:
+            stopwords = {"a", "an", "the", "to", "for", "with", "about", "and"}
+            return {
+                token
+                for token in re.findall(r"[a-z0-9]+", str(value or "").lower())
+                if len(token) > 2 and token not in stopwords
+            }
+
+        ordinal_patterns = (
+            (0, r"(?:the\s+)?(?:first|1st|one|#?1)(?:\s+(?:one|reminder))?"),
+            (1, r"(?:the\s+)?(?:second|2nd|two|#?2)(?:\s+(?:one|reminder))?"),
+            (2, r"(?:the\s+)?(?:third|3rd|three|#?3)(?:\s+(?:one|reminder))?"),
+            (3, r"(?:the\s+)?(?:fourth|4th|four|#?4)(?:\s+(?:one|reminder))?"),
+            (4, r"(?:the\s+)?(?:fifth|5th|five|#?5)(?:\s+(?:one|reminder))?"),
+        )
+        for index, pattern in ordinal_patterns:
+            if re.fullmatch(pattern, needle) and index < len(deliveries):
+                delivery = deliveries[index]
+                if isinstance(delivery, dict):
+                    return delivery
+
+        needle_normalized = _normalize(needle)
+        needle_tokens = _tokens(needle)
+        token_matches: list[tuple[int, int, dict]] = []
+        for delivery in deliveries:
+            if not isinstance(delivery, dict):
+                continue
+            candidates = (
+                delivery.get("reminder_id"),
+                delivery.get("id"),
+                delivery.get("title"),
+            )
+            if any(str(value or "").strip().lower() == needle for value in candidates):
+                return delivery
+            if any(_normalize(value) == needle_normalized for value in candidates):
+                return delivery
+            title_tokens = _tokens(delivery.get("title") or "")
+            if title_tokens and title_tokens <= needle_tokens:
+                token_matches.append((len(title_tokens), len(_normalize(delivery.get("title") or "")), delivery))
+            elif needle_tokens and needle_tokens <= title_tokens:
+                token_matches.append((len(needle_tokens), -len(title_tokens), delivery))
+        if token_matches:
+            return max(token_matches, key=lambda match: (match[0], match[1]))[2]
+        return None
 
     async def handle_search_memories(args: dict) -> dict:
         senior_id = session_state.get("senior_id")
@@ -363,6 +442,16 @@ def make_tool_handlers(session_state: dict) -> dict:
 
         if not query:
             return {"status": "success", "result": "No query provided."}
+
+        if _MEDICAL_SEARCH_RE.search(query):
+            logger.info("Tool: web_search blocked medical query")
+            return {
+                "status": "success",
+                "result": (
+                    "Donna is not a medical or emergency service. Suggest they contact "
+                    "a trusted person or qualified professional for medical questions."
+                ),
+            }
 
         sanitized_query = sanitize_web_search_query(query, session_state)
         if not sanitized_query:
@@ -443,14 +532,25 @@ def make_tool_handlers(session_state: dict) -> dict:
         # Local tracking is synchronous (critical for prompt context), but
         # post-call cleanup verifies the DB status before skipping retries.
         delivered = session_state.setdefault("reminders_delivered", set())
+        deliveries = session_state.get("reminder_deliveries") or []
+        delivery = _find_reminder_delivery(deliveries, reminder_id)
+        if delivery is None:
+            delivery = session_state.get("reminder_delivery") or {}
+
         if reminder_id:
             delivered.add(reminder_id)
-        delivery = session_state.get("reminder_delivery") or {}
+        delivery_reminder_id = delivery.get("reminder_id") or delivery.get("id")
+        if delivery_reminder_id:
+            delivered.add(delivery_reminder_id)
         title = delivery.get("title")
         if title:
             delivered.add(title)
 
         session_state["_reminder_ack_attempted"] = True
+        attempted_ids = session_state.setdefault("_reminder_ack_attempted_ids", set())
+        for value in (reminder_id, delivery_reminder_id, title):
+            if value:
+                attempted_ids.add(value)
 
         async def _persist_ack():
             try:
@@ -504,11 +604,10 @@ def make_tool_handlers(session_state: dict) -> dict:
             try:
                 from services.memory import store
                 category_to_type = {
-                    "health": "health",
                     "family": "relationship",
                     "preference": "preference",
                     "life_event": "fact",
-                    "emotional": "concern",
+                    "emotional": "fact",
                     "activity": "preference",
                 }
                 await store(
@@ -546,7 +645,7 @@ def make_tool_handlers(session_state: dict) -> dict:
                 "result": "I need a title. Ask them what to remind them about.",
             }
 
-        if reminder_type not in {"medication", "appointment", "custom", "wellness", "social"}:
+        if reminder_type not in {"custom", "social"}:
             reminder_type = "custom"
 
         if frequency not in {"daily", "weekly", "one-time"}:
@@ -648,24 +747,9 @@ def make_tool_handlers(session_state: dict) -> dict:
         "check_caregiver_notes": handle_check_caregiver_notes,
     }
 
-    # Wrap each handler to track tools_used in session_state for metrics
-    tools_used = session_state.setdefault("_tools_used", [])
-
     def _wrap(name, fn):
         async def tracked(args):
-            turn_sequence = session_state.get("_current_turn_sequence")
-            if name not in tools_used:
-                tools_used.append(name)
-            logger.info("Tool CALL: {name}", name=name)
-            record_context_event(
-                session_state,
-                source="tool",
-                action="called",
-                label=f"{name} called",
-                provider="llm_tool",
-                turn_sequence=turn_sequence,
-                metadata={"tool": name, "arguments": args or {}},
-            )
+            turn_sequence = _record_tool_call(session_state, name, args)
             start = time.time()
             result = await fn(args)
             elapsed_ms = round((time.time() - start) * 1000)
@@ -763,3 +847,284 @@ def make_onboarding_flows_tools(session_state: dict) -> dict[str, FlowsFunctionS
     )
 
     return schemas
+
+
+# ---------------------------------------------------------------------------
+# Consent call tools (call_type="consent")
+# See docs/plans/2026-05-24-consent-and-discovery-call-flows.md
+# ---------------------------------------------------------------------------
+
+RECORD_CONSENT_RESPONSE_SCHEMA = {
+    "name": "record_consent_response",
+    "description": (
+        "Capture the senior's yes/no answer to the combined consent question "
+        "(\"is it okay to call you regularly AND record our calls?\"). Call "
+        "exactly ONCE per consent call, immediately after the senior gives a "
+        "clear answer — confirm fuzzy answers before calling. Pass the senior's "
+        "actual words in senior_quote — do not paraphrase. This writes to the "
+        "senior_consents audit table and rolls up seniors.consent_status / callable."
+    ),
+    "properties": {
+        "granted": {
+            "type": "boolean",
+            "description": (
+                "True if the senior said yes to BOTH calling and recording. "
+                "False if they said no to either or to both — any 'no' is a "
+                "full decline."
+            ),
+        },
+        "senior_quote": {
+            "type": "string",
+            "description": (
+                "The senior's actual verbatim words confirming this consent "
+                "(e.g., 'Yeah that's fine' or 'No I'd rather not'). Do NOT paraphrase."
+            ),
+        },
+    },
+    "required": ["granted"],
+}
+
+
+def make_consent_flows_tools(session_state: dict) -> dict[str, FlowsFunctionSchema]:
+    """Create FlowsFunctionSchema for consent calls.
+
+    Returns: record_consent_response only. Consent calls are intentionally
+    stripped — no web search, no memory, no caregiver notes. Single-decision
+    model: one combined consent per call (see migration 019).
+    """
+
+    async def handle_record_consent(args: dict) -> dict:
+        from services.seniors import record_consent
+
+        _record_tool_call(session_state, "record_consent_response", args)
+
+        senior_id = session_state.get("senior_id")
+        if not senior_id:
+            logger.warning("record_consent_response called with no senior_id")
+            return {
+                "status": "error",
+                "result": "I'm having trouble saving that. Let me try again.",
+            }
+
+        granted = bool(args.get("granted"))
+        senior_quote = (args.get("senior_quote") or "").strip() or None
+
+        # Idempotency: refuse a second capture in the same call. The model is
+        # instructed once-per-call; this is the hard stop. The first answer wins.
+        if session_state.get("_consent_captured") is not None:
+            prior = session_state["_consent_captured"]
+            logger.info(
+                "record_consent_response: duplicate suppressed (prior granted={g})",
+                g=prior.get("granted"),
+            )
+            return {
+                "status": "success",
+                "result": (
+                    f"Already captured granted={prior.get('granted')} this call. "
+                    "Move on — do not re-ask."
+                ),
+            }
+
+        conversation_id = session_state.get("conversation_id")
+        try:
+            result = await record_consent(
+                senior_id=senior_id,
+                conversation_id=conversation_id,
+                granted=granted,
+                senior_quote=senior_quote,
+                captured_by="donna_tool",
+            )
+        except Exception as e:
+            logger.error("record_consent_response DB error: {err}", err=str(e))
+            return {
+                "status": "error",
+                "result": "I had trouble saving that. Let me try once more.",
+            }
+
+        session_state["_consent_captured"] = {
+            "granted": granted,
+            "rolled_up_status": result.get("rolled_up_status"),
+            "captured_at": result.get("captured_at"),
+        }
+        session_state["_consent_rolled_up_status"] = result.get("rolled_up_status")
+        return {
+            "status": "success",
+            "result": f"Recorded consent granted={granted}.",
+        }
+
+    schemas: dict[str, FlowsFunctionSchema] = {}
+    schemas["record_consent_response"] = FlowsFunctionSchema(
+        name=RECORD_CONSENT_RESPONSE_SCHEMA["name"],
+        description=RECORD_CONSENT_RESPONSE_SCHEMA["description"],
+        properties=RECORD_CONSENT_RESPONSE_SCHEMA["properties"],
+        required=RECORD_CONSENT_RESPONSE_SCHEMA["required"],
+        handler=handle_record_consent,
+    )
+    return schemas
+
+
+# ---------------------------------------------------------------------------
+# Discovery call tools (call_type="discovery")
+# See docs/plans/2026-05-24-consent-and-discovery-call-flows.md
+# ---------------------------------------------------------------------------
+
+# Map discovery categories → memories.type values. Source-of-truth list lives
+# in db/schema.js (memories.type = fact|preference|event|concern|relationship).
+_DISCOVERY_CATEGORY_TO_MEMORY_TYPE = {
+    "friend": "relationship",
+    "family": "relationship",
+    "hobby": "preference",
+    "interest": "preference",
+    "routine": "fact",
+}
+
+RECORD_DISCOVERY_FACT_SCHEMA = {
+    "name": "record_discovery_fact",
+    "description": (
+        "Capture a specific fact the senior just shared about themselves — a friend "
+        "or family member, a hobby, an interest, a routine. Use their own words for "
+        "content; do not paraphrase or guess. Call between turns, naturally, "
+        "without pausing the conversation. Only capture things they STATED — do "
+        "not call this for things you inferred."
+    ),
+    "properties": {
+        "category": {
+            "type": "string",
+            "enum": ["friend", "hobby", "interest", "routine", "family"],
+            "description": (
+                "What kind of fact this is. friend = someone they see socially. "
+                "family = a relative. hobby = something they actively do. "
+                "interest = a topic/thing they care about. routine = a recurring activity."
+            ),
+        },
+        "content": {
+            "type": "string",
+            "description": (
+                "The fact in 1-2 short sentences, using the senior's words where "
+                "possible. Example: \"Plays bridge every Thursday at the church with "
+                "Eleanor and two other friends.\""
+            ),
+        },
+        "confidence": {
+            "type": "string",
+            "enum": ["stated", "inferred"],
+            "description": (
+                "stated = the senior directly said this. inferred = you read between "
+                "the lines. Prefer stated; only use inferred for clear context like "
+                "\"my husband Frank\" → spouse relationship."
+            ),
+        },
+    },
+    "required": ["category", "content"],
+}
+
+
+def make_discovery_flows_tools(session_state: dict) -> dict[str, FlowsFunctionSchema]:
+    """Create FlowsFunctionSchema for discovery calls.
+
+    Returns: record_discovery_fact + web_search. No reminder/memory-search
+    tools — Director handles memory retrieval; web_search lets Donna riff on
+    things the senior brings up (weather, news, etc.).
+    """
+    subscriber_handlers = make_tool_handlers(session_state)
+    captured_facts = session_state.setdefault("_discovery_facts", [])
+
+    async def handle_record_discovery_fact(args: dict) -> dict:
+        from services.memory import store
+
+        _record_tool_call(session_state, "record_discovery_fact", args)
+
+        senior_id = session_state.get("senior_id")
+        if not senior_id:
+            logger.warning("record_discovery_fact called with no senior_id")
+            return {"status": "error", "result": "Continue naturally."}
+
+        category = (args.get("category") or "").strip().lower()
+        if category not in _DISCOVERY_CATEGORY_TO_MEMORY_TYPE:
+            return {
+                "status": "error",
+                "result": f"Invalid category: {category}.",
+            }
+
+        content = (args.get("content") or "").strip()
+        if not content:
+            return {"status": "error", "result": "Empty content — skipped."}
+
+        confidence = (args.get("confidence") or "stated").strip().lower()
+        if confidence not in ("stated", "inferred"):
+            confidence = "stated"
+
+        # Buffered for post-call profile_suggestions extractor. Memory write
+        # is fire-and-forget — Donna shouldn't wait on embeddings.
+        captured_facts.append({
+            "category": category,
+            "content": content,
+            "confidence": confidence,
+            "captured_at_turn": session_state.get("_current_turn_sequence"),
+        })
+
+        async def _background_store():
+            try:
+                # stated → importance 80, inferred → 60. Caregiver review
+                # surface should weight these similarly when proposing
+                # profile updates.
+                importance = 80 if confidence == "stated" else 60
+                await store(
+                    senior_id=senior_id,
+                    type_=_DISCOVERY_CATEGORY_TO_MEMORY_TYPE[category],
+                    content=content,
+                    source=session_state.get("conversation_id") or "discovery",
+                    importance=importance,
+                    metadata={
+                        "discovery_category": category,
+                        "discovery_confidence": confidence,
+                    },
+                )
+            except Exception as e:
+                logger.error("record_discovery_fact background store failed: {err}", err=str(e))
+
+        task = asyncio.create_task(_background_store())
+        session_state.setdefault("_tool_background_tasks", []).append(task)
+        return {"status": "success", "result": f"Captured {category}: {content[:60]}"}
+
+    schemas: dict[str, FlowsFunctionSchema] = {}
+    schemas["record_discovery_fact"] = FlowsFunctionSchema(
+        name=RECORD_DISCOVERY_FACT_SCHEMA["name"],
+        description=RECORD_DISCOVERY_FACT_SCHEMA["description"],
+        properties=RECORD_DISCOVERY_FACT_SCHEMA["properties"],
+        required=RECORD_DISCOVERY_FACT_SCHEMA["required"],
+        handler=handle_record_discovery_fact,
+    )
+
+    web_search_schema = get_web_search_schema(session_state)
+    schemas["web_search"] = FlowsFunctionSchema(
+        name=web_search_schema["name"],
+        description=web_search_schema["description"],
+        properties=web_search_schema["properties"],
+        required=web_search_schema["required"],
+        handler=subscriber_handlers["web_search"],
+    )
+
+    return schemas
+
+
+# ---------------------------------------------------------------------------
+# Tool factory dispatch
+# ---------------------------------------------------------------------------
+
+# call_type → factory function. Used by bot.py (real calls) and by the
+# live-sim pipeline (tests/simulation/pipeline.py) so mock-call scenarios
+# expose the same tool set Donna would see on a real call. Register new
+# flows here when adding a call type with its own tool set.
+_CALL_TYPE_TOOL_FACTORIES = {
+    "onboarding": make_onboarding_flows_tools,
+    "consent": make_consent_flows_tools,
+    "discovery": make_discovery_flows_tools,
+}
+
+
+def select_flows_tools(session_state: dict) -> dict[str, FlowsFunctionSchema]:
+    """Pick the tool factory for this call_type. Defaults to the subscriber stack."""
+    call_type = (session_state or {}).get("call_type", "")
+    factory = _CALL_TYPE_TOOL_FACTORIES.get(call_type, make_flows_tools)
+    return factory(session_state)

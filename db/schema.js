@@ -9,8 +9,8 @@ export const seniors = pgTable('seniors', {
   interests: text('interests').array(),
   familyInfo: json('family_info'),
   familyInfoEncrypted: text('family_info_encrypted'),
-  medicalNotes: text('medical_notes'),
-  medicalNotesEncrypted: text('medical_notes_encrypted'),
+  profileNotes: text('profile_notes'),
+  profileNotesEncrypted: text('profile_notes_encrypted'),
   preferredCallTimes: json('preferred_call_times'),
   preferredCallTimesEncrypted: text('preferred_call_times_encrypted'),
   isActive: boolean('is_active').default(true),
@@ -26,6 +26,26 @@ export const seniors = pgTable('seniors', {
   callContextSnapshotEncrypted: text('call_context_snapshot_encrypted'),
   cachedNews: text('cached_news'),
   cachedNewsUpdatedAt: timestamp('cached_news_updated_at'),
+  // Consent (migration 014). consentStatus is a roll-up of senior_consents
+  // rows. callable is the consent-driven block on outbound calling — separate
+  // from isActive (caregiver soft-pause). Scheduler/queue must read all three.
+  consentStatus: varchar('consent_status', { length: 20 }).default('pending').notNull(),
+  consentDate: timestamp('consent_date', { withTimezone: true }),
+  callable: boolean('callable').default(true).notNull(),
+});
+
+// Senior consent events (migration 014). One row per (senior, consent_type)
+// captured by the `consent` call type. Audit / HIPAA source of truth;
+// seniors.consentStatus is the denormalized roll-up.
+export const seniorConsents = pgTable('senior_consents', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  seniorId: uuid('senior_id').notNull().references(() => seniors.id, { onDelete: 'cascade' }),
+  conversationId: uuid('conversation_id').references(() => conversations.id),
+  consentType: varchar('consent_type', { length: 50 }).notNull(),
+  granted: boolean('granted').notNull(),
+  seniorQuoteEncrypted: text('senior_quote_encrypted'),
+  capturedBy: varchar('captured_by', { length: 50 }).default('donna_tool').notNull(),
+  capturedAt: timestamp('captured_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
 // Conversations (call history)
@@ -47,6 +67,13 @@ export const conversations = pgTable('conversations', {
   transcriptTextEncrypted: text('transcript_text_encrypted'),
   callMetrics: json('call_metrics'),
   voicemailDetected: boolean('voicemail_detected').default(false),
+  // Discovery-call output (migration 015). Caregiver-reviewable list of
+  // proposed profile facts; null on non-discovery calls.
+  profileSuggestions: jsonb('profile_suggestions'),
+  // Telemetry (migration 020): AMD classification + goodbye timing + end reason.
+  amdResult: varchar('amd_result', { length: 40 }),
+  goodbyeDetectedAt: timestamp('goodbye_detected_at', { withTimezone: true }),
+  endReason: varchar('end_reason', { length: 60 }),
   createdAt: timestamp('created_at').defaultNow(),
 });
 
@@ -69,7 +96,7 @@ export const memories = pgTable('memories', {
 export const reminders = pgTable('reminders', {
   id: uuid('id').defaultRandom().primaryKey(),
   seniorId: uuid('senior_id').references(() => seniors.id),
-  type: varchar('type', { length: 50 }), // medication, appointment, custom
+  type: varchar('type', { length: 50 }), // custom, social
   title: varchar('title', { length: 255 }).notNull(),
   titleEncrypted: text('title_encrypted'),
   description: text('description'),
@@ -154,9 +181,9 @@ export const dailyCallContext = pgTable('daily_call_context', {
 export const notificationPreferences = pgTable('notification_preferences', {
   id: uuid('id').defaultRandom().primaryKey(),
   caregiverId: uuid('caregiver_id').references(() => caregivers.id).notNull().unique(),
-  // Event toggles (default all on)
+  // Event toggles
   callCompleted: boolean('call_completed').default(true),
-  concernDetected: boolean('concern_detected').default(true),
+  concernDetected: boolean('concern_detected').default(false), // Legacy deprecated field.
   reminderMissed: boolean('reminder_missed').default(true),
   weeklySummary: boolean('weekly_summary').default(true),
   // Call summaries & pause
@@ -181,7 +208,7 @@ export const notifications = pgTable('notifications', {
   id: uuid('id').defaultRandom().primaryKey(),
   caregiverId: uuid('caregiver_id').references(() => caregivers.id).notNull(),
   seniorId: uuid('senior_id').references(() => seniors.id),
-  eventType: varchar('event_type', { length: 50 }).notNull(), // call_completed, concern_detected, reminder_missed, weekly_summary
+  eventType: varchar('event_type', { length: 50 }).notNull(), // call_completed, reminder_missed, weekly_summary
   channel: varchar('channel', { length: 20 }).notNull(),      // email; legacy rows may be sms
   content: text('content').notNull(),
   contentEncrypted: text('content_encrypted'),

@@ -276,6 +276,14 @@ class TestRegressionEmotionalSupport:
 class TestRegressionMemoryRecall:
     """Regression: senior references past conversations."""
 
+    # Scenario.expect_topics references 'medical' which extract_topics no
+    # longer emits per the medical-features deprecation (migration 014).
+    @pytest.mark.skip(
+        reason=(
+            "Deprecated: scenario asserts 'medical' topic tracking which "
+            "extract_topics no longer emits. See migration 014_deprecate."
+        )
+    )
     @pytest.mark.asyncio
     async def test_memory_recall_completes(self):
         components, p1, p2 = _build_with_mocked_director(
@@ -294,9 +302,16 @@ class TestRegressionMemoryRecall:
         )
         assert_no_guidance_spoken(components.tts.full_text)
 
+    @pytest.mark.skip(
+        reason=(
+            "Deprecated: AnalysisResult.health_signals removed per "
+            "migration 014_deprecate. quick_analyze no longer surfaces "
+            "health/medical pattern signals."
+        )
+    )
     @pytest.mark.asyncio
     async def test_health_pattern_detected(self):
-        """Knee/arthritis mention should trigger HEALTH pattern."""
+        """Knee/arthritis mention used to trigger the HEALTH pattern."""
         from processors.quick_observer import quick_analyze
 
         result = quick_analyze("I've been having trouble with my knee, the doctor said it's arthritis.")

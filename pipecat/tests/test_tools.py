@@ -68,6 +68,18 @@ class TestToolSchemas:
         sanitized = sanitize_web_search_query("I take metformin and feel dizzy in Springfield", session_state)
         assert sanitized == "a person take metformin and feel dizzy"
 
+    def test_web_search_sanitizer_removes_contact_and_address_details(self):
+        session_state = {"senior": {"name": "Alice Parker"}}
+        sanitized = sanitize_web_search_query(
+            "Find garden services for Alice at 123 Maple Street, 555-121-3434",
+            session_state,
+        )
+
+        assert "Alice" not in sanitized
+        assert "123 Maple" not in sanitized
+        assert "555" not in sanitized
+        assert "garden services" in sanitized
+
     def test_web_search_sanitizer_drops_prompt_injection_canary(self):
         session_state = {
             "senior": {
@@ -185,10 +197,10 @@ class TestToolHandlerFactory:
 
         with patch("lib.growthbook.is_on", return_value=True), \
              patch("services.news.web_search_query", new_callable=AsyncMock, return_value="result") as mock_search:
-            result = await handlers["web_search"]({"query": "Margaret Smith metformin side effects"})
+            result = await handlers["web_search"]({"query": "Margaret Smith garden club events"})
 
         assert result["status"] == "success"
-        mock_search.assert_awaited_once_with("metformin side effects")
+        mock_search.assert_awaited_once_with("garden club events")
 
 
 class TestFlowsTools:
@@ -211,3 +223,189 @@ class TestFlowsTools:
         tools = make_onboarding_flows_tools(session_state)
         assert list(tools) == ["web_search"]
         assert tools["web_search"].handler is not None
+
+
+class TestConsentTool:
+    def test_record_consent_schema_valid(self):
+        from flows.tools import RECORD_CONSENT_RESPONSE_SCHEMA
+        assert RECORD_CONSENT_RESPONSE_SCHEMA["name"] == "record_consent_response"
+        # Single-decision model: only `granted` is required. No consent_type
+        # property (the column is fixed to 'call_and_recording').
+        assert RECORD_CONSENT_RESPONSE_SCHEMA["required"] == ["granted"]
+        assert "consent_type" not in RECORD_CONSENT_RESPONSE_SCHEMA["properties"]
+        assert "granted" in RECORD_CONSENT_RESPONSE_SCHEMA["properties"]
+        assert "senior_quote" in RECORD_CONSENT_RESPONSE_SCHEMA["properties"]
+
+    def test_make_consent_flows_tools_returns_only_consent_tool(self):
+        from flows.tools import make_consent_flows_tools
+        tools = make_consent_flows_tools({"senior_id": "sen-1"})
+        assert list(tools) == ["record_consent_response"]
+        assert tools["record_consent_response"].handler is not None
+
+    @pytest.mark.asyncio
+    async def test_record_consent_handler_persists_and_marks_captured(self):
+        from flows.tools import make_consent_flows_tools
+        session_state = {
+            "senior_id": "sen-1",
+            "conversation_id": "conv-1",
+            "call_type": "consent",
+        }
+        tools = make_consent_flows_tools(session_state)
+        with patch(
+            "services.seniors.record_consent",
+            new_callable=AsyncMock,
+            return_value={"id": "row-1", "captured_at": "now", "rolled_up_status": "granted"},
+        ) as mock_rc:
+            res = await tools["record_consent_response"].handler({
+                "granted": True,
+                "senior_quote": "Yeah that's fine",
+            })
+        assert res["status"] == "success"
+        mock_rc.assert_awaited_once()
+        kwargs = mock_rc.await_args.kwargs
+        # The handler must not pass consent_type — it's fixed to 'call_and_recording'
+        # inside the service (CONSENT_TYPE constant).
+        assert "consent_type" not in kwargs
+        assert kwargs["granted"] is True
+        assert kwargs["senior_quote"] == "Yeah that's fine"
+        assert session_state["_consent_captured"]["granted"] is True
+        assert session_state["_tools_used"] == ["record_consent_response"]
+        event = session_state["_context_trace_events"][0]
+        assert event["source"] == "tool"
+        assert event["action"] == "called"
+        assert event["metadata"]["tool"] == "record_consent_response"
+
+    @pytest.mark.asyncio
+    async def test_record_consent_handler_is_idempotent_per_call(self):
+        """Single-decision: second call within the same session is suppressed."""
+        from flows.tools import make_consent_flows_tools
+        session_state = {"senior_id": "sen-1"}
+        tools = make_consent_flows_tools(session_state)
+        with patch(
+            "services.seniors.record_consent",
+            new_callable=AsyncMock,
+            return_value={"id": "row-1", "captured_at": "now", "rolled_up_status": "granted"},
+        ) as mock_rc:
+            first = await tools["record_consent_response"].handler({"granted": True})
+            # Second call with the OPPOSITE answer should not overwrite — first wins.
+            second = await tools["record_consent_response"].handler({"granted": False})
+        assert first["status"] == "success"
+        assert second["status"] == "success"
+        assert "Already captured" in second["result"]
+        mock_rc.assert_awaited_once()
+        assert session_state["_consent_captured"]["granted"] is True
+        assert session_state["_tools_used"] == ["record_consent_response"]
+
+    @pytest.mark.asyncio
+    async def test_record_consent_handler_no_senior_id_returns_error(self):
+        from flows.tools import make_consent_flows_tools
+        tools = make_consent_flows_tools({})
+        res = await tools["record_consent_response"].handler({"granted": True})
+        assert res["status"] == "error"
+
+
+class TestDiscoveryTool:
+    def test_record_discovery_fact_schema_valid(self):
+        from flows.tools import RECORD_DISCOVERY_FACT_SCHEMA
+        assert RECORD_DISCOVERY_FACT_SCHEMA["name"] == "record_discovery_fact"
+        cats = RECORD_DISCOVERY_FACT_SCHEMA["properties"]["category"]["enum"]
+        assert set(cats) == {"friend", "hobby", "interest", "routine", "family"}
+        assert "category" in RECORD_DISCOVERY_FACT_SCHEMA["required"]
+        assert "content" in RECORD_DISCOVERY_FACT_SCHEMA["required"]
+
+    def test_make_discovery_flows_tools_returns_fact_and_search(self):
+        from flows.tools import make_discovery_flows_tools
+        tools = make_discovery_flows_tools({"senior_id": "sen-1"})
+        assert set(tools) == {"record_discovery_fact", "web_search"}
+
+    @pytest.mark.asyncio
+    async def test_record_discovery_fact_buffers_and_fires_store(self):
+        from flows.tools import make_discovery_flows_tools
+        session_state = {"senior_id": "sen-1", "conversation_id": "conv-1"}
+        tools = make_discovery_flows_tools(session_state)
+        with patch(
+            "services.memory.store",
+            new_callable=AsyncMock,
+            return_value={"id": "mem-1"},
+        ) as mock_store:
+            res = await tools["record_discovery_fact"].handler({
+                "category": "friend",
+                "content": "Plays bridge with Eleanor on Thursdays",
+                "confidence": "stated",
+            })
+            # Background task is created — give the loop one tick to run it.
+            await asyncio.sleep(0)
+        assert res["status"] == "success"
+        facts = session_state["_discovery_facts"]
+        assert len(facts) == 1
+        assert facts[0]["category"] == "friend"
+        assert facts[0]["confidence"] == "stated"
+        assert session_state["_tools_used"] == ["record_discovery_fact"]
+        event = session_state["_context_trace_events"][0]
+        assert event["source"] == "tool"
+        assert event["action"] == "called"
+        assert event["metadata"]["tool"] == "record_discovery_fact"
+        mock_store.assert_awaited_once()
+        kwargs = mock_store.await_args.kwargs
+        # friend → relationship
+        assert kwargs["type_"] == "relationship"
+        assert kwargs["importance"] == 80
+
+    @pytest.mark.asyncio
+    async def test_record_discovery_fact_inferred_lower_importance(self):
+        from flows.tools import make_discovery_flows_tools
+        session_state = {"senior_id": "sen-1"}
+        tools = make_discovery_flows_tools(session_state)
+        with patch(
+            "services.memory.store",
+            new_callable=AsyncMock,
+            return_value=None,
+        ) as mock_store:
+            await tools["record_discovery_fact"].handler({
+                "category": "hobby",
+                "content": "Likes gardening",
+                "confidence": "inferred",
+            })
+            await asyncio.sleep(0)
+        kwargs = mock_store.await_args.kwargs
+        assert kwargs["importance"] == 60
+        assert kwargs["type_"] == "preference"
+
+    @pytest.mark.asyncio
+    async def test_record_discovery_fact_rejects_invalid_category(self):
+        from flows.tools import make_discovery_flows_tools
+        tools = make_discovery_flows_tools({"senior_id": "sen-1"})
+        res = await tools["record_discovery_fact"].handler({
+            "category": "clinical",
+            "content": "Keeps that private",
+        })
+        assert res["status"] == "error"
+
+
+class TestSelectFlowsTools:
+    """Dispatch helper used by both bot.py and the live-sim pipeline."""
+
+    def test_defaults_to_subscriber_stack(self):
+        from flows.tools import select_flows_tools
+        tools = select_flows_tools({"senior_id": "sen-1"})
+        assert set(tools) == {"web_search", "mark_reminder_acknowledged", "create_reminder"}
+
+    def test_unknown_call_type_falls_back_to_subscriber(self):
+        from flows.tools import select_flows_tools
+        tools = select_flows_tools({"senior_id": "sen-1", "call_type": "future_unknown_type"})
+        assert "web_search" in tools and "create_reminder" in tools
+
+    def test_onboarding(self):
+        from flows.tools import select_flows_tools
+        tools = select_flows_tools({"call_type": "onboarding"})
+        assert list(tools) == ["web_search"]
+
+    def test_consent(self):
+        from flows.tools import select_flows_tools
+        tools = select_flows_tools({"call_type": "consent", "senior_id": "sen-1"})
+        assert list(tools) == ["record_consent_response"]
+
+    def test_discovery(self):
+        from flows.tools import select_flows_tools
+        tools = select_flows_tools({"call_type": "discovery", "senior_id": "sen-1"})
+        assert set(tools) == {"record_discovery_fact", "web_search"}

@@ -261,11 +261,6 @@ def format_reminder_prompt(reminder: dict) -> str:
     lines.append(f'You are calling to remind them about: "{reminder.get("title", "")}"')
     if reminder.get("description"):
         lines.append(f"Details: {reminder['description']}")
-    rtype = reminder.get("type")
-    if rtype == "medication":
-        lines.append("This is a medication reminder - be gentle but clear about the importance of taking their medication.")
-    elif rtype == "appointment":
-        lines.append("This is an appointment reminder - make sure they know the time and any preparation needed.")
     lines.append("\nDeliver this reminder naturally in the conversation - don't sound robotic or alarming.")
     lines.append("Start with a warm greeting, then mention the reminder.")
     return "\n".join(lines)

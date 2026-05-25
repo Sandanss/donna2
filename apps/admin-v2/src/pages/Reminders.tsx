@@ -4,9 +4,8 @@ import { formatDate } from '@/lib/utils';
 import { useToast } from '@/components/Toast';
 
 const typeIcons: Record<string, string> = {
-  medication: '\u{1F48A}',
-  appointment: '\u{1F4C5}',
   custom: '\u{1F4CC}',
+  social: '\u{1F4DE}',
 };
 
 function getScheduleLabel(r: Reminder): string {
@@ -25,7 +24,7 @@ export default function Reminders() {
 
   // Form state
   const [seniorId, setSeniorId] = useState('');
-  const [type, setType] = useState('medication');
+  const [type, setType] = useState('custom');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [date, setDate] = useState('');
@@ -51,7 +50,7 @@ export default function Reminders() {
 
   function resetForm() {
     setSeniorId('');
-    setType('medication');
+    setType('custom');
     setTitle('');
     setDescription('');
     setDate('');
@@ -163,9 +162,8 @@ export default function Reminders() {
                 value={type}
                 onChange={(e) => setType(e.target.value)}
               >
-                <option value="medication">Medication</option>
-                <option value="appointment">Appointment</option>
                 <option value="custom">Custom</option>
+                <option value="social">Social</option>
               </select>
             </div>
             <div>
@@ -176,7 +174,7 @@ export default function Reminders() {
                 type="text"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                placeholder="e.g. Take morning pills"
+                placeholder="e.g. Call Emma after lunch"
                 required
               />
             </div>

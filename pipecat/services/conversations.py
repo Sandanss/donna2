@@ -37,7 +37,8 @@ async def complete(call_sid: str, data: dict) -> dict | None:
     """Update a conversation when a call ends.
 
     Accepts snake_case keys: duration_seconds, status, summary, transcript,
-    transcript_text, call_metrics, sentiment, concerns.
+    transcript_text, call_metrics, sentiment, concerns, amd_result,
+    goodbye_detected_at, end_reason.
 
     Writes encrypted structured JSON and encrypted text transcript columns.
     The legacy plaintext transcript column remains read-only fallback for rows
@@ -57,7 +58,10 @@ async def complete(call_sid: str, data: dict) -> dict | None:
              concerns = NULL,
              summary_encrypted = $5,
              transcript_encrypted = $6,
-             transcript_text_encrypted = $7
+             transcript_text_encrypted = $7,
+             amd_result = COALESCE($9, amd_result),
+             goodbye_detected_at = COALESCE($10, goodbye_detected_at),
+             end_reason = COALESCE($11, end_reason)
            WHERE call_sid = $8
            RETURNING *""",
         data.get("duration_seconds"),
@@ -68,6 +72,9 @@ async def complete(call_sid: str, data: dict) -> dict | None:
         encrypt_json(transcript) if transcript else None,
         encrypt(transcript_text),
         call_sid,
+        data.get("amd_result"),
+        data.get("goodbye_detected_at"),
+        data.get("end_reason"),
     )
     if row:
         logger.info("Completed conversation {id} ({dur}s)", id=row["id"], dur=data.get("duration_seconds"))
@@ -251,6 +258,29 @@ async def update_summary(
         return None
 
 
+async def update_sentiment(call_sid: str, sentiment: str) -> dict | None:
+    """Set conversations.sentiment without touching summary or other fields.
+
+    Used by the post-call analysis fallback path: when Gemini fails to
+    return parseable JSON we fall back to _get_default_analysis() which
+    yields sentiment='neutral'. We still want the conversation row to
+    reflect that we attempted analysis, so this writes ONLY sentiment.
+    """
+    try:
+        row = await query_one(
+            """UPDATE conversations
+               SET sentiment = COALESCE($1, sentiment)
+               WHERE call_sid = $2
+               RETURNING id""",
+            sentiment,
+            call_sid,
+        )
+        return row
+    except Exception as e:
+        logger.error("Error updating sentiment: {err}", err=str(e))
+        return None
+
+
 async def get_recent_summaries(
     senior_id: str,
     limit: int = 3,
@@ -411,3 +441,22 @@ async def get_recent(limit: int = 20) -> list[dict]:
            LIMIT $1""",
         limit,
     )
+
+
+async def save_profile_suggestions(conversation_id: str, payload: dict) -> dict | None:
+    """Write the discovery-call profile_suggestions payload to conversations.
+
+    Caregiver-review surface reads this column. See migration 015 / docs/plans/
+    2026-05-24-consent-and-discovery-call-flows.md.
+    """
+    if not conversation_id:
+        return None
+    row = await query_one(
+        """UPDATE conversations
+           SET profile_suggestions = $1::jsonb
+           WHERE id = $2
+           RETURNING id, profile_suggestions""",
+        json.dumps(payload),
+        conversation_id,
+    )
+    return row

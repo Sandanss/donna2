@@ -21,7 +21,7 @@ import {
 } from "@/src/hooks";
 
 type ToggleRow = {
-  key: "callCompleted" | "concernDetected" | "reminderMissed" | "weeklySummary";
+  key: "callCompleted" | "reminderMissed" | "weeklySummary";
   titleKey: string;
   descriptionKey: string;
 };
@@ -31,11 +31,6 @@ const NOTIFICATION_TOGGLES: ToggleRow[] = [
     key: "callCompleted",
     titleKey: "notificationPreferences.callSummaries",
     descriptionKey: "notificationPreferences.callSummariesDesc",
-  },
-  {
-    key: "concernDetected",
-    titleKey: "notificationPreferences.concernAlerts",
-    descriptionKey: "notificationPreferences.concernAlertsDesc",
   },
   {
     key: "reminderMissed",
@@ -56,7 +51,6 @@ export default function NotificationPreferencesScreen() {
   const updatePreferences = useUpdateNotificationPreferences();
 
   const [callCompleted, setCallCompleted] = useState(true);
-  const [concernDetected, setConcernDetected] = useState(true);
   const [reminderMissed, setReminderMissed] = useState(true);
   const [weeklySummary, setWeeklySummary] = useState(true);
 
@@ -64,7 +58,6 @@ export default function NotificationPreferencesScreen() {
   useEffect(() => {
     if (preferences) {
       setCallCompleted(preferences.callCompleted ?? true);
-      setConcernDetected(preferences.concernDetected ?? true);
       setReminderMissed(preferences.reminderMissed ?? true);
       setWeeklySummary(preferences.weeklySummary ?? true);
     }
@@ -72,14 +65,12 @@ export default function NotificationPreferencesScreen() {
 
   const toggleState: Record<string, boolean> = {
     callCompleted,
-    concernDetected,
     reminderMissed,
     weeklySummary,
   };
 
   const toggleSetters: Record<string, (val: boolean) => void> = {
     callCompleted: setCallCompleted,
-    concernDetected: setConcernDetected,
     reminderMissed: setReminderMissed,
     weeklySummary: setWeeklySummary,
   };
@@ -88,7 +79,6 @@ export default function NotificationPreferencesScreen() {
     try {
       await updatePreferences.mutateAsync({
         callCompleted,
-        concernDetected,
         reminderMissed,
         weeklySummary,
       });

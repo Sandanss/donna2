@@ -52,8 +52,6 @@ router.post('/api/canary/members', requireAdmin, async (req, res) => {
       return sendError(res, 400, { error: 'ramp_phase must be 1-50 chars of [A-Za-z0-9_-]' });
     }
 
-    const notes = body.notes ? String(body.notes).slice(0, 500) : null;
-
     const added = [];
     const errors = [];
     for (const seniorId of seniorIds) {
@@ -62,7 +60,6 @@ router.post('/api/canary/members', requireAdmin, async (req, res) => {
           seniorId,
           rampPhase,
           addedBy: req.auth?.userId || null,
-          notes,
         });
         added.push(row);
       } catch (error) {

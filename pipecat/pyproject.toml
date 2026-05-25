@@ -48,4 +48,6 @@ markers = [
     "llm: tests requiring real LLM API calls (ANTHROPIC_API_KEY)",
     "llm_simulation: LLM-vs-LLM simulation tests (slow, requires ANTHROPIC_API_KEY)",
     "regression: conversation scenario regression tests (full pipeline simulation)",
+    "stress: opt-in stress/load tests that may run many simulated calls",
+    "live_analysis: replay post-call analysis against live DB transcripts (opt-in, never CI; needs DONNA_REPLAY_LIVE_SOURCE + DATABASE_URL)",
 ]

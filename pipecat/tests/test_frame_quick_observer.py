@@ -62,12 +62,12 @@ class TestQuickObserverGuidanceInjection:
     """
 
     @pytest.mark.asyncio
-    async def test_health_signal_stashes_guidance_in_session_state(self, session_state):
-        """Health-related input should stash guidance in session_state for the Director."""
+    async def test_emotion_signal_stashes_guidance_in_session_state(self, session_state):
+        """Emotion-related input should stash guidance in session_state for the Director."""
         processor = QuickObserverProcessor(session_state=session_state)
         capture = await run_processor_test(
             processors=[processor],
-            frames_to_inject=[make_transcription("I fell in the bathroom")],
+            frames_to_inject=[make_transcription("I'm so lonely, nobody ever calls me")],
         )
 
         # The processor must NOT push the guidance frame itself — that's
@@ -81,7 +81,7 @@ class TestQuickObserverGuidanceInjection:
 
         # And the stash must be populated for the Director to pick up.
         stashed = session_state.get("_pending_observer_guidance")
-        assert stashed, "Expected health signal to populate _pending_observer_guidance"
+        assert stashed, "Expected emotion signal to populate _pending_observer_guidance"
         # Stashed value is the raw guidance text (no [EPHEMERAL: ...] header —
         # the Director adds that when it injects).
         assert isinstance(stashed, str)
@@ -160,6 +160,22 @@ class TestQuickObserverGoodbyeEndFrame:
         await asyncio.wait_for(runner.run(task), timeout=5.0)
 
         assert session_state.get("_goodbye_in_progress") is True
+
+    @pytest.mark.asyncio
+    async def test_consent_call_goodbye_does_not_force_end(self, session_state):
+        """Consent calls should let the consent flow end the call after recording."""
+        session_state["call_type"] = "consent"
+        processor = QuickObserverProcessor(session_state=session_state)
+        processor.GOODBYE_DELAY_SECONDS = 0.1
+
+        await run_processor_test(
+            processors=[processor],
+            frames_to_inject=[make_transcription("Yes, I agree. Bye now")],
+            pre_end_delay=0.3,
+        )
+
+        assert processor._goodbye_task is None
+        assert session_state.get("_goodbye_in_progress") is not True
 
     @pytest.mark.asyncio
     async def test_early_strong_goodbye_forces_end(self, session_state, frame_capture):

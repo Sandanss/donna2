@@ -83,6 +83,16 @@ def _legal_hold_exclusion(alias: str, table: str) -> str:
     )
 
 
+def _dependency_exclusion(alias: str, table: str) -> str:
+    if table != "call_queue":
+        return "TRUE"
+    return (
+        "NOT EXISTS (SELECT 1 FROM call_attempts ca WHERE ca.queue_id = target.id)"
+        " AND NOT EXISTS (SELECT 1 FROM outbound_call_guards ocg WHERE ocg.queue_id = target.id)"
+        " AND NOT EXISTS (SELECT 1 FROM scheduler_shadow_comparisons ssc WHERE ssc.queue_id = target.id)"
+    ).replace("target.", f"{alias}.")
+
+
 # ---------------------------------------------------------------------------
 # Core purge logic
 # ---------------------------------------------------------------------------
@@ -106,6 +116,7 @@ async def _purge_table(table: str, date_column: str, retention_days: int) -> int
             f"  FROM {table} AS target"
             f"  WHERE target.{date_column} < NOW() - make_interval(days => $1)"
             f"    AND {_legal_hold_exclusion('target', table)}"
+            f"    AND {_dependency_exclusion('target', table)}"
             f"  ORDER BY target.{date_column}"
             f"  LIMIT {BATCH_SIZE}"
             f"), deleted AS ("
@@ -264,11 +275,11 @@ async def purge_expired_data() -> dict[str, int]:
         "caregiver_notes": settings.retention_caregiver_notes_days,
         "prospects": settings.retention_prospects_days,
         "senior_profile_review": settings.retention_inactive_senior_review_days,
-        "call_queue": settings.retention_call_queue_days,
         "call_attempts": settings.retention_call_attempts_days,
         "post_call_jobs": settings.retention_post_call_jobs_days,
         "outbound_call_guards": settings.retention_outbound_call_guards_days,
         "scheduler_shadow_comparisons": settings.retention_scheduler_shadow_comparisons_days,
+        "call_queue": settings.retention_call_queue_days,
         "canary_cohort_membership": settings.retention_canary_cohort_membership_days,
         "waitlist": settings.retention_waitlist_days,
         "audit_logs": settings.retention_audit_logs_days,

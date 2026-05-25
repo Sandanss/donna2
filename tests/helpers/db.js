@@ -41,7 +41,7 @@ export const mockSchema = {
     timezone: 'timezone',
     interests: 'interests',
     family: 'family',
-    medicalNotes: 'medical_notes',
+    profileNotes: 'profile_notes',
     isActive: 'is_active',
     createdAt: 'created_at',
     updatedAt: 'updated_at',

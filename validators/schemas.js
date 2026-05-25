@@ -67,7 +67,7 @@ export const createSeniorSchema = z.object({
   timezone: timezoneSchema.default('America/New_York'),
   interests: z.array(z.string().max(100)).max(20).optional(),
   familyInfo: z.record(z.unknown()).optional(),
-  medicalNotes: z.string().max(10000).optional(),
+  profileNotes: z.string().max(10000).optional(),
   preferredCallTimes: z.record(z.unknown()).optional(),
   isActive: z.boolean().default(true),
   city: z.string().max(100).optional(),
@@ -82,7 +82,7 @@ export const updateSeniorSchema = z.object({
   timezone: timezoneSchema.optional(),
   interests: z.array(z.string().max(100)).max(20).optional(),
   familyInfo: z.record(z.unknown()).optional(),
-  medicalNotes: z.string().max(10000).optional(),
+  profileNotes: z.string().max(10000).optional(),
   preferredCallTimes: z.record(z.unknown()).optional(),
   isActive: z.boolean().optional(),
   city: z.string().max(100).optional(),
@@ -101,10 +101,7 @@ const memoryTypeEnum = z.enum([
   'fact',
   'preference',
   'event',
-  'concern',
   'relationship',
-  'health',
-  'medication',
   'family',
   'interest',
   'routine',
@@ -139,10 +136,7 @@ export const memorySearchQuerySchema = z.object({
 // =============================================================================
 
 const reminderTypeEnum = z.enum([
-  'medication',
-  'appointment',
   'custom',
-  'wellness',
   'social',
 ]);
 
@@ -189,9 +183,19 @@ export const createReminderBatchSchema = z.object({
 // Call Schemas
 // =============================================================================
 
+// Manual-call callTypes the API will accept. Legacy/scheduled values
+// ("check-in", "reminder", "schedule") are intentionally excluded — those
+// must come from the scheduler/queue path, not a caregiver button.
+// "consent" + "discovery" are caregiver-initiated per the May 17 spec.
+export const manualCallTypeEnum = z.enum(['consent', 'discovery']);
+
 export const initiateCallSchema = z.object({
   seniorId: uuidSchema,
   contextNotes: z.string().max(1000).optional(),
+  // Default to the legacy manual check-in behavior when omitted, so existing
+  // callers keep working. Setting callType routes to the new consent/discovery
+  // flows.
+  callType: manualCallTypeEnum.optional(),
 });
 
 // =============================================================================
@@ -387,7 +391,6 @@ export const updateScheduleSchema = z.object({
 
 export const notificationPreferencesSchema = z.object({
   callCompleted: z.boolean().optional(),
-  concernDetected: z.boolean().optional(),
   reminderMissed: z.boolean().optional(),
   weeklySummary: z.boolean().optional(),
   callSummaries: z.boolean().optional(),
@@ -402,7 +405,11 @@ export const notificationPreferencesSchema = z.object({
 });
 
 export const notificationTriggerSchema = z.object({
-  event_type: z.enum(['call_completed', 'concern_detected', 'reminder_missed']),
+  event_type: z.enum([
+    'call_completed',
+    'reminder_missed',
+    'consent_declined',
+  ]),
   senior_id: uuidSchema,
   data: z.object({}).passthrough(), // flexible payload
 });

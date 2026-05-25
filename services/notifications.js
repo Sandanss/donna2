@@ -95,7 +95,6 @@ async function getClerkContact(clerkUserId) {
 // ---------------------------------------------------------------------------
 const EVENT_TO_PREF = {
   call_completed: 'callCompleted',
-  concern_detected: 'concernDetected',
   reminder_missed: 'reminderMissed',
   weekly_summary: 'weeklySummary',
 };
@@ -151,7 +150,7 @@ export const notificationService = {
       return {
         caregiverId,
         callCompleted: true,
-        concernDetected: true,
+        concernDetected: false,
         reminderMissed: true,
         weeklySummary: true,
         callSummaries: true,
@@ -170,7 +169,7 @@ export const notificationService = {
   },
 
   async upsertPreferences(caregiverId, data) {
-    const normalizedData = { ...data, smsEnabled: false };
+    const normalizedData = { ...data, concernDetected: false, smsEnabled: false };
 
     // Try update first
     const [existing] = await db.select({ id: notificationPreferences.id })
@@ -221,33 +220,6 @@ export const notificationService = {
     }
   },
 
-  async onConcernDetected(seniorId, data) {
-    const caregiverList = await this._getCaregiversForSenior(seniorId);
-    const senior = await this._getSenior(seniorId);
-    const seniorName = senior?.name || 'your loved one';
-
-    const concern = sanitizeNotificationContent(
-      data.concern || 'A concern was detected during the call.',
-      { maxLen: 600, replacement: 'A concern was detected during the call.' }
-    );
-    const content = sanitizeNotificationContent(
-      `Alert: During a call with ${seniorName}, Donna noticed something that may need attention. ${concern}`
-    );
-
-    for (const cg of caregiverList) {
-      // Concern notifications bypass quiet hours
-      await this._sendIfAllowed(
-        cg.id,
-        cg.clerkUserId,
-        seniorId,
-        'concern_detected',
-        content,
-        data,
-        { bypassQuietHours: true, expoPushToken: cg.expoPushToken },
-      );
-    }
-  },
-
   async onReminderMissed(seniorId, data) {
     const caregiverList = await this._getCaregiversForSenior(seniorId);
     const senior = await this._getSenior(seniorId);
@@ -270,6 +242,45 @@ export const notificationService = {
         content,
         data,
         { expoPushToken: cg.expoPushToken },
+      );
+    }
+  },
+
+  async onConsentDeclined(seniorId, data) {
+    // Fired when a consent call captured a 'no' for call_permission or
+    // recording_permission. Bypasses quiet hours and the user preference
+    // check — the senior has refused, the caregiver needs to know so they
+    // can follow up personally. (See docs/plans/2026-05-24-consent-and-discovery-call-flows.md.)
+    const caregiverList = await this._getCaregiversForSenior(seniorId);
+    const senior = await this._getSenior(seniorId);
+    const seniorName = senior?.name || 'your loved one';
+
+    const declinedType = (data?.consent_type || '').toString();
+    const declinedLabel = declinedType === 'recording_permission'
+      ? 'recording calls'
+      : declinedType === 'call_permission'
+        ? 'receiving calls'
+        : 'continuing with Donna';
+
+    const content = sanitizeNotificationContent(
+      `${seniorName} declined ${declinedLabel} when Donna asked for permission. ` +
+      `Donna will not call them again. You may want to follow up with them directly.`
+    );
+
+    for (const cg of caregiverList) {
+      // Bypass both quiet hours AND the user preference check by routing
+      // directly to _sendEmail. This is intentional: declining consent
+      // is a hard stop on service, not a notification a caregiver should
+      // be able to opt out of.
+      const contact = await getClerkContact(cg.clerkUserId);
+      if (!contact?.email) continue;
+      await this._sendEmail(
+        cg.id,
+        seniorId,
+        'consent_declined',
+        content,
+        data,
+        contact.email,
       );
     }
   },
@@ -339,7 +350,6 @@ export const notificationService = {
     const safeContent = sanitizeNotificationContent(content);
     const titles = {
       call_completed: 'Donna call summary',
-      concern_detected: '⚠️ Donna alert',
       reminder_missed: 'Missed reminder',
       weekly_summary: 'Weekly summary',
     };
@@ -413,8 +423,7 @@ export const notificationService = {
     // Build subject from event type
     const subjects = {
       call_completed: 'Donna call summary',
-      concern_detected: '⚠️ Donna concern alert',
-      reminder_missed: 'Missed reminder alert',
+      reminder_missed: 'Missed reminder',
       weekly_summary: 'Weekly summary from Donna',
     };
 

@@ -40,7 +40,7 @@ pipecat/tests/simulation/
 ├── fixtures.py        # TestSenior dataclass, seed/cleanup DB helpers
 ├── pipeline.py        # build_live_sim_pipeline — real pipeline with mock STT/TTS
 ├── transport.py       # TextCallerTransport + AudioCallerTransport + ResponseCollector
-├── scenarios.py       # 4 baseline scenarios: web_search, memory_seed, memory_recall, reminder
+├── scenarios.py       # scenario catalog: web_search, memory, reminder, safety, outage cases
 ├── runner.py          # run_simulated_call — orchestrates one call end-to-end
 ├── concurrent.py      # run_simulated_calls_concurrent — N calls in parallel (PR #262)
 └── cohort.py          # build_cohort_report, compare_cohorts — SLO grading (PR #262)
@@ -149,10 +149,179 @@ metrics logger emits during real calls.
 | `memory_seed` | Donna writing memories during the call |
 | `memory_recall` | Director injecting prefetched memories from prior calls |
 | `reminder` | Pipecat Flows reminder phase → main transition; `mark_reminder_acknowledged` |
+| `multiple_reminders` | Donna brings up multiple everyday reminders in the opening and records each acknowledgement |
+| `reminder_overload` | Five non-medical reminders in one call; caller acknowledges only some |
+| `ambiguous_reminder_ack` | Caller says "the second one" instead of naming the reminder |
+| `reminder_interruption` | Caller interrupts reminder delivery with a new reminder request |
+| `similar_reminders` | Similar titles like "Call Eleanor" vs. "Call Eleanor about bridge club" |
+| `out_of_order_reminder_ack` | Caller acknowledges reminders in a different order than Donna presented them |
+| `unacknowledged_reminder` | Caller dodges the reminder; Donna should not mark it acknowledged prematurely |
+| `false_goodbye_reminder_ack` | Caller says goodbye to someone nearby while acknowledging a reminder |
+| `cognitive_confusion_reminder` | Caller asks Donna to repeat who she is and what the reminder was |
+| `low_engagement_reminder` | Terse caller receives a reminder without over-prompting |
+| `embedding_outage` | OpenAI embedding failure/quota exhaustion; memory search degrades without ending the call |
+| `false_goodbye` | Senior says a goodbye-like phrase to someone else mid-call; call should continue |
+| `low_engagement` | Reserved senior gives short answers; Donna should re-engage without interrogating |
+| `health_concern` | Senior mentions lightheadedness/stumble; Donna should respond with calm concern |
+| `cognitive_confusion` | Senior repeats and forgets context; Donna should orient patiently |
+| `reminder_creation` | Senior asks Donna to create a new reminder; `create_reminder` should fire after confirmation |
+| `async_search_overlap` | Senior asks a second current-info question while search is still settling |
+| `slow_search_overlap` | Same as overlap, but web search is deliberately delayed |
+| `empty_search_result` | Web search returns no useful result; Donna should not retry-loop |
+| `search_phi_guard` | Caller includes fake private details in a search request; query should be sanitized |
+| `consent_grant` | Clear combined call+recording consent grant |
+| `consent_decline` | Clear combined consent decline; scheduler gate should roll up false |
+| `consent_ambiguous_then_grant` | Fuzzy consent answer, clarification, then grant |
+| `consent_ai_question_then_grant` | AI disclosure and recording-access questions before grant |
+| `consent_off_topic_redirect_decline` | Off-topic redirect during consent; no web search; decline captured |
+| `consent_boundary_reminder_attempt` | Consent call resists drifting into reminder creation |
+| `discovery` | Multi-category discovery: friends, hobby/routine, family |
+| `discovery_quiet_routine` | Quiet caller; gentle prompting yields routine and relationship facts |
+| `discovery_off_topic_weather` | Discovery plus current-weather lookup (`record_discovery_fact` + `web_search`) |
+| `discovery_boundary_redirect` | Senior refuses private topics, then shares safe interests |
+| `discovery_early_goodbye` | Partial discovery before an early goodbye |
+| `discovery_correction` | Senior corrects a stated discovery fact in-call |
+| `discovery_boundary_reminder_attempt` | Discovery call resists drifting into reminder scheduling |
 
 Choose with `--scenario <name>`. To add new scenarios see ["Adding a scenario"](#adding-a-scenario) below.
 
-### 3. Concurrent / cohort A/B run
+### 3. Stress Pack
+
+The stress pack is the recommended first pass when you want breadth without
+spending money on thousands of live LLM turns. It documents the corner cases
+we want to keep exercising:
+
+| Category | Scenario/helper | Failure mode it targets |
+|---|---|---|
+| Reminder overload | `reminder_overload` | Multi-item greeting loses items or marks the whole batch acknowledged |
+| Ambiguous acknowledgement | `ambiguous_reminder_ack` | "The second one" maps to the wrong reminder |
+| Reminder interruption | `reminder_interruption` | New reminder request makes Donna forget pending delivered reminders |
+| Duplicate/similar titles | `similar_reminders` | Slug/title matching picks the shorter similar reminder |
+| Out-of-order acknowledgement | `out_of_order_reminder_ack` | Tool handler assumes presentation order |
+| No acknowledgement | `unacknowledged_reminder` | Donna marks a vague topic change as confirmed |
+| Tool argument messiness | unit tests in `test_pipeline_tool_calls.py` | UUID/title/slug/ordinal arguments resolve inconsistently |
+| Embedding outage | `embedding_outage` | Memory recall fails when OpenAI embedding quota is exhausted |
+| Slow search + second turn | `slow_search_overlap` | Duplicate search calls or stale answers while waiting |
+| Bad/empty search | `empty_search_result` | Repeated tool calls or awkward failure copy |
+| Search PHI guard | `search_phi_guard` + sanitizer tests | Names, phones, or addresses leave Donna in a web query |
+| False goodbye under reminder pressure | `false_goodbye_reminder_ack` | Quick Observer ends the call while a reminder ack is happening |
+| Cognitive confusion + reminders | `cognitive_confusion_reminder` | Donna marks acknowledgement before the caller understands |
+| Low engagement + reminders | `low_engagement_reminder` | Donna over-prompts or misses terse acknowledgement |
+| Bilingual reminder creation | `reminder_creation` | Spanish/English confirmation flow fails before `create_reminder` |
+| Consent boundary | `consent_boundary_reminder_attempt` | First call drifts into regular reminder workflow |
+| Discovery boundary | `discovery_boundary_reminder_attempt` | Profile-building call becomes reminder scheduling |
+| Reminder stampede | `build_reminder_stampede_specs(count)` | Concurrent reminder calls collide on state/DB rows |
+| Post-call stampede | `build_post_call_stampede_specs(count)` | Many calls end together and saturate post-call jobs |
+| Parallel flake detector | `build_parallel_flake_specs(factory, repetitions=N)` | State leaks and nondeterminism across repeated concurrent runs |
+| 2,000-user infra | `scale_2000_load_test_plan()` + Locust | Load balancing/WS/DB pressure without 2,000 LLM calls |
+
+Run a small behavior stress pack:
+
+```bash
+cd pipecat
+railway run --environment dev --service donna-pipecat -- \
+  uv run python scripts/run_simulated_stress_pack.py \
+    --mode stress-pack \
+    --max-concurrent 5 \
+    --no-post-call
+```
+
+Preview the exact call list without spending LLM tokens:
+
+```bash
+cd pipecat
+uv run python scripts/run_simulated_stress_pack.py \
+  --mode stress-pack \
+  --dry-run \
+  --json
+```
+
+```python
+from tests.simulation import build_stress_pack_specs, run_simulated_calls_concurrent
+
+specs = build_stress_pack_specs(repetitions=1)
+summary = await run_simulated_calls_concurrent(
+    specs,
+    max_concurrent=5,
+    run_post_call_processing=False,
+)
+print(summary)
+```
+
+Run a targeted reminder stampede:
+
+```bash
+cd pipecat
+railway run --environment dev --service donna-pipecat -- \
+  uv run python scripts/run_simulated_stress_pack.py \
+    --mode reminder-stampede \
+    --count 50 \
+    --max-concurrent 25 \
+    --no-post-call
+```
+
+```python
+from tests.simulation import build_reminder_stampede_specs, run_simulated_calls_concurrent
+
+specs = build_reminder_stampede_specs(50)
+summary = await run_simulated_calls_concurrent(
+    specs,
+    max_concurrent=25,
+    run_post_call_processing=False,
+)
+```
+
+Run a parallel flake detector:
+
+```bash
+cd pipecat
+railway run --environment dev --service donna-pipecat -- \
+  uv run python scripts/run_simulated_stress_pack.py \
+    --mode flake \
+    --scenario multiple_reminders \
+    --count 20 \
+    --max-concurrent 10 \
+    --no-post-call
+```
+
+```python
+from tests.simulation import build_parallel_flake_specs, multiple_reminders_scenario
+
+specs = build_parallel_flake_specs(multiple_reminders_scenario, repetitions=20)
+```
+
+Run a post-call stampede with post-call processing enabled:
+
+```bash
+cd pipecat
+railway run --environment dev --service donna-pipecat -- \
+  uv run python scripts/run_simulated_stress_pack.py \
+    --mode post-call-stampede \
+    --count 25 \
+    --max-concurrent 10
+```
+
+Print the 2,000-user load-test plan:
+
+```bash
+cd pipecat
+uv run python scripts/run_simulated_stress_pack.py \
+  --mode scale-2000-plan \
+  --json
+```
+
+The pytest wrapper for real LLM stress calls is opt-in:
+
+```bash
+cd pipecat
+railway run --environment dev --service donna-pipecat -- \
+  env RUN_LIVE_STRESS_SIMULATION=true \
+      LIVE_STRESS_SCENARIOS=ambiguous_reminder_ack,similar_reminders,empty_search_result \
+      LIVE_STRESS_MAX_CONCURRENT=3 \
+      uv run pytest tests/test_live_stress_simulation.py -m "llm_simulation and stress" -q
+```
+
+### 4. Concurrent / cohort A/B run
 
 Build a Python script (or inline in an `ipython`/`uv run python`):
 
@@ -191,7 +360,7 @@ don't collide. The comparator grades against plan §1.3 SLOs (setup p95 ≤
 1.5s, success rate ≥ 0.95, post-call completion ≥ 0.95). Thresholds are
 overridable for relaxed canary policies.
 
-### 4. Stampede shape (Phase 6 / 600-call stress)
+### 5. Stampede shape (Phase 6 / 600-call stress)
 
 ```python
 specs = [ConcurrentCallSpec(scenario=web_search_scenario()) for _ in range(600)]
@@ -202,6 +371,39 @@ summary = await run_simulated_calls_concurrent(specs, max_concurrent=600, timeou
 the LLMs are real (~$0.05/call × 600 ≈ $30 per stampede). STT, TTS, and
 telephony are mocked. Use it for: post-call queue saturation, DB pool
 behavior under spike, Director timing fairness across N calls.
+
+### 6. 2,000-user infra/load-balancer stress
+
+Do not use 2,000 full LLM-vs-LLM calls as the default load-balancer test.
+That mostly stress-tests Anthropic/OpenAI quotas and cost, not Railway routing.
+
+For the 2,000-user infrastructure target, use the load-test harness:
+
+```bash
+cd pipecat
+export LOAD_TEST_HOST=https://<pipecat-staging-or-dev-host>
+export LOAD_TEST_DB_URL=postgresql://<staging-neon-branch>
+bash tests/load/run_load_tests.sh stress
+```
+
+The load runner already has a `stress` target for 2,000 concurrent users, but
+verify the WebSocket locust file matches the active telephony provider before
+using the result as a release gate. The current active production path is
+Telnyx (`/telnyx/*` + `/ws?ws_token=...`), while older load scripts may still
+use the retired Twilio `/voice/answer` shape.
+
+The target Pipecat service must be deployed with `LOAD_TEST_MODE=true` so the
+WebSocket path exercises HTTP routing, WebSocket connection handling, Railway
+load balancing, replica capacity, health checks, and DB pressure without
+calling real STT/LLM/TTS for every synthetic call.
+
+Use both tracks together:
+
+- **Mock-call simulation:** behavior correctness, tool use, memory injection,
+  goodbye handling, post-call processing, and moderate concurrent pipeline
+  safety.
+- **Locust WebSocket load:** 500/2,000-user infra validation, load balancer
+  behavior, connection churn, DB pool pressure, and scheduler throughput.
 
 ---
 
@@ -239,6 +441,15 @@ from tests.simulation import (
     ConcurrentCallSpec, ConcurrentCallOutcome, ConcurrentRunSummary,
     run_simulated_calls_concurrent,
 
+    # Stress pack helpers
+    STRESS_SCENARIO_FACTORIES,
+    build_stress_pack_specs, build_reminder_stampede_specs,
+    build_post_call_stampede_specs, build_parallel_flake_specs,
+    scale_2000_load_test_plan,
+
+    # Consent/discovery suites
+    consent_mock_call_scenarios, discovery_mock_call_scenarios,
+
     # Aggregate + compare cohorts
     CohortSloReport, CohortSloThresholds, CohortComparison, SloBreach,
     DEFAULT_THRESHOLDS,
@@ -246,7 +457,7 @@ from tests.simulation import (
 )
 ```
 
-The runner is `run_simulated_call(scenario, senior=None, conversation_id=None, run_post_call_processing=True) -> CallResult`. The full `CallResult` shape is documented in `transport.py` — turns, tool_calls_made, injected_memories, fillers, total_duration_ms, end_reason, post_call_completed.
+The runner is `run_simulated_call(scenario, senior=None, conversation_id=None, run_post_call_processing=True) -> CallResult`. The full `CallResult` shape is documented in `transport.py` — turns, tool_calls_made, injected_memories, fillers, total_duration_ms, end_reason, post_call_completed, plus PHI-safe post-call metrics fields for whether `call_metrics` logged, which tool names were written, and whether encrypted context trace was included.
 
 ---
 
@@ -374,6 +585,8 @@ cannot: STT misrecognition, codec mismatches, sample-rate drift, VAD
 boundary issues. Use audio mode for a **small** number of calls in
 addition to text-mode breadth.
 
+Implementation plan: `docs/plans/2026-05-25-audio-mock-call-testing-plan.md`.
+
 ---
 
 ## Cost
@@ -409,9 +622,9 @@ huge stampedes run for $0.
 - **DB is your DB.** Currently runs against dev Neon. For CI use, a fresh
   Postgres container per run is recommended (not yet wired into the
   pytest config).
-- **Cleanup is shallow.** Until [bug #1](#real-bugs-the-harness-catches) is
-  fixed, the `seniors` row from each demo run persists. Use a unique
-  TestSenior per run (the demo script does this automatically).
+- **Cleanup is still dev-DB dependent.** Test seniors are deleted after runs,
+  and each run uses a unique UUID + fake phone, but interrupted live runs can
+  still leave stale rows. Prefer a staging Neon branch for large runs.
 
 ---
 
@@ -420,6 +633,10 @@ huge stampedes run for $0.
 - `pipecat/tests/test_live_simulation.py` — pytest-driven simulation tests
   (mark `llm_simulation`). Set `ANTHROPIC_API_KEY` and run:
   `cd pipecat && uv run pytest tests/test_live_simulation.py -m llm_simulation -v`
+- `pipecat/tests/test_live_stress_simulation.py` — opt-in advanced stress
+  subsets and reminder stampedes (marks `llm_simulation` + `stress`).
+- `pipecat/scripts/run_simulated_stress_pack.py` — operator CLI for stress
+  packs, stampedes, flake detection, dry-run plans, and the 2,000-user plan.
 - `pipecat/tests/simulation/__init__.py` — the canonical public API surface.
 - `pipecat/tests/test_simulation_concurrent.py`,
   `pipecat/tests/test_simulation_cohort.py`,

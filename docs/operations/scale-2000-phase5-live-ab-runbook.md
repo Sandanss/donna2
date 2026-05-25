@@ -60,7 +60,7 @@ Run the matrix from the technical plan with only synthetic seniors. The expected
 | Control | Legacy scheduler |
 | Treatment | Queue dispatcher |
 
-After each scenario, check call acceptance and logs, but do not paste phone numbers, names, transcripts, reminder text, caregiver notes, medical notes, prompt context, or `ws_token` values into notes.
+After each scenario, check call acceptance and logs, but do not paste phone numbers, names, transcripts, reminder text, caregiver notes, profile notes, prompt context, or `ws_token` values into notes.
 
 ## Report
 
@@ -139,4 +139,4 @@ railway logs --service donna-api --environment staging --since 30m --lines 500
 railway logs --service donna-pipecat --environment staging --since 30m --lines 500
 ```
 
-Expected: no raw senior names, phone numbers, transcripts, reminder text, caregiver notes, medical notes, prompt context, or `ws_token` values.
+Expected: no raw senior names, phone numbers, transcripts, reminder text, caregiver notes, profile notes, prompt context, or `ws_token` values.

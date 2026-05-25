@@ -16,9 +16,11 @@ Run: cd pipecat && python -m pytest tests/test_live_simulation.py -v -m llm_simu
 
 import asyncio
 import os
+import re
 import uuid
 
 import pytest
+import pytest_asyncio
 
 from tests.simulation.fixtures import (
     TestSenior,
@@ -28,9 +30,20 @@ from tests.simulation.fixtures import (
 )
 from tests.simulation.runner import run_simulated_call
 from tests.simulation.scenarios import (
+    async_search_overlap_scenario,
+    cognitive_confusion_scenario,
+    consent_decline_scenario,
+    consent_grant_scenario,
+    discovery_scenario,
+    embedding_outage_scenario,
+    false_goodbye_scenario,
+    health_concern_scenario,
+    low_engagement_scenario,
     memory_recall_scenario,
     memory_seed_scenario,
+    multiple_reminders_scenario,
     reminder_scenario,
+    reminder_creation_scenario,
     web_search_scenario,
 )
 
@@ -52,12 +65,57 @@ pytestmark = [
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def test_senior():
-    """Seed a test senior and clean up after the test."""
-    senior = await seed_test_senior()
-    yield senior
-    await cleanup_test_senior(senior.id)
+    """Seed a test senior and clean up after the test.
+
+    Uses pytest_asyncio.fixture (not pytest.fixture) so the async generator
+    is materialised correctly under pytest-asyncio strict mode (1.x).
+    The DB pool is closed after each test because asyncpg pools are bound to
+    the event loop that created them, while pytest-asyncio gives these tests
+    fresh loops.
+    """
+    from db import close_pool
+
+    senior = _fresh_test_senior()
+    try:
+        await seed_test_senior(senior)
+        yield senior
+    finally:
+        await cleanup_test_senior(senior.id)
+        await close_pool()
+
+
+def _fresh_test_senior(template: TestSenior | None = None) -> TestSenior:
+    """Create an isolated senior profile for a live simulation run."""
+    template = template or TestSenior()
+    unique_suffix = uuid.uuid4().hex[:8]
+    return TestSenior(
+        id=str(uuid.uuid4()),
+        name=f"{template.name.split()[0]} Sim-{unique_suffix[:6]}",
+        phone=f"555{int(unique_suffix, 16) % 10_000_000:07d}",
+        timezone=template.timezone,
+        interests=list(template.interests),
+        profile_notes=template.profile_notes,
+        city=template.city,
+        state=template.state,
+    )
+
+
+async def _run_with_scenario_senior(scenario, *, run_post_call_processing=False):
+    """Run a scenario against its own senior profile and always clean up."""
+    from db import close_pool
+
+    senior = await seed_test_senior(_fresh_test_senior(scenario.senior))
+    try:
+        return await run_simulated_call(
+            scenario,
+            senior=senior,
+            run_post_call_processing=run_post_call_processing,
+        )
+    finally:
+        await cleanup_test_senior(senior.id)
+        await close_pool()
 
 
 # ---------------------------------------------------------------------------
@@ -144,20 +202,21 @@ class TestMemoryAcrossCalls:
         await asyncio.sleep(3)
 
         # Verify memories were saved to DB
-        from db import query
+        from db import query_many
 
-        rows = await query(
+        rows = await query_many(
             """SELECT content FROM memories
                WHERE senior_id = $1
-                 AND source = 'conversation'
+                 AND source = $2
             """,
             uuid.UUID(test_senior.id),
+            seed_result.conversation_id,
         )
 
         # Post-call should have extracted at least one memory
         assert rows is not None and len(rows) > 0, (
             "Expected post-call memory extraction to save at least one "
-            "memory with source='conversation'"
+            "memory linked to the seed conversation"
         )
 
         # -- Call 2: Recall memories --
@@ -194,7 +253,7 @@ class TestMemoryAcrossCalls:
 
 
 class TestReminderAcknowledgment:
-    """Tests that medication reminders are delivered and acknowledged."""
+    """Tests that everyday reminders are delivered and acknowledged."""
 
     @pytest.mark.asyncio
     async def test_reminder_delivered_and_acknowledged(
@@ -203,9 +262,9 @@ class TestReminderAcknowledgment:
         """Run the reminder scenario and verify tool call + mention.
 
         The reminder scenario is a ``call_type="reminder"`` call where
-        Margaret receives a metformin reminder and acknowledges it.
+        Margaret receives a household reminder and acknowledges it.
         The pipeline should invoke ``mark_reminder_acknowledged`` and
-        mention the medication in Donna's speech.
+        mention the reminder in Donna's speech.
         """
         scenario = reminder_scenario()
         result = await run_simulated_call(
@@ -214,22 +273,137 @@ class TestReminderAcknowledgment:
             run_post_call_processing=False,
         )
 
+        # Donna should bring up the reminder in the opening hello/intro.
+        opening_text = (result.initial_donna_text or "").lower()
+        assert _mentions_reminder(opening_text), (
+            "Expected Donna's opening greeting to naturally include the "
+            f"reminder. Opening: {opening_text[:500]}"
+        )
+
         # The mark_reminder_acknowledged tool should have been called
         assert "mark_reminder_acknowledged" in result.tool_calls_made, (
             f"Expected 'mark_reminder_acknowledged' in tool calls, "
             f"got: {result.tool_calls_made}"
         )
 
-        # Donna should mention metformin or medication in her responses
+        # Donna should bring up the reminder before Margaret acknowledges it.
+        first_ack_turn = _first_reminder_acknowledgement_turn(result.turns)
+        assert first_ack_turn is not None, (
+            "Expected the simulated senior to acknowledge the reminder"
+        )
+        donna_before_ack = " ".join([
+            opening_text,
+            *(
+                t["donna"].lower()
+                for t in result.turns[:first_ack_turn]
+                if t.get("donna")
+            ),
+        ])
+        assert _mentions_reminder(donna_before_ack), (
+            "Expected Donna to surface the reminder before the senior "
+            f"acknowledged it. Donna before ack: {donna_before_ack[:500]}"
+        )
+
+        # Donna should mention the household reminder somewhere in the call.
         donna_text = " ".join(
             t["donna"].lower()
             for t in result.turns
             if t.get("donna")
         )
-        assert "metformin" in donna_text or "medication" in donna_text, (
-            f"Expected Donna to mention 'metformin' or 'medication'. "
+        assert "plants" in donna_text or "water" in donna_text, (
+            "Expected Donna to mention the plant-watering reminder. "
             f"Donna said: {donna_text[:500]}"
         )
+
+    @pytest.mark.asyncio
+    async def test_multiple_reminders_brought_up_in_opening(
+        self, test_senior: TestSenior
+    ):
+        """Donna should surface every pending reminder in the opening."""
+        scenario = multiple_reminders_scenario()
+        result = await run_simulated_call(
+            scenario,
+            senior=test_senior,
+            run_post_call_processing=False,
+        )
+
+        opening_text = (result.initial_donna_text or "").lower()
+        assert _mentions_multiple_reminders(opening_text), (
+            "Expected Donna's opening greeting to include every pending "
+            f"reminder. Opening: {opening_text[:700]}"
+        )
+
+        caller_text = " ".join(
+            turn.get("caller", "").lower() for turn in result.turns
+        )
+        assert "plants" in caller_text
+        assert "bridge" in caller_text or "eleanor" in caller_text
+
+        ack_calls = [
+            call
+            for call in result.tool_call_details
+            if call.get("name") == "mark_reminder_acknowledged"
+        ]
+        ack_values = {
+            str((call.get("args") or {}).get("reminder_id") or "").lower()
+            for call in ack_calls
+        }
+        missing = [
+            reminder
+            for reminder in scenario.reminders
+            if not _ack_values_match_reminder(ack_values, reminder)
+        ]
+        assert not missing, (
+            "Expected an acknowledgement call for each reminder. "
+            f"Missing={missing}, got={ack_calls}"
+        )
+
+
+def _first_reminder_acknowledgement_turn(turns: list[dict]) -> int | None:
+    """Return the first turn index where the caller acknowledges the reminder."""
+    for index, turn in enumerate(turns):
+        caller = (turn.get("caller") or "").lower()
+        if "plants" in caller and any(
+            word in caller for word in ("water", "watering", "reminding")
+        ):
+            return index
+    return None
+
+
+def _mentions_reminder(text: str) -> bool:
+    """Return whether Donna brought up the reminder content."""
+    lowered = text.lower()
+    return any(
+        phrase in lowered
+        for phrase in ("plants", "porch", "water", "watering", "reminder")
+    )
+
+
+def _mentions_multiple_reminders(text: str) -> bool:
+    """Return whether Donna brought up both multi-reminder items."""
+    lowered = text.lower()
+    mentions_plants = "plants" in lowered or "porch" in lowered or "water" in lowered
+    mentions_bridge = "bridge" in lowered or "eleanor" in lowered
+    mentions_time = "9" in lowered or "nine" in lowered or "tomorrow" in lowered
+    return mentions_plants and mentions_bridge and mentions_time
+
+
+def _ack_values_match_reminder(ack_values: set[str], reminder: dict) -> bool:
+    """Accept stored IDs, exact titles, or readable title slugs."""
+    expected_id = str(reminder.get("id") or "").lower()
+    title = str(reminder.get("title") or "").lower()
+    title_tokens = {
+        token
+        for token in re.findall(r"[a-z0-9]+", title)
+        if len(token) > 2 and token not in {"the", "about", "and", "with", "for"}
+    }
+    for value in ack_values:
+        if value in {expected_id, title}:
+            return True
+        value_tokens = set(re.findall(r"[a-z0-9]+", value))
+        if title_tokens and title_tokens <= value_tokens:
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -272,3 +446,290 @@ class TestCallMetrics:
             assert lat < 60_000, (
                 f"Latency {lat:.0f}ms exceeds 60s — likely a hang"
             )
+
+
+# ---------------------------------------------------------------------------
+# TestConsentCall
+# ---------------------------------------------------------------------------
+
+
+class TestConsentCall:
+    """End-to-end consent flow: run a simulated call, verify DB writes.
+
+    These tests are the answer to "did the consent flow actually update the
+    database correctly?". They:
+      1. Seed a TestSenior — defaults to consent_status='pending' via the
+         column DEFAULT from migration 014.
+      2. Run consent_grant_scenario / consent_decline_scenario through the
+         real pipeline (real Claude Haiku, real Director-bypass path, real
+         Pipecat Flows, real DB tool handler).
+      3. Assert senior_consents has the expected rows and seniors has the
+         expected rolled-up state.
+
+    These calls exercise the record_consent_response tool, which is the
+    only way two rows land in senior_consents during a consent call.
+    """
+
+    @pytest.mark.asyncio
+    async def test_consent_grant_persists_one_row_and_rolls_up_granted(
+        self, test_senior: TestSenior
+    ):
+        """consent_grant: combined yes → senior_consents has 1 granted row
+        (consent_type='call_and_recording'), seniors.consent_status='granted',
+        seniors.callable=true."""
+        from db import query_many, query_one
+
+        # Sanity check the precondition: a fresh test senior starts pending.
+        # The migration backfilled existing seniors to 'granted', but newly
+        # inserted seniors get the DEFAULT 'pending' value.
+        before = await query_one(
+            "SELECT consent_status, callable FROM seniors WHERE id = $1",
+            uuid.UUID(test_senior.id),
+        )
+        assert before["consent_status"] == "pending", (
+            f"Test fixture should start at 'pending', got {before['consent_status']}"
+        )
+        assert before["callable"] is True
+
+        # Run the simulated call. Post-call processing OFF — consent calls
+        # already skip the heavy post-call analysis path, and we don't need
+        # any of it for this assertion.
+        scenario = consent_grant_scenario()
+        result = await run_simulated_call(
+            scenario,
+            senior=test_senior,
+            run_post_call_processing=False,
+        )
+
+        # Give the in-transaction tool handler a tick to settle (DB writes
+        # happen synchronously inside the handler, so this is belt-and-braces).
+        await asyncio.sleep(0.5)
+
+        # 1. Single-decision model: exactly one row, granted=true.
+        consent_rows = await query_many(
+            """SELECT consent_type, granted, captured_at
+               FROM senior_consents
+               WHERE senior_id = $1
+               ORDER BY captured_at""",
+            uuid.UUID(test_senior.id),
+        )
+        assert consent_rows and len(consent_rows) == 1, (
+            f"Expected exactly one senior_consents row, got {len(consent_rows or [])}. "
+            f"Tool calls: {result.tool_calls_made}"
+        )
+        row = consent_rows[0]
+        assert row["consent_type"] == "call_and_recording", (
+            f"Expected consent_type='call_and_recording', got {row['consent_type']}"
+        )
+        assert row["granted"] is True
+
+        # 2. Rolled-up seniors columns should reflect granted.
+        after = await query_one(
+            """SELECT consent_status, callable, consent_date
+               FROM seniors WHERE id = $1""",
+            uuid.UUID(test_senior.id),
+        )
+        assert after["consent_status"] == "granted", (
+            f"Expected consent_status='granted', got {after['consent_status']}"
+        )
+        assert after["callable"] is True
+        assert after["consent_date"] is not None
+
+        # 3. The tool actually fired (this is what the integration is proving).
+        assert "record_consent_response" in result.tool_calls_made, (
+            f"Expected record_consent_response to be called. "
+            f"Got tool_calls={result.tool_calls_made}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_consent_decline_flips_callable_false(
+        self, test_senior: TestSenior
+    ):
+        """consent_decline scenario: combined no → senior_consents has 1
+        granted=false row, seniors.consent_status='declined', callable=false."""
+        from db import query_many, query_one
+
+        scenario = consent_decline_scenario()
+        result = await run_simulated_call(
+            scenario,
+            senior=test_senior,
+            run_post_call_processing=False,
+        )
+
+        await asyncio.sleep(0.5)
+
+        # Single-decision model: exactly one row, granted=false.
+        consent_rows = await query_many(
+            """SELECT consent_type, granted
+               FROM senior_consents
+               WHERE senior_id = $1
+               ORDER BY captured_at""",
+            uuid.UUID(test_senior.id),
+        )
+        assert consent_rows and len(consent_rows) == 1, (
+            f"Expected exactly one senior_consents row, got {len(consent_rows or [])}. "
+            f"Tool calls: {result.tool_calls_made}"
+        )
+        row = consent_rows[0]
+        assert row["consent_type"] == "call_and_recording"
+        assert row["granted"] is False, (
+            "Persona declined — granted should be False"
+        )
+
+        # Rolled-up state: declined consent flips both consent_status and the
+        # callable gate the scheduler reads.
+        after = await query_one(
+            "SELECT consent_status, callable FROM seniors WHERE id = $1",
+            uuid.UUID(test_senior.id),
+        )
+        assert after["consent_status"] == "declined", (
+            f"Expected consent_status='declined', got {after['consent_status']}"
+        )
+        assert after["callable"] is False, (
+            "callable should flip to false on consent decline — "
+            "this is what gates the scheduler from dispatching"
+        )
+
+
+# ---------------------------------------------------------------------------
+# TestDiscoveryCall
+# ---------------------------------------------------------------------------
+
+
+class TestDiscoveryCall:
+    """End-to-end discovery flow: verify facts land in memories AND the
+    caregiver-reviewable profile_suggestions JSONB on conversations."""
+
+    @pytest.mark.asyncio
+    async def test_discovery_writes_profile_suggestions_and_memories(
+        self, test_senior: TestSenior
+    ):
+        """discovery_scenario: senior shares friends, routines, family.
+        Expect record_discovery_fact invoked multiple times; post-call
+        snapshots the buffer to conversations.profile_suggestions."""
+        from db import query_many, query_one
+
+        scenario = discovery_scenario()
+        # Post-call processing ON — that's what writes profile_suggestions.
+        result = await run_simulated_call(
+            scenario,
+            senior=test_senior,
+            run_post_call_processing=True,
+        )
+
+        # The async memory.store + post-call writer both run in the
+        # background; give them time to settle.
+        await asyncio.sleep(3)
+
+        # 1. The discovery tool actually fired.
+        assert "record_discovery_fact" in result.tool_calls_made, (
+            f"Expected record_discovery_fact tool call. "
+            f"Got tool_calls={result.tool_calls_made}"
+        )
+
+        # 2. The most recent conversation for this senior should have a
+        #    populated profile_suggestions payload.
+        conv = await query_one(
+            """SELECT id, profile_suggestions
+               FROM conversations
+               WHERE senior_id = $1
+               ORDER BY started_at DESC
+               LIMIT 1""",
+            uuid.UUID(test_senior.id),
+        )
+        assert conv is not None, "Expected at least one conversation row"
+        assert conv["profile_suggestions"] is not None, (
+            "Expected profile_suggestions to be written by the discovery "
+            "post-call writer"
+        )
+
+        # Payload is asyncpg-decoded JSONB → dict in Python.
+        payload = conv["profile_suggestions"]
+        if isinstance(payload, str):
+            import json
+            payload = json.loads(payload)
+        facts = payload.get("facts") or []
+        assert len(facts) > 0, (
+            f"Expected at least one captured discovery fact, got {payload}"
+        )
+        # Categories should be valid enums.
+        valid_cats = {"friend", "hobby", "interest", "routine", "family"}
+        for f in facts:
+            assert f.get("category") in valid_cats, (
+                f"Unexpected category {f.get('category')} in {f}"
+            )
+
+        # 3. record_discovery_fact also writes into memories (fire-and-forget).
+        memory_rows = await query_many(
+            """SELECT id FROM memories
+               WHERE senior_id = $1
+                 AND metadata->>'discovery_category' IS NOT NULL""",
+            uuid.UUID(test_senior.id),
+        )
+        assert memory_rows is not None and len(memory_rows) > 0, (
+            "Expected at least one memory row tagged with discovery_category. "
+            "The background memory.store may have raced past the test window — "
+            "if this flakes, bump the sleep above."
+        )
+
+
+# ---------------------------------------------------------------------------
+# TestAdditionalSituations
+# ---------------------------------------------------------------------------
+
+
+class TestAdditionalSituations:
+    """Live-sim coverage for the expanded mock-call situation catalog."""
+
+    @pytest.mark.asyncio
+    async def test_embedding_outage_degrades_gracefully(self):
+        scenario = embedding_outage_scenario()
+        result = await _run_with_scenario_senior(scenario)
+
+        assert result.end_reason not in {"no_greeting", "timeout"}
+        assert len(result.turns) >= 2
+        assert result.injected_memories == []
+
+    @pytest.mark.asyncio
+    async def test_false_goodbye_does_not_end_immediately(self):
+        scenario = false_goodbye_scenario()
+        result = await _run_with_scenario_senior(scenario)
+
+        assert result.end_reason not in {"no_greeting", "timeout"}
+        assert len(result.turns) >= 2, (
+            "Expected conversation to continue after the mid-call neighbor goodbye"
+        )
+
+    @pytest.mark.parametrize(
+        "scenario_factory",
+        [
+            low_engagement_scenario,
+            health_concern_scenario,
+            cognitive_confusion_scenario,
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_behavioral_scenarios_complete_without_hanging(self, scenario_factory):
+        scenario = scenario_factory()
+        result = await _run_with_scenario_senior(scenario)
+
+        assert result.end_reason not in {"no_greeting", "timeout"}
+        assert len(result.turns) >= 2
+
+    @pytest.mark.asyncio
+    async def test_reminder_creation_invokes_tool(self):
+        scenario = reminder_creation_scenario()
+        result = await _run_with_scenario_senior(scenario)
+
+        assert "create_reminder" in result.tool_calls_made, (
+            f"Expected create_reminder tool call, got {result.tool_calls_made}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_async_search_overlap_invokes_search(self):
+        scenario = async_search_overlap_scenario()
+        result = await _run_with_scenario_senior(scenario)
+
+        assert "web_search" in result.tool_calls_made, (
+            f"Expected web_search tool call, got {result.tool_calls_made}"
+        )

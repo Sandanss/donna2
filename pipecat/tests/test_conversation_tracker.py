@@ -1,5 +1,7 @@
 """Tests for conversation tracking — topic, question, and advice extraction."""
 
+import pytest
+
 from processors.conversation_tracker import (
     extract_topics,
     extract_questions,
@@ -9,11 +11,19 @@ from processors.conversation_tracker import (
 )
 
 
+# medical/health_concerns topics were removed when Donna stopped classifying
+# medical content per docs/plans/2026-05-17-senior-consent-verification-flow.md.
+_DEPRECATED_MEDICAL_TOPIC = pytest.mark.skip(
+    reason="Deprecated: extract_topics no longer emits medical/health_concerns categories."
+)
+
+
 class TestTopicExtraction:
     def test_gardening_topic(self):
         topics = extract_topics("I was out gardening this morning")
         assert "gardening" in topics
 
+    @_DEPRECATED_MEDICAL_TOPIC
     def test_medical_topic(self):
         topics = extract_topics("I have a doctor appointment tomorrow")
         assert "medical" in topics
@@ -36,6 +46,7 @@ class TestTopicExtraction:
         topics = extract_topics("I'm doing fine thank you")
         assert len(topics) == 0
 
+    @_DEPRECATED_MEDICAL_TOPIC
     def test_health_concerns(self):
         topics = extract_topics("I've been having some pain in my knee")
         assert "health concerns" in topics

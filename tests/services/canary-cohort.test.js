@@ -71,6 +71,7 @@ describe('canary-cohort', () => {
       const auditWriter = vi.fn(async () => undefined);
       const expectedRow = { ...insertedRow };
       delete expectedRow.__was_inserted;
+      delete expectedRow.notes;
 
       const row = await addToCanary(
         { seniorId: VALID_UUID_A, rampPhase: '5', addedBy: 'admin-1' },
@@ -79,6 +80,7 @@ describe('canary-cohort', () => {
 
       expect(row).toEqual(expectedRow);
       expect(db.execute).toHaveBeenCalledTimes(1);
+      expect(JSON.stringify(db.execute.mock.calls[0][0])).not.toContain('notes');
 
       await new Promise((r) => setTimeout(r, 0));
       expect(auditWriter).toHaveBeenCalledWith(expect.objectContaining({
@@ -106,6 +108,7 @@ describe('canary-cohort', () => {
       });
       const expectedRow = { ...insertedRow };
       delete expectedRow.__was_inserted;
+      delete expectedRow.notes;
 
       const row = await addToCanary(
         { seniorId: VALID_UUID_A, rampPhase: '5', addedBy: 'admin-1' },
@@ -131,6 +134,7 @@ describe('canary-cohort', () => {
       const auditWriter = vi.fn(async () => undefined);
       const expectedRow = { ...existingRow };
       delete expectedRow.__was_inserted;
+      delete expectedRow.notes;
 
       const row = await addToCanary(
         { seniorId: VALID_UUID_A, rampPhase: '5', addedBy: 'admin-1' },
@@ -218,15 +222,19 @@ describe('canary-cohort', () => {
       expect(db.execute).toHaveBeenCalledTimes(1);
     });
 
-    it('returns rows from the DB in execute order', async () => {
+    it('returns rows from the DB in execute order without free-form notes', async () => {
       const rows = [
-        { senior_id: VALID_UUID_A, ramp_phase: '5', added_at: '2026-05-24T00:00:00Z' },
-        { senior_id: VALID_UUID_B, ramp_phase: '10', added_at: '2026-05-24T01:00:00Z' },
+        { senior_id: VALID_UUID_A, ramp_phase: '5', added_at: '2026-05-24T00:00:00Z', notes: 'PHI_SENTINEL_SHOULD_NOT_EMIT' },
+        { senior_id: VALID_UUID_B, ramp_phase: '10', added_at: '2026-05-24T01:00:00Z', notes: null },
       ];
       const db = database([rows]);
 
       const members = await listActiveCanaryMembers({}, { database: db });
-      expect(members).toEqual(rows);
+      expect(members).toEqual([
+        { senior_id: VALID_UUID_A, ramp_phase: '5', added_at: '2026-05-24T00:00:00Z' },
+        { senior_id: VALID_UUID_B, ramp_phase: '10', added_at: '2026-05-24T01:00:00Z' },
+      ]);
+      expect(JSON.stringify(members)).not.toContain('PHI_SENTINEL');
     });
   });
 

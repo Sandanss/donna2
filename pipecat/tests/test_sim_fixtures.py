@@ -40,7 +40,7 @@ class TestTestSenior:
         assert "gardening" in senior.interests
         assert "crossword puzzles" in senior.interests
         assert len(senior.interests) == 5
-        assert "diabetes" in senior.medical_notes.lower()
+        assert "gentle reminders" in senior.profile_notes.lower()
 
     def test_id_is_valid_uuid(self):
         senior = TestSenior()

@@ -60,6 +60,12 @@ function normalizeRemovedReason(value) {
   return reason;
 }
 
+function stripCanaryRow(row) {
+  if (!row) return row;
+  const { notes: _notes, ...safeRow } = row;
+  return safeRow;
+}
+
 /**
  * Add a senior to the active canary cohort. Idempotent: if the senior is
  * already active in any phase, the existing row is returned unchanged.
@@ -68,7 +74,7 @@ function normalizeRemovedReason(value) {
  * per senior exists at a time.
  */
 export async function addToCanary(
-  { seniorId, rampPhase, addedBy = null, notes = null } = {},
+  { seniorId, rampPhase, addedBy = null } = {},
   { database = db, auditWriter = writeAudit } = {},
 ) {
   const id = requireSeniorId(seniorId);
@@ -79,8 +85,8 @@ export async function addToCanary(
   // still allowing historical removed rows.
   const result = await database.execute(sql`
     WITH inserted AS (
-      INSERT INTO canary_cohort_membership (senior_id, ramp_phase, added_by, notes)
-      VALUES (${id}, ${phase}, ${addedBy}, ${notes})
+      INSERT INTO canary_cohort_membership (senior_id, ramp_phase, added_by)
+      VALUES (${id}, ${phase}, ${addedBy})
       ON CONFLICT (senior_id) WHERE removed_at IS NULL DO NOTHING
       RETURNING *, true AS "__was_inserted"
     ),
@@ -104,6 +110,7 @@ export async function addToCanary(
 
   const wasInserted = row.__was_inserted === true;
   delete row.__was_inserted;
+  const safeRow = stripCanaryRow(row);
 
   // Audit only on real insert (existing rows aren't a state change).
   if (wasInserted) {
@@ -117,7 +124,7 @@ export async function addToCanary(
     })).catch((err) => log.warn('Canary add audit failed', { error: err?.message }));
   }
 
-  return row;
+  return safeRow;
 }
 
 /**
@@ -162,13 +169,13 @@ export async function removeFromCanary(
 export async function listActiveCanaryMembers({ limit = 500 } = {}, { database = db } = {}) {
   const safeLimit = Math.max(1, Math.min(2000, Number.parseInt(limit, 10) || 500));
   const result = await database.execute(sql`
-    SELECT senior_id, ramp_phase, added_at, added_by, notes
+    SELECT senior_id, ramp_phase, added_at, added_by
     FROM canary_cohort_membership
     WHERE removed_at IS NULL
     ORDER BY added_at DESC
     LIMIT ${safeLimit}
   `);
-  return rowsFrom(result);
+  return rowsFrom(result).map(stripCanaryRow);
 }
 
 /**

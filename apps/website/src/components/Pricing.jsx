@@ -34,7 +34,7 @@ export default function Pricing({ onOpenWaitlist }) {
             </li>
             <li>
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M13.3 4.7L6.5 11.5L2.7 7.7" stroke="#5F7464" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-              Full reminders functionality
+              Everyday reminders functionality
             </li>
             <li>
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M13.3 4.7L6.5 11.5L2.7 7.7" stroke="#5F7464" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
@@ -46,7 +46,7 @@ export default function Pricing({ onOpenWaitlist }) {
             </li>
             <li>
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M13.3 4.7L6.5 11.5L2.7 7.7" stroke="#5F7464" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-              Instant alerts if calls are missed
+              Missed call notifications
             </li>
             <li>
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M13.3 4.7L6.5 11.5L2.7 7.7" stroke="#5F7464" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>

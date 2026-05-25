@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   PIPECAT_HEARTBEAT_KEY_PREFIX,
   PIPECAT_QUEUE_RESERVATION_KEY_PREFIX,
+  PIPECAT_RESERVATION_SLOT_KEY_PREFIX,
   PIPECAT_RESERVATION_KEY_PREFIX,
   acquirePipecatCapacityReservation,
   buildPipecatCapacityReservation,
@@ -213,5 +214,65 @@ describe('Pipecat capacity registry', () => {
       backend: 'injected',
     }));
     expect(calls.some(parts => parts[0] === 'SET' && parts.includes('NX'))).toBe(true);
+  });
+
+  it('bounds concurrent reservations with Redis slot claims', async () => {
+    const store = new Map();
+    const command = async (...parts) => {
+      if (parts[0] === 'SET') {
+        const [, key, value] = parts;
+        const nx = parts.includes('NX');
+        if (nx && store.has(key)) return null;
+        store.set(key, value);
+        return 'OK';
+      }
+      if (parts[0] === 'GET') {
+        return store.get(parts[1]) ?? null;
+      }
+      if (parts[0] === 'DEL') {
+        let deleted = 0;
+        for (const key of parts.slice(1)) {
+          if (store.delete(key)) deleted++;
+        }
+        return deleted;
+      }
+      throw new Error(`unexpected command ${parts[0]}`);
+    };
+
+    const first = await acquirePipecatCapacityReservation({
+      reservationId: 'reservation-1',
+      queueId: 'queue-1',
+      maxReservations: 1,
+      command,
+    });
+
+    expect(first.acquired).toBe(true);
+    expect(first.slotKey).toBe(`${PIPECAT_RESERVATION_SLOT_KEY_PREFIX}0`);
+    expect(store.has(`${PIPECAT_RESERVATION_SLOT_KEY_PREFIX}0`)).toBe(true);
+
+    const second = await acquirePipecatCapacityReservation({
+      reservationId: 'reservation-2',
+      queueId: 'queue-2',
+      maxReservations: 1,
+      command,
+    });
+
+    expect(second).toEqual(expect.objectContaining({
+      acquired: false,
+      reason: 'capacity_full',
+    }));
+    expect(store.has(`${PIPECAT_QUEUE_RESERVATION_KEY_PREFIX}queue-2`)).toBe(false);
+
+    const released = await releasePipecatCapacityReservation({
+      reservationId: 'reservation-1',
+      queueId: 'queue-1',
+      command,
+    });
+
+    expect(released).toEqual(expect.objectContaining({
+      released: true,
+      deleted: 3,
+    }));
+    expect(store.has(`${PIPECAT_RESERVATION_SLOT_KEY_PREFIX}0`)).toBe(false);
   });
 });

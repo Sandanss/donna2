@@ -1,7 +1,7 @@
 """Post-call processing — runs after the telephony client disconnects.
 
-Orchestrates: conversation completion, call analysis (Gemini Flash),
-memory extraction, daily context save, reminder cleanup, and cache clearing.
+    Orchestrates: conversation completion, call analysis (Gemini Flash),
+    memory extraction, daily context save, reminder cleanup, and cache clearing.
 
 Extracted from bot.py to keep the pipeline assembly module focused.
 """
@@ -29,6 +29,24 @@ def _is_undefined_column_error(exc: Exception) -> bool:
 
 def _is_unique_violation_error(exc: Exception) -> bool:
     return getattr(exc, "sqlstate", None) == "23505" or exc.__class__.__name__ == "UniqueViolationError"
+
+
+def _mark_call_metrics_persisted(
+    session_state: dict,
+    *,
+    tools_used: list,
+    context_trace: dict | None,
+    context_trace_encrypted: bool,
+    error_count: int,
+) -> None:
+    """Expose a PHI-safe metrics persistence summary for tests and simulators."""
+    session_state["_post_call_metrics_persisted"] = {
+        "persisted": True,
+        "tools_used": list(tools_used or []),
+        "context_event_count": int((context_trace or {}).get("event_count") or 0),
+        "context_trace_encrypted": bool(context_trace_encrypted),
+        "error_count": int(error_count or 0),
+    }
 
 
 def _call_started_at(session_state: dict) -> datetime | None:
@@ -188,6 +206,34 @@ def _infer_reminder_ack_from_transcript(session_state: dict, transcript: list | 
     return None
 
 
+async def _save_discovery_profile_suggestions(
+    session_state: dict,
+    conversation_id: str | None,
+) -> None:
+    """Snapshot the in-call _discovery_facts buffer to conversations.profile_suggestions.
+
+    Skipped quietly if there's nothing to save or no conversation_id — both
+    are normal (very short discovery call, or a test harness without DB).
+    """
+    if not conversation_id:
+        return
+    facts = session_state.get("_discovery_facts") or []
+    if not facts:
+        return
+    from services.conversations import save_profile_suggestions
+    from datetime import datetime, timezone
+    payload = {
+        "captured_at": datetime.now(timezone.utc).isoformat(),
+        "facts": facts,
+    }
+    await save_profile_suggestions(conversation_id, payload)
+    logger.info(
+        "[discovery] Saved {n} profile_suggestions for conversation {cid}",
+        n=len(facts),
+        cid=str(conversation_id)[:8],
+    )
+
+
 async def run_post_call(
     session_state: dict,
     conversation_tracker,
@@ -237,6 +283,10 @@ async def run_post_call(
                 "duration_seconds": duration_seconds,
                 "status": "completed",
                 "transcript": transcript,
+                # Telemetry (migration 020): plumbed from QO / AMD handler.
+                "amd_result": session_state.get("_amd_result"),
+                "goodbye_detected_at": session_state.get("_goodbye_detected_at"),
+                "end_reason": session_state.get("_end_reason"),
             })
     except Exception as e:
         post_call_error_steps.append("complete conversation")
@@ -249,6 +299,20 @@ async def run_post_call(
     except Exception as e:
         post_call_error_steps.append("caregiver note delivery check")
         logger.error("[{cs}] Post-call caregiver note delivery check failed: {err}", cs=call_sid, err=str(e))
+
+    # Discovery calls: persist captured facts as caregiver-reviewable
+    # profile_suggestions. The in-call tool also writes to memories
+    # (fire-and-forget) so the next call has the facts; this column is for
+    # the caregiver-review surface.
+    if session_state.get("call_type") == "discovery":
+        try:
+            await _save_discovery_profile_suggestions(session_state, conversation_id)
+        except Exception as e:
+            post_call_error_steps.append("save discovery profile suggestions")
+            logger.error(
+                "[{cs}] Post-call save discovery profile suggestions failed: {err}",
+                cs=call_sid, err=str(e),
+            )
 
     # --- Parallel group: independent steps (2, 3, 5, 6) ---
     async def _step2_analysis():
@@ -264,10 +328,24 @@ async def run_post_call(
         if conversation_id and senior_id:
             await save_call_analysis(conversation_id, senior_id, result)
         summary = result.get("summary") if result else None
-        if summary and summary != "Analysis unavailable":
+        sentiment = result.get("sentiment") if result else None
+        has_real_summary = summary and summary != "Analysis unavailable"
+        if has_real_summary:
             from services.conversations import update_summary
-            await update_summary(call_sid, summary, result.get("sentiment"))
+            await update_summary(call_sid, summary, sentiment)
             logger.info("[{cs}] Persisted call summary ({n} chars)", cs=call_sid, n=len(summary))
+        elif sentiment:
+            # Fallback path: analysis failed (Gemini JSON parse error, API
+            # outage, etc.) and _get_default_analysis returned sentiment=
+            # 'neutral'. Persist the sentiment anyway so the conversation
+            # row reflects that we tried. Empty summary stays empty.
+            from services.conversations import update_sentiment
+            await update_sentiment(call_sid, sentiment)
+            logger.info(
+                "[{cs}] Persisted fallback sentiment={s} (summary unavailable)",
+                cs=call_sid,
+                s=sentiment,
+            )
         return result
 
     async def _step3_memory():
@@ -554,6 +632,13 @@ async def _persist_call_metrics(
                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)""",
             *args,
         )
+        _mark_call_metrics_persisted(
+            session_state,
+            tools_used=tools_used,
+            context_trace=context_trace,
+            context_trace_encrypted=bool(context_trace_encrypted),
+            error_count=error_count,
+        )
     except Exception as e:
         if _is_unique_violation_error(e):
             try:
@@ -573,6 +658,13 @@ async def _persist_call_metrics(
                            context_trace_encrypted = $13
                        WHERE call_sid = $1""",
                     *args,
+                )
+                _mark_call_metrics_persisted(
+                    session_state,
+                    tools_used=tools_used,
+                    context_trace=context_trace,
+                    context_trace_encrypted=bool(context_trace_encrypted),
+                    error_count=error_count,
                 )
                 logger.info("[{cs}] Call metrics updated after duplicate insert", cs=call_sid)
             except Exception as update_exc:
@@ -594,6 +686,13 @@ async def _persist_call_metrics(
                        WHERE call_sid = $1""",
                     *args[:-1],
                 )
+                _mark_call_metrics_persisted(
+                    session_state,
+                    tools_used=tools_used,
+                    context_trace=context_trace,
+                    context_trace_encrypted=False,
+                    error_count=error_count,
+                )
                 logger.info("[{cs}] Call metrics updated after duplicate insert without context trace", cs=call_sid)
             return
 
@@ -607,6 +706,13 @@ async def _persist_call_metrics(
                     tools_used, token_usage, error_count)
                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)""",
                 *args[:-1],
+            )
+            _mark_call_metrics_persisted(
+                session_state,
+                tools_used=tools_used,
+                context_trace=context_trace,
+                context_trace_encrypted=False,
+                error_count=error_count,
             )
             logger.warning(
                 "[{cs}] context_trace_encrypted column missing; call metrics persisted without context trace",
@@ -630,6 +736,13 @@ async def _persist_call_metrics(
                        error_count = $12
                    WHERE call_sid = $1""",
                 *args[:-1],
+            )
+            _mark_call_metrics_persisted(
+                session_state,
+                tools_used=tools_used,
+                context_trace=context_trace,
+                context_trace_encrypted=False,
+                error_count=error_count,
             )
             logger.info("[{cs}] Call metrics updated after duplicate insert without context trace", cs=call_sid)
     logger.info(
@@ -773,8 +886,8 @@ async def _summarize_onboarding_call(transcript: list | str, call_sid: str) -> s
         "- Caller's name (if given)\n"
         "- Who they're calling about (parent, grandparent, themselves) and that person's name\n"
         "- What they learned about Donna\n"
-        "- Any concerns or questions they raised\n"
-        "- Any details about the senior (interests, health, living situation)\n"
+        "- Any questions they raised\n"
+        "- Any details about the senior (interests, hobbies, living situation)\n"
         "- Whether they seemed interested in signing up\n\n"
         "Write 2-4 sentences as a brief context note that Donna can reference on the next call. "
         "Be specific — use names and details, not vague summaries.\n\n"
@@ -975,7 +1088,6 @@ async def _trigger_caregiver_notification(
                         "caregiver_sms": analysis.get("caregiver_sms"),
                         "topics": analysis.get("topics_discussed", []),
                         "engagement_score": analysis.get("engagement_score"),
-                        "concerns": analysis.get("concerns", []),
                         "positive_observations": analysis.get(
                             "positive_observations", []
                         ),
@@ -994,52 +1106,3 @@ async def _trigger_caregiver_notification(
                 cs=call_sid,
                 err=str(e),
             )
-
-        # Trigger concern_detected for high-severity concerns
-        for concern in analysis.get("concerns") or []:
-            if isinstance(concern, dict) and concern.get("severity") == "high":
-                try:
-                    response = await _post_notification_with_retry(
-                        client,
-                        f"{node_url}/api/notifications/trigger",
-                        {
-                            "event_type": "concern_detected",
-                            "senior_id": str(senior_id),
-                            "data": {
-                                "call_sid": call_sid,
-                                "concern": _format_concern_for_notification(concern),
-                                "severity": concern.get("severity"),
-                                "type": concern.get("type") or concern.get("category"),
-                                "recommended_action": concern.get("recommended_action"),
-                            },
-                        },
-                        headers,
-                    )
-                    logger.info(
-                        "[{cs}] Triggered concern_detected notification status={status}",
-                        cs=call_sid,
-                        status=response.status_code,
-                    )
-                except Exception as e:
-                    logger.error(
-                        "[{cs}] concern_detected notification failed: {err}",
-                        cs=call_sid,
-                        err=str(e),
-                    )
-
-
-def _format_concern_for_notification(concern: dict) -> str:
-    """Build the Node-expected privacy-bounded concern string."""
-    if not isinstance(concern, dict):
-        return str(concern or "")[:300]
-
-    text_parts = [
-        concern.get("description"),
-        concern.get("summary"),
-        concern.get("concern"),
-        concern.get("recommended_action"),
-    ]
-    text = " ".join(str(part).strip() for part in text_parts if part).strip()
-    if not text:
-        text = "High-severity concern detected during Donna's call."
-    return text[:300]

@@ -47,6 +47,8 @@ const harness = vi.hoisted(() => {
     authToRole: vi.fn(() => 'caregiver'),
     initiateTelnyxOutboundCall: vi.fn(),
     endTelnyxCall: vi.fn(),
+    enqueueCall: vi.fn(),
+    resolveCallArchitectureConfig: vi.fn(() => ({ mode: 'legacy_only' })),
     idempotencyMiddleware: vi.fn((_req, _res, next) => next()),
     callLimiter: vi.fn((_req, _res, next) => next()),
   };
@@ -84,6 +86,15 @@ vi.mock('../../../services/telnyx.js', () => ({
   endTelnyxCall: harness.endTelnyxCall,
 }));
 
+vi.mock('../../../services/call-queue.js', async () => {
+  const actual = await vi.importActual('../../../services/call-queue.js');
+  return {
+    ...actual,
+    enqueueCall: harness.enqueueCall,
+    resolveCallArchitectureConfig: harness.resolveCallArchitectureConfig,
+  };
+});
+
 import callsRouter from '../../../routes/calls.js';
 
 const SENIOR_ID = '11111111-1111-4111-8111-111111111111';
@@ -119,6 +130,8 @@ describe('calls route runtime behavior', () => {
       callControlId: 'control-test-1',
     });
     harness.endTelnyxCall.mockResolvedValue({});
+    harness.enqueueCall.mockResolvedValue({ row: { id: 'queue-1' } });
+    harness.resolveCallArchitectureConfig.mockReturnValue({ mode: 'legacy_only' });
   });
 
   it('validates call initiation input before touching senior data', async () => {
@@ -178,6 +191,34 @@ describe('calls route runtime behavior', () => {
       resourceType: 'call',
       metadata: { seniorId: SENIOR_ID },
     }));
+  });
+
+  it('enqueues manual calls behind queue primary instead of bypassing capacity', async () => {
+    harness.resolveCallArchitectureConfig.mockReturnValue({ mode: 'queue_primary' });
+
+    const response = await requestJson(callsRouter, {
+      method: 'POST',
+      path: '/api/call',
+      headers: { 'idempotency-key': 'manual-call-key-12345' },
+      body: { seniorId: SENIOR_ID },
+      configureApp,
+    });
+
+    expect(response.status).toBe(202);
+    expect(response.body).toMatchObject({
+      success: true,
+      queued: true,
+      queueId: 'queue-1',
+      seniorId: SENIOR_ID,
+    });
+    expect(harness.enqueueCall).toHaveBeenCalledWith(expect.objectContaining({
+      seniorId: SENIOR_ID,
+      callType: 'manual',
+      priorityLane: 'manual',
+      priorityScore: 100,
+      requestId: 'manual-call-key-12345',
+    }));
+    expect(harness.initiateTelnyxOutboundCall).not.toHaveBeenCalled();
   });
 
   it('does not initiate calls for inactive seniors', async () => {

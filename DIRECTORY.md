@@ -9,7 +9,12 @@
 | I need to... | Go to |
 |---|---|
 | Change what Donna says / conversation behavior | `pipecat/prompts.py` (prompt text) + `pipecat/flows/nodes.py` (flow logic) |
-| Add or modify LLM tools | `pipecat/flows/tools.py` |
+| Add or modify LLM tools | `pipecat/flows/tools.py` (single `select_flows_tools` dispatch) |
+| Add a new call type | Touch 4 files: `pipecat/prompts.py` (system + task prompts), `pipecat/flows/nodes.py` (`CALL_TYPE_INITIAL_NODES`), `pipecat/flows/tools.py` (`_CALL_TYPE_TOOL_FACTORIES`), and the queue dispatcher (`services/call-queue.js` `QUEUE_TO_PIPECAT_CALL_TYPE`) so old + new architectures both honor it |
+| Change consent capture / audit | `pipecat/services/seniors.py` (`record_consent`) + `db/migrations/014_senior_consents.sql` + `pipecat/flows/tools.py` (`record_consent_response`) |
+| Change discovery facts / profile suggestions | `pipecat/flows/tools.py` (`record_discovery_fact`) + `pipecat/services/post_call.py` (`_save_discovery_profile_suggestions`) + `pipecat/services/conversations.py` (`save_profile_suggestions`) |
+| Gate the scheduler on consent | `services/scheduler.js` (legacy) + `services/call-schedules.js` (materializer); guard column is `seniors.callable` AND `seniors.consent_status` |
+| Send caregiver notification on consent decline | `services/notifications.js` (`onConsentDeclined`) + `routes/notifications.js` (trigger dispatch) + `pipecat/services/seniors.py` (`_notify_consent_declined`) |
 | Change Quick Observer pattern detection | `pipecat/processors/patterns.py` (data) + `pipecat/processors/quick_observer.py` (logic) |
 | Change Conversation Director behavior | `pipecat/processors/conversation_director.py` + `pipecat/services/director_llm.py` |
 | Change how calls end | `pipecat/processors/quick_observer.py` (goodbye) + `pipecat/processors/conversation_director.py` (time limits) |
@@ -121,9 +126,15 @@ pipecat/
 ├── prompts.py           System prompts + phase task instructions
 │
 ├── flows/               Call state machine (Pipecat Flows)
-│   ├── nodes.py         Conditional reminder → main → winding_down → closing (+ onboarding)
+│   ├── nodes.py         Conditional reminder → main → winding_down → closing (+ onboarding, consent, discovery)
+│   │                    CALL_TYPE_INITIAL_NODES dispatch picks the entry node per call_type.
 │   │                    Imports prompts from prompts.py
-│   ├── tools.py         3 active subscriber-call Claude tools (web_search, mark_reminder_acknowledged, create_reminder); onboarding exposes web_search only
+│   ├── tools.py         Tool factories per call type; select_flows_tools(session_state) is the
+│   │                    shared dispatch used by bot.py + tests/simulation/pipeline.py.
+│   │                    Subscriber: web_search, mark_reminder_acknowledged, create_reminder.
+│   │                    Onboarding: web_search only.
+│   │                    Consent: record_consent_response only (single combined ask, idempotent per call).
+│   │                    Discovery: record_discovery_fact + web_search.
 │   └── gemini_tools.py  Gemini Live tool adapter
 │
 ├── processors/          Frame processors in the audio pipeline

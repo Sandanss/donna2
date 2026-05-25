@@ -41,6 +41,7 @@ import { readPipecatCapacityRegistry } from '../services/pipecat-capacity.js';
 import { initGrowthBook, closeGrowthBook } from '../lib/growthbook.js';
 import { getPipecatPublicUrl } from '../lib/security-config.js';
 import { createLogger } from '../lib/logger.js';
+import { resolveMergedCanarySeniorIds } from '../services/canary-cohort.js';
 
 const log = createLogger('DispatcherWorker');
 
@@ -99,7 +100,7 @@ export async function dispatchOnce({ baseUrl }) {
     ? config.canaryPercent
     : 100;
   const canarySeniorIds = config.mode === CALL_ARCHITECTURE_MODES.CANARY_QUEUE
-    ? config.canarySeniorIds
+    ? await resolveMergedCanarySeniorIds(config.canarySeniorIds)
     : [];
 
   const capacityInputs = await loadCapacityInputs(config);

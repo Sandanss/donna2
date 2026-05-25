@@ -41,7 +41,7 @@ class TestSenior:
         phone: 10-digit phone number (not dialled in sim tests).
         timezone: IANA timezone for scheduling logic.
         interests: List of interest strings injected into the system prompt.
-        medical_notes: Medical context available to the pipeline.
+        profile_notes: Profile notes available to the pipeline.
         city: City for weather/news personalisation.
         state: US state abbreviation.
     """
@@ -53,7 +53,7 @@ class TestSenior:
     interests: list[str] = field(default_factory=lambda: [
         "gardening", "cooking", "grandchildren", "bird watching", "crossword puzzles",
     ])
-    medical_notes: str = "Type 2 diabetes, mild arthritis in hands"
+    profile_notes: str = "Prefers gentle reminders and concise check-ins"
     city: str = "Dallas"
     state: str = "TX"
 
@@ -75,6 +75,37 @@ DEFAULT_CACHED_NEWS = (
     "Weather expected to be sunny with highs in the 70s."
 )
 
+_SENIOR_PROFILE_NOTES_COLUMN: str | None = None
+
+
+def _pick_profile_notes_column(columns: set[str]) -> str:
+    """Choose the active senior notes column during the rename migration."""
+    if "profile_notes" in columns:
+        return "profile_notes"
+    if "medical_notes" in columns:
+        return "medical_notes"
+    return "profile_notes"
+
+
+async def _senior_profile_notes_column() -> str:
+    """Return the DB column used for senior profile notes in this environment."""
+    global _SENIOR_PROFILE_NOTES_COLUMN
+    if _SENIOR_PROFILE_NOTES_COLUMN:
+        return _SENIOR_PROFILE_NOTES_COLUMN
+
+    from db import query_many
+
+    rows = await query_many(
+        """SELECT column_name
+             FROM information_schema.columns
+            WHERE table_name = 'seniors'
+              AND column_name IN ('profile_notes', 'medical_notes')"""
+    )
+    _SENIOR_PROFILE_NOTES_COLUMN = _pick_profile_notes_column(
+        {str(row["column_name"]) for row in rows}
+    )
+    return _SENIOR_PROFILE_NOTES_COLUMN
+
 
 # ---------------------------------------------------------------------------
 # seed_test_senior
@@ -92,22 +123,23 @@ async def seed_test_senior(senior: TestSenior | None = None) -> TestSenior:
 
     Returns the ``TestSenior`` instance (with its generated ``id``).
     """
-    from db import execute, query_one
+    from db import execute
 
     senior = senior or TestSenior()
+    notes_column = await _senior_profile_notes_column()
 
     # Insert senior -- ON CONFLICT guards against re-runs
     await execute(
-        """INSERT INTO seniors (id, name, phone, timezone, interests,
-               medical_notes, cached_news, is_active)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, true)
-           ON CONFLICT (id) DO NOTHING""",
+        f"""INSERT INTO seniors (id, name, phone, timezone, interests,
+               {notes_column}, cached_news, is_active, consent_status, callable)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, true, 'pending', true)
+            ON CONFLICT (id) DO NOTHING""",
         uuid.UUID(senior.id),
         senior.name,
         senior.phone,
         senior.timezone,
         senior.interests,
-        senior.medical_notes,
+        senior.profile_notes,
         DEFAULT_CACHED_NEWS,
     )
 
@@ -208,7 +240,7 @@ async def build_session_state(
             "phone": senior.phone,
             "timezone": senior.timezone,
             "interests": senior.interests,
-            "medical_notes": senior.medical_notes,
+            "profile_notes": senior.profile_notes,
             "interest_scores": None,
         },
         "memory_context": memory_context,
@@ -253,12 +285,18 @@ async def cleanup_test_senior(senior_id: str) -> None:
     # Child tables that have a direct senior_id column. Phase 1 queue
     # tables may not exist on every environment, so we tolerate missing
     # tables at debug level.
+    #
+    # ORDER MATTERS: conversations comes after every table that has an FK
+    # to conversations.id (post_call_jobs.conversation_id, call_attempts.
+    # conversation_id, call_metrics.conversation_id where present). Otherwise
+    # the conversations DELETE silently fails on FK violation and leaves
+    # rows behind, which then blocks the final seniors DELETE.
     senior_id_tables = [
+        # Tables that may also reference conversations.id — clear first.
         "call_metrics",
         "daily_call_context",
         "call_analyses",
         "memories",
-        "conversations",
         "caregivers",
         "call_attempts",
         "call_queue",
@@ -267,6 +305,9 @@ async def cleanup_test_senior(senior_id: str) -> None:
         "scheduler_shadow_comparisons",
         "senior_call_schedules",
         "canary_cohort_membership",
+        "senior_consents",  # ON DELETE CASCADE on seniors, but explicit is safer
+        # conversations LAST so any conversation_id FKs above are already gone.
+        "conversations",
     ]
     for table in senior_id_tables:
         try:

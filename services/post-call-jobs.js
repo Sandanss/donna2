@@ -816,70 +816,74 @@ export async function executePostCallJob({
 } = {}) {
   if (!job) throw new Error('job is required');
   const owner = requireString(workerId, 'workerId');
-  const running = await markPostCallJobRunning({
-    database,
-    jobId: job.id,
-    workerId: owner,
-    now,
-  });
-  if (!running) {
-    return {
-      jobId: job.id,
-      jobType: job.jobType,
-      status: 'skipped',
-      reason: 'lease_not_owned_or_expired',
-    };
-  }
-
-  const provider = providerForPostCallJobType(running.jobType, { analysisProvider });
-  const handler = handlers[running.jobType] || handlers.default;
+  const jobType = job.jobType || job.job_type;
+  const provider = providerForPostCallJobType(jobType, { analysisProvider });
+  const handler = handlers[jobType] || handlers.default;
   if (!handler) {
     const failed = await failPostCallJob({
       database,
-      jobId: running.id,
+      jobId: job.id,
       workerId: owner,
       errorCode: 'handler_missing',
       now,
     });
     return {
-      jobId: running.id,
-      jobType: running.jobType,
+      jobId: job.id,
+      jobType,
       provider,
       status: failed?.status || POST_CALL_JOB_STATUSES.FAILED,
       errorCode: 'handler_missing',
     };
   }
 
-  try {
-    await providerSemaphores.run(provider, () => handler(running, { provider, workerId: owner }));
-    const completed = await completePostCallJob({
+  return providerSemaphores.run(provider, async () => {
+    const running = await markPostCallJobRunning({
       database,
-      jobId: running.id,
+      jobId: job.id,
       workerId: owner,
-      now: new Date(),
+      now,
     });
-    return {
-      jobId: running.id,
-      jobType: running.jobType,
-      provider,
-      status: completed?.status || POST_CALL_JOB_STATUSES.COMPLETED,
-    };
-  } catch (error) {
-    const failed = await failPostCallJob({
-      database,
-      jobId: running.id,
-      workerId: owner,
-      errorCode: sanitizeCode(error?.code || error?.message || 'handler_failed'),
-      now: new Date(),
-    });
-    return {
-      jobId: running.id,
-      jobType: running.jobType,
-      provider,
-      status: failed?.status || POST_CALL_JOB_STATUSES.FAILED,
-      errorCode: sanitizeCode(error?.code || error?.message || 'handler_failed'),
-    };
-  }
+    if (!running) {
+      return {
+        jobId: job.id,
+        jobType,
+        provider,
+        status: 'skipped',
+        reason: 'lease_not_owned_or_expired',
+      };
+    }
+
+    try {
+      await handler(running, { provider, workerId: owner });
+      const completed = await completePostCallJob({
+        database,
+        jobId: running.id,
+        workerId: owner,
+        now: new Date(),
+      });
+      return {
+        jobId: running.id,
+        jobType: running.jobType,
+        provider,
+        status: completed?.status || POST_CALL_JOB_STATUSES.COMPLETED,
+      };
+    } catch (error) {
+      const failed = await failPostCallJob({
+        database,
+        jobId: running.id,
+        workerId: owner,
+        errorCode: sanitizeCode(error?.code || error?.message || 'handler_failed'),
+        now: new Date(),
+      });
+      return {
+        jobId: running.id,
+        jobType: running.jobType,
+        provider,
+        status: failed?.status || POST_CALL_JOB_STATUSES.FAILED,
+        errorCode: sanitizeCode(error?.code || error?.message || 'handler_failed'),
+      };
+    }
+  });
 }
 
 export async function runPostCallWorkerOnce({

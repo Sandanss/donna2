@@ -104,6 +104,8 @@ const CAPACITY_DECISIONS = new Set([
   'deferred',
 ]);
 
+const AMBIGUOUS_DIAL_ERROR_CODE = 'dial_result_ambiguous';
+
 let queueDispatcherDraining = false;
 const activeQueueDispatches = new Set();
 const inFlightCapacityReservations = new Map();
@@ -1001,7 +1003,7 @@ export async function leaseQueuedCalls({
     WITH candidates AS (
       SELECT id
       FROM call_queue
-      WHERE status = ${CALL_QUEUE_STATUSES.QUEUED}
+      WHERE status IN (${CALL_QUEUE_STATUSES.QUEUED}, ${CALL_QUEUE_STATUSES.DEFERRED})
         ${lane ? sql`AND priority_lane = ${lane}` : sql``}
         ${cohortFilter}
         AND earliest_at <= ${currentTime}
@@ -1048,7 +1050,7 @@ export async function countReadyQueuedCallsByLane({
   const result = await database.execute(sql`
     SELECT priority_lane, COUNT(*)::int AS count
     FROM call_queue
-    WHERE status = ${CALL_QUEUE_STATUSES.QUEUED}
+    WHERE status IN (${CALL_QUEUE_STATUSES.QUEUED}, ${CALL_QUEUE_STATUSES.DEFERRED})
       ${cohortFilter}
       AND earliest_at <= ${currentTime}
       AND latest_at > ${currentTime}
@@ -1196,13 +1198,32 @@ export async function recoverExpiredQueueLeases({
 
   const result = await database.execute(sql`
     WITH candidates AS (
-      SELECT id
-      FROM call_queue
-      WHERE status = ${CALL_QUEUE_STATUSES.LEASED}
-        AND lease_expires_at <= ${currentTime}
-        AND latest_at > ${currentTime}
-      ORDER BY lease_expires_at ASC
-      FOR UPDATE SKIP LOCKED
+      SELECT q.id
+      FROM call_queue q
+      LEFT JOIN call_attempts ca ON ca.id = q.last_attempt_id
+      WHERE q.status IN (${CALL_QUEUE_STATUSES.LEASED}, ${CALL_QUEUE_STATUSES.INITIATING})
+        AND q.lease_expires_at <= ${currentTime}
+        AND q.latest_at > ${currentTime}
+        AND (
+          q.status = ${CALL_QUEUE_STATUSES.LEASED}
+          OR (
+            q.status = ${CALL_QUEUE_STATUSES.INITIATING}
+            AND COALESCE(q.last_error_code, '') <> ${AMBIGUOUS_DIAL_ERROR_CODE}
+            AND NOT EXISTS (
+              SELECT 1
+              FROM outbound_call_guards g
+              WHERE g.queue_id = q.id
+                AND g.status IN ('active', 'initiating', 'initiated')
+            )
+            AND (
+              ca.id IS NULL
+              OR ca.call_control_id IS NULL
+              OR ca.status IN ('failed', 'expired', 'suppressed')
+            )
+          )
+        )
+      ORDER BY q.lease_expires_at ASC
+      FOR UPDATE OF q SKIP LOCKED
       LIMIT ${safeLimit}
     )
     UPDATE call_queue q
@@ -1233,7 +1254,12 @@ export async function expireOverdueQueuedCalls({
     WITH candidates AS (
       SELECT id
       FROM call_queue
-      WHERE status IN (${CALL_QUEUE_STATUSES.QUEUED}, ${CALL_QUEUE_STATUSES.LEASED})
+      WHERE status IN (
+        ${CALL_QUEUE_STATUSES.QUEUED},
+        ${CALL_QUEUE_STATUSES.DEFERRED},
+        ${CALL_QUEUE_STATUSES.LEASED},
+        ${CALL_QUEUE_STATUSES.INITIATING}
+      )
         AND latest_at <= ${currentTime}
       ORDER BY latest_at ASC
       FOR UPDATE SKIP LOCKED
@@ -1288,11 +1314,16 @@ export async function reconcileQueueLeases(options = {}, { database = db } = {})
  * window means the next reconciler cycle inside the same lease window
  * recovers the row.
  */
-export function defaultGuardExpiry({ targetAt, leaseSeconds }) {
+export function defaultGuardExpiry({ targetAt, leaseSeconds, now = null }) {
   const target = targetAt instanceof Date ? targetAt : new Date(targetAt);
+  const current = now == null ? null : now instanceof Date ? now : new Date(now);
+  if (Number.isNaN(target.getTime()) || (current && Number.isNaN(current.getTime()))) {
+    throw new Error('targetAt and now must be valid dates');
+  }
   const lease = Number.isFinite(leaseSeconds) && leaseSeconds > 0 ? Number(leaseSeconds) : 60;
   const cushionSeconds = Math.max(60, 2 * lease + 30);
-  return new Date(target.getTime() + cushionSeconds * 1000);
+  const baseTime = current ? Math.max(target.getTime(), current.getTime()) : target.getTime();
+  return new Date(baseTime + cushionSeconds * 1000);
 }
 
 export async function releaseExpiredOutboundCallGuards({
@@ -1380,7 +1411,11 @@ export async function acquireOutboundCallGuard(input, { database = db } = {}) {
   const architecture = requireString(input.architecture, 'architecture');
   const targetAt = requireDate(input.targetAt, 'targetAt');
   const expiresAt = requireDate(
-    input.expiresAt || defaultGuardExpiry({ targetAt, leaseSeconds: input.leaseSeconds }),
+    input.expiresAt || defaultGuardExpiry({
+      targetAt,
+      leaseSeconds: input.leaseSeconds,
+      now: input.now || null,
+    }),
     'expiresAt',
   );
 
@@ -1407,7 +1442,7 @@ export async function acquireOutboundCallGuard(input, { database = db } = {}) {
       ${expiresAt},
       ${input.status || 'active'}
     )
-    ON CONFLICT (guard_key) DO NOTHING
+    ON CONFLICT (guard_key) WHERE status IN ('active', 'initiating', 'initiated') DO NOTHING
     RETURNING *
   `);
 
@@ -1420,6 +1455,8 @@ export async function acquireOutboundCallGuard(input, { database = db } = {}) {
     SELECT *
     FROM outbound_call_guards
     WHERE guard_key = ${guardKey}
+      AND status IN ('active', 'initiating', 'initiated')
+    ORDER BY updated_at DESC
     LIMIT 1
   `);
 
@@ -1439,6 +1476,7 @@ export async function markOutboundCallGuardInitiated(input, { database = db } = 
         call_control_id = ${input.callControlId || input.call_control_id || null},
         updated_at = NOW()
     WHERE ${selector}
+      AND status = 'initiating'
     RETURNING *
   `);
 
@@ -1457,6 +1495,7 @@ export async function markOutboundCallGuardInitiatingIfCallable(input, { databas
       SELECT g.*
       FROM outbound_call_guards g
       WHERE ${selector}
+        AND g.status = 'active'
       FOR UPDATE
     ),
     callable_guard AS (
@@ -1619,16 +1658,47 @@ export async function markQueuedCallStarted(input, { database = db } = {}) {
 export async function releaseQueuedCallForRetry(input, { database = db } = {}) {
   const queueId = requireString(input.queueId, 'queueId');
   const errorCode = String(input.errorCode || 'dispatch_deferred').slice(0, 200);
+  const currentTime = requireDate(input.now || new Date(), 'now');
+  const safeMaxAttempts = safePositiveInteger(input.maxAttempts, 5, 20);
 
   const result = await database.execute(sql`
     UPDATE call_queue
-    SET status = ${CALL_QUEUE_STATUSES.QUEUED},
+    SET status = CASE
+          WHEN attempt_count >= ${safeMaxAttempts} THEN ${CALL_QUEUE_STATUSES.FAILED}
+          ELSE ${CALL_QUEUE_STATUSES.DEFERRED}
+        END,
         lease_owner = NULL,
         lease_expires_at = NULL,
+        earliest_at = CASE
+          WHEN attempt_count >= ${safeMaxAttempts} THEN earliest_at
+          ELSE ${currentTime}::timestamp + make_interval(secs => CASE
+            WHEN attempt_count <= 0 THEN 30
+            WHEN attempt_count = 1 THEN 60
+            WHEN attempt_count = 2 THEN 120
+            WHEN attempt_count = 3 THEN 300
+            ELSE 900
+          END)
+        END,
         last_error_code = ${errorCode},
         last_error_at = NOW(),
         updated_at = NOW()
     WHERE id = ${queueId}
+    RETURNING *
+  `);
+
+  return rowsFrom(result)[0] || null;
+}
+
+export async function markQueuedCallDispatchAmbiguous(input, { database = db } = {}) {
+  const queueId = requireString(input.queueId, 'queueId');
+
+  const result = await database.execute(sql`
+    UPDATE call_queue
+    SET last_error_code = ${AMBIGUOUS_DIAL_ERROR_CODE},
+        last_error_at = NOW(),
+        updated_at = NOW()
+    WHERE id = ${queueId}
+      AND status = ${CALL_QUEUE_STATUSES.INITIATING}
     RETURNING *
   `);
 
@@ -1741,11 +1811,17 @@ export function buildQueueOutboundCallParams(row, {
   const targetAt = queueRowValue(row, 'targetAt', 'target_at');
   const reminderId = queueRowValue(row, 'reminderId', 'reminder_id');
 
-  const pipecatCallType = callType === 'schedule'
-    ? 'schedule'
-    : callType === 'reminder'
-      ? 'reminder'
-      : 'check-in';
+  // Map queue callType → Pipecat callType. Pass through values that already
+  // exist as Pipecat flow types; everything else (including legacy 'manual')
+  // falls through to the default 'check-in' subscriber flow.
+  const QUEUE_TO_PIPECAT_CALL_TYPE = {
+    schedule: 'schedule',
+    reminder: 'reminder',
+    onboarding: 'onboarding',
+    consent: 'consent',
+    discovery: 'discovery',
+  };
+  const pipecatCallType = QUEUE_TO_PIPECAT_CALL_TYPE[callType] || 'check-in';
 
   const params = {
     seniorId,
@@ -1902,6 +1978,7 @@ export async function dispatchQueuedCalls({
     let guard = null;
     let attempt = null;
     let affinityHintInstanceId = null;
+    let dialAuthorityIssued = false;
     if (affinityEnabled && seniorId) {
       try {
         const hint = await getReplicaAffinityHint(seniorId);
@@ -1924,6 +2001,7 @@ export async function dispatchQueuedCalls({
         await releaseQueuedCallForRetry({
           queueId,
           errorCode: 'dispatcher_draining',
+          now: currentTime,
         }, { database });
         continue;
       }
@@ -1931,6 +2009,7 @@ export async function dispatchQueuedCalls({
       const reservation = await acquireReservation({
         reservationId,
         queueId,
+        maxReservations: safeCapacitySlots,
         ttlSeconds: reservationTtlSeconds,
         createdAt: currentTime,
       });
@@ -1938,6 +2017,7 @@ export async function dispatchQueuedCalls({
         await releaseQueuedCallForRetry({
           queueId,
           errorCode: reservation.reason || 'capacity_reservation_unavailable',
+          now: currentTime,
         }, { database });
         continue;
       }
@@ -1957,6 +2037,7 @@ export async function dispatchQueuedCalls({
         architecture,
         targetAt,
         leaseSeconds,
+        now: currentTime,
       }, { database });
 
       if (!guardResult.acquired) {
@@ -2031,6 +2112,7 @@ export async function dispatchQueuedCalls({
         continue;
       }
       guard = guardInitiating.guard || guard;
+      dialAuthorityIssued = true;
 
       const call = await dialCall(buildQueueOutboundCallParams(row, {
         baseUrl,
@@ -2092,7 +2174,14 @@ export async function dispatchQueuedCalls({
     } catch (error) {
       result.failed++;
       if (reservationAcquired) {
-        if (inFlightCapacityReservations.has(reservationId)) {
+        if (dialAuthorityIssued) {
+          // Once a guard has passed the final callable check, a thrown Telnyx
+          // request is ambiguous: Pipecat may already have created the call.
+          // Keep the Redis reservation until TTL/Pipecat cleanup instead of
+          // freeing capacity that may still be serving an in-flight call.
+          untrackCapacityReservation(reservationId);
+          reservationAcquired = false;
+        } else if (inFlightCapacityReservations.has(reservationId)) {
           let reservationReleased = false;
           try {
             await releaseReservation({ reservationId, queueId });
@@ -2110,6 +2199,20 @@ export async function dispatchQueuedCalls({
           reservationAcquired = false;
         }
       }
+      if (dialAuthorityIssued) {
+        try {
+          await markQueuedCallDispatchAmbiguous({
+            queueId,
+            providerErrorCode: errorCodeFrom(error),
+          }, { database });
+        } catch (markError) {
+          log.warn('Failed to mark queue call dispatch ambiguous', {
+            queueId,
+            error: markError.message,
+          });
+        }
+        continue;
+      }
       if (guard) {
         try {
           await releaseOutboundCallGuard({
@@ -2123,6 +2226,7 @@ export async function dispatchQueuedCalls({
       await releaseQueuedCallForRetry({
         queueId,
         errorCode: errorCodeFrom(error),
+        now: currentTime,
       }, { database });
     }
   }

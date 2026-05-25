@@ -3,24 +3,29 @@
 Runs synchronously on each TranscriptionFrame before the LLM processes it.
 Stores guidance for Conversation Director to inject into the current response.
 
-Pattern data lives in processors/patterns.py (268 patterns, 19 categories).
-This file contains only analysis logic and the FrameProcessor wrapper.
+Pattern data lives in processors/patterns.py. This file imports only the
+companion-call categories used for guidance and the FrameProcessor wrapper.
 """
 
 import asyncio
 from dataclasses import dataclass, field
 from loguru import logger
-from pipecat.frames.frames import EndFrame, Frame, TranscriptionFrame
+from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
+    EndFrame,
+    Frame,
+    TranscriptionFrame,
+)
 from pipecat.processors.frame_processor import FrameProcessor
 
 from processors.patterns import (
-    HEALTH_PATTERNS, FAMILY_PATTERNS, EMOTION_PATTERNS, SAFETY_PATTERNS,
+    FAMILY_PATTERNS, EMOTION_PATTERNS,
     SOCIAL_PATTERNS, ACTIVITY_PATTERNS, TIME_PATTERNS, ENVIRONMENT_PATTERNS,
-    ADL_PATTERNS, COGNITIVE_PATTERNS, HELP_REQUEST_PATTERNS, END_OF_LIFE_PATTERNS,
-    HYDRATION_PATTERNS, TRANSPORTATION_PATTERNS, NEWS_PATTERNS, GOODBYE_PATTERNS,
+    HELP_REQUEST_PATTERNS, END_OF_LIFE_PATTERNS,
+    NEWS_PATTERNS, GOODBYE_PATTERNS,
     QUESTION_PATTERNS, ENGAGEMENT_PATTERNS, REMINDER_ACK_PATTERNS,
-    SAFETY_GUIDANCE, EOL_GUIDANCE, ADL_GUIDANCE, COGNITIVE_GUIDANCE,
-    HYDRATION_GUIDANCE, TRANSPORT_GUIDANCE, HEALTH_GUIDANCE, EMOTION_GUIDANCE,
+    EOL_GUIDANCE, EMOTION_GUIDANCE,
 )
 
 
@@ -48,20 +53,14 @@ def _has_goodbye_continuation(text: str) -> bool:
 
 @dataclass
 class AnalysisResult:
-    health_signals: list = field(default_factory=list)
     family_signals: list = field(default_factory=list)
     emotion_signals: list = field(default_factory=list)
-    safety_signals: list = field(default_factory=list)
     social_signals: list = field(default_factory=list)
     activity_signals: list = field(default_factory=list)
     time_signals: list = field(default_factory=list)
     environment_signals: list = field(default_factory=list)
-    adl_signals: list = field(default_factory=list)
-    cognitive_signals: list = field(default_factory=list)
     help_request_signals: list = field(default_factory=list)
     end_of_life_signals: list = field(default_factory=list)
-    hydration_signals: list = field(default_factory=list)
-    transport_signals: list = field(default_factory=list)
     news_signals: list = field(default_factory=list)
     goodbye_signals: list = field(default_factory=list)
     is_question: bool = False
@@ -78,7 +77,7 @@ class AnalysisResult:
 # =============================================================================
 
 def quick_analyze(user_message: str, recent_history: list[dict] | None = None) -> AnalysisResult:
-    """Analyze user message with 268 regex patterns. Returns AnalysisResult with guidance."""
+    """Analyze user message with companion-call regex patterns."""
     result = AnalysisResult()
     if not user_message:
         return result
@@ -97,20 +96,14 @@ def quick_analyze(user_message: str, recent_history: list[dict] | None = None) -
                 else:
                     target.append(p.signal)
 
-    _scan(HEALTH_PATTERNS, result.health_signals, sev=True)
     _scan(FAMILY_PATTERNS, result.family_signals)
     _scan(EMOTION_PATTERNS, result.emotion_signals, emo=True)
-    _scan(SAFETY_PATTERNS, result.safety_signals, sev=True)
     _scan(SOCIAL_PATTERNS, result.social_signals)
     _scan(ACTIVITY_PATTERNS, result.activity_signals)
     _scan(TIME_PATTERNS, result.time_signals)
     _scan(ENVIRONMENT_PATTERNS, result.environment_signals)
-    _scan(ADL_PATTERNS, result.adl_signals, sev=True)
-    _scan(COGNITIVE_PATTERNS, result.cognitive_signals, sev=True)
     _scan(HELP_REQUEST_PATTERNS, result.help_request_signals)
     _scan(END_OF_LIFE_PATTERNS, result.end_of_life_signals, sev=True)
-    _scan(HYDRATION_PATTERNS, result.hydration_signals, sev=True)
-    _scan(TRANSPORTATION_PATTERNS, result.transport_signals, sev=True)
 
     # News — also sets needs_web_search
     for p in NEWS_PATTERNS:
@@ -167,36 +160,12 @@ def quick_analyze(user_message: str, recent_history: list[dict] | None = None) -
 def _build_guidance(r: AnalysisResult) -> str | None:
     lines: list[str] = []
 
-    if r.safety_signals:
-        sig = r.safety_signals[0]["signal"]
-        lines.append(f"[SAFETY] {SAFETY_GUIDANCE.get(sig, 'Safety concern detected. Ask if they are okay.')}")
-
     if r.end_of_life_signals:
         sig = r.end_of_life_signals[0]["signal"]
         lines.append(f"[END OF LIFE] {EOL_GUIDANCE.get(sig, 'Sensitive topic. Be very gentle and listen.')}")
 
-    if r.adl_signals:
-        sig = r.adl_signals[0]["signal"]
-        lines.append(f"[DAILY LIVING] {ADL_GUIDANCE.get(sig, 'They mentioned difficulty with daily tasks. Ask how they are managing.')}")
-
-    if r.cognitive_signals:
-        sig = r.cognitive_signals[0]["signal"]
-        lines.append(f"[COGNITIVE] {COGNITIVE_GUIDANCE.get(sig, 'Possible cognitive concern. Be patient and reassuring.')}")
-
-    if r.hydration_signals:
-        sig = r.hydration_signals[0]["signal"]
-        lines.append(f"[NUTRITION] {HYDRATION_GUIDANCE.get(sig, 'Nutrition concern. Ask about their eating and drinking.')}")
-
-    if r.transport_signals:
-        sig = r.transport_signals[0]["signal"]
-        lines.append(f"[TRANSPORT] {TRANSPORT_GUIDANCE.get(sig, 'Transportation came up. Ask how they are getting around.')}")
-
     if r.help_request_signals:
         lines.append("[HELP REQUEST] They're asking for help. Address their request directly and clearly.")
-
-    if r.health_signals:
-        sig = r.health_signals[0]["signal"]
-        lines.append(f"[HEALTH] {HEALTH_GUIDANCE.get(sig, 'Health topic mentioned. Ask how they are feeling.')}")
 
     neg = [e for e in r.emotion_signals if e["valence"] == "negative"]
     pos = [e for e in r.emotion_signals if e["valence"] == "positive"]
@@ -252,35 +221,8 @@ def _build_token_recommendation(r: AnalysisResult) -> dict | None:
     if crit_eol:
         return {"max_tokens": 350, "reason": "crisis_support"}
 
-    if any(s["severity"] == "high" for s in r.safety_signals):
-        return {"max_tokens": 300, "reason": "safety_concern"}
-
-    if any(s["severity"] == "high" for s in r.adl_signals):
-        return {"max_tokens": 250, "reason": "functional_concern"}
-
-    if any(s["severity"] == "high" for s in r.cognitive_signals):
-        return {"max_tokens": 250, "reason": "cognitive_concern"}
-
-    if any(s["severity"] == "high" for s in r.hydration_signals):
-        return {"max_tokens": 220, "reason": "nutrition_concern"}
-
-    if any(s["severity"] == "high" for s in r.health_signals):
-        return {"max_tokens": 250, "reason": "health_safety"}
-
-    if any(s["severity"] == "medium" for s in r.health_signals):
-        return {"max_tokens": 200, "reason": "health_mention"}
-
     if r.end_of_life_signals:
         return {"max_tokens": 250, "reason": "end_of_life_topic"}
-
-    if any(s["severity"] == "medium" for s in r.adl_signals):
-        return {"max_tokens": 200, "reason": "functional_mention"}
-
-    if any(s["severity"] == "medium" for s in r.cognitive_signals):
-        return {"max_tokens": 200, "reason": "cognitive_mention"}
-
-    if any(s["severity"] == "high" for s in r.transport_signals):
-        return {"max_tokens": 200, "reason": "mobility_isolation"}
 
     if r.help_request_signals:
         return {"max_tokens": 200, "reason": "help_request"}
@@ -302,7 +244,7 @@ def _build_token_recommendation(r: AnalysisResult) -> dict | None:
     if r.engagement_level == "high":
         return {"max_tokens": 150, "reason": "high_engagement"}
 
-    if r.is_question and not r.health_signals and not high_neg:
+    if r.is_question and not high_neg:
         return {"max_tokens": 100, "reason": "simple_question"}
 
     if r.family_signals:
@@ -327,6 +269,14 @@ class QuickObserverProcessor(FrameProcessor):
     # Gives the LLM time to generate and TTS to speak the goodbye audio.
     GOODBYE_DELAY_SECONDS = 5.0
     PROGRAMMATIC_GOODBYE_MIN_ELAPSED_SECONDS = 0.0
+    # After the initial delay, keep checking every TTS_IDLE_POLL_SECONDS to
+    # see if Donna's audio output has gone idle. Caps total wait so the call
+    # can't hang forever if TTS keeps generating (model run-on).
+    TTS_IDLE_POLL_SECONDS = 0.5
+    MAX_END_WAIT_SECONDS = 30.0
+    # Buffer between BotStoppedSpeaking and the EndFrame fire, so the final
+    # frame of audio has time to flush out over the network.
+    POST_TTS_BUFFER_SECONDS = 0.6
 
     def __init__(self, session_state: dict | None = None, **kwargs):
         super().__init__(**kwargs)
@@ -335,19 +285,131 @@ class QuickObserverProcessor(FrameProcessor):
         self._session_state = session_state
         self._pipeline_task = None  # Set via set_pipeline_task() after pipeline creation
         self._goodbye_task: asyncio.Task | None = None
+        # Tracks whether Donna's TTS is currently producing audio frames.
+        # Updated by BotStartedSpeakingFrame / BotStoppedSpeakingFrame.
+        self._bot_speaking: bool = False
+        self._bot_last_stopped_at: float | None = None
 
     def set_pipeline_task(self, task):
         """Set the pipeline task reference for programmatic call ending."""
         self._pipeline_task = task
 
+    async def _try_transition_to_winding_down(self) -> bool:
+        """Programmatically transition the flow to winding_down.
+
+        Bypasses the LLM tool call (which is unreliable when the senior says
+        a weak goodbye like just 'bye'). Builds the winding_down node from
+        the cached flows_tools + session_state and asks flow_manager to
+        switch. Returns True on success, False if any prerequisite is
+        missing (in which case the caller should fall back to EndFrame).
+        """
+        if not self._session_state:
+            return False
+        flow_manager = self._session_state.get("_flow_manager")
+        flows_tools = self._session_state.get("_flow_tools")
+        if flow_manager is None or not flows_tools:
+            logger.warning(
+                "[QuickObserver] Can't programmatically transition — "
+                "flow_manager={fm} flow_tools={ft}",
+                fm=flow_manager is not None,
+                ft=bool(flows_tools),
+            )
+            return False
+        try:
+            from flows.nodes import build_winding_down_node
+            node = build_winding_down_node(self._session_state, flows_tools)
+            await flow_manager.set_node_from_config(node)
+            logger.info(
+                "[QuickObserver] Programmatic transition: main → winding_down"
+            )
+            if self._session_state is not None:
+                self._session_state["_end_reason"] = "goodbye_detected_qo_transition"
+            return True
+        except Exception as e:
+            logger.error(
+                "[QuickObserver] Transition to winding_down failed: {err}",
+                err=str(e),
+            )
+            return False
+
+    async def _wait_until_bot_silent(self, *, max_wait: float) -> bool:
+        """Wait until the bot is no longer speaking. Returns True if reached
+        a silent state (with the POST_TTS_BUFFER_SECONDS buffer), False if
+        we hit the cap while bot was still speaking."""
+        import time as _t
+        start = _t.time()
+        # If bot hasn't started speaking yet, give it a brief moment to begin
+        # (TTS pipeline takes ~100-500ms to first audio frame). Otherwise we'd
+        # bail out before Donna gets a chance to speak.
+        if not self._bot_speaking and self._bot_last_stopped_at is None:
+            grace_end = _t.time() + 1.0
+            while _t.time() < grace_end and not self._bot_speaking:
+                await asyncio.sleep(self.TTS_IDLE_POLL_SECONDS)
+        # Now wait for bot to stop speaking, capped at max_wait total.
+        while _t.time() - start < max_wait:
+            if not self._bot_speaking:
+                # Got silence — let the final audio frame flush.
+                await asyncio.sleep(self.POST_TTS_BUFFER_SECONDS)
+                # Re-check: if Donna started speaking again during the buffer,
+                # keep waiting (another turn of response generation).
+                if not self._bot_speaking:
+                    return True
+            await asyncio.sleep(self.TTS_IDLE_POLL_SECONDS)
+        return False
+
     async def _force_end_call(self):
-        """Wait for goodbye audio to play, then end the call via EndFrame."""
+        """End the call gracefully on detected goodbye.
+
+        Strategy (replaces the old fixed-delay EndFrame):
+          1. Try a programmatic transition to winding_down. The closing flow
+             will speak its piece and emit end_conversation. No cutoff.
+          2. If the transition succeeds, set a long max-wait safety net to
+             EndFrame if the flow gets stuck.
+          3. If the transition fails (no flow_manager/flow_tools available,
+             or any error), wait for Donna to stop speaking, then fire
+             EndFrame — preserves the original behavior but no longer cuts
+             her off mid-sentence.
+        """
         try:
             settings = (self._session_state or {}).get("call_settings") or {}
-            delay = settings.get("goodbye_delay_seconds", self.GOODBYE_DELAY_SECONDS)
-            await asyncio.sleep(delay)
+            initial_delay = settings.get("goodbye_delay_seconds", self.GOODBYE_DELAY_SECONDS)
+            max_wait = settings.get("goodbye_max_wait_seconds", self.MAX_END_WAIT_SECONDS)
+
+            # Phase 1: try programmatic transition immediately.
+            transitioned = await self._try_transition_to_winding_down()
+
+            if transitioned:
+                # Closing node has post_actions=end_conversation; the flow
+                # will end the call naturally. Set a long safety net just
+                # in case the closing flow stalls.
+                await asyncio.sleep(max_wait)
+                if self._pipeline_task and (self._session_state or {}).get("_end_reason") != "user_hangup":
+                    logger.warning(
+                        "[QuickObserver] Winding-down took longer than {s}s — "
+                        "force-ending as safety net",
+                        s=max_wait,
+                    )
+                    if self._session_state is not None:
+                        self._session_state["_end_reason"] = "goodbye_detected_safety_net"
+                    await self._pipeline_task.queue_frame(EndFrame())
+                return
+
+            # Phase 2: fall back to wait-for-TTS-silent then EndFrame.
+            logger.info(
+                "[QuickObserver] Transition not available — falling back to "
+                "TTS-aware EndFrame (delay={d}s, max_wait={m}s)",
+                d=initial_delay,
+                m=max_wait,
+            )
+            await asyncio.sleep(initial_delay)
+            reached_silent = await self._wait_until_bot_silent(max_wait=max_wait)
+            if not reached_silent:
+                logger.warning(
+                    "[QuickObserver] Bot still speaking after {s}s — force-ending anyway",
+                    s=max_wait,
+                )
             if self._pipeline_task:
-                logger.info("[QuickObserver] Goodbye timeout reached — ending call programmatically")
+                logger.info("[QuickObserver] Goodbye reached silent state — ending call")
                 if self._session_state is not None:
                     self._session_state["_end_reason"] = "goodbye_detected"
                 await self._pipeline_task.queue_frame(EndFrame())
@@ -370,6 +432,16 @@ class QuickObserverProcessor(FrameProcessor):
 
     async def process_frame(self, frame: Frame, direction):
         await super().process_frame(frame, direction)
+
+        # Track bot-speaking state so _wait_until_bot_silent can do its job.
+        # These frames originate downstream of the TTS service and are
+        # observed here purely for goodbye-timing logic. Always pass through.
+        if isinstance(frame, BotStartedSpeakingFrame):
+            self._bot_speaking = True
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            self._bot_speaking = False
+            import time as _t
+            self._bot_last_stopped_at = _t.time()
 
         if isinstance(frame, TranscriptionFrame):
             text = frame.text
@@ -421,7 +493,18 @@ class QuickObserverProcessor(FrameProcessor):
             # PROGRAMMATIC GOODBYE: When strong goodbye detected, schedule forced
             # call end. The LLM will still generate its goodbye response normally,
             # but we don't rely on it to call the transition tools.
-            if analysis.goodbye_signals and self._goodbye_task is None:
+            #
+            # Consent calls are exempt: the persona is scripted to end with a
+            # warm "bye now" right after agreeing/declining, and the QO racing
+            # ahead can force the call to end before Donna calls
+            # record_consent_response — losing the senior's answer entirely.
+            # The consent closing node handles call termination via its
+            # end_conversation post_action.
+            call_type = (self._session_state or {}).get("call_type")
+            if call_type == "consent":
+                # Skip the entire programmatic-goodbye block for consent calls.
+                pass
+            elif analysis.goodbye_signals and self._goodbye_task is None:
                 has_strong = any(g["strength"] == "strong" for g in analysis.goodbye_signals)
                 if has_strong:
                     settings = (self._session_state or {}).get("call_settings") or {}
@@ -445,9 +528,15 @@ class QuickObserverProcessor(FrameProcessor):
                         d=delay,
                     )
                     self._goodbye_task = asyncio.create_task(self._force_end_call())
-                    # Signal to Director to suppress stale guidance
+                    # Signal to Director to suppress stale guidance + stamp the
+                    # detection time so post-call analytics know when QO fired.
                     if self._session_state is not None:
                         self._session_state["_goodbye_in_progress"] = True
+                        if not self._session_state.get("_goodbye_detected_at"):
+                            import time as _t, datetime as _dt
+                            self._session_state["_goodbye_detected_at"] = (
+                                _dt.datetime.now(_dt.timezone.utc)
+                            )
 
             # Cancel goodbye timer if senior keeps speaking (false goodbye)
             elif self._goodbye_task is not None and not self._goodbye_task.done():

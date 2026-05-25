@@ -21,6 +21,7 @@ import {
   resolveCallArchitectureConfig,
 } from './call-queue.js';
 import { materializeDueNormalizedSchedules } from './call-schedules.js';
+import { isSchedulerConsentGateEnabled } from '../lib/scheduler-config.js';
 import { readPipecatCapacityRegistry } from './pipecat-capacity.js';
 import { resolveMergedCanarySeniorIds } from './canary-cohort.js';
 import {
@@ -907,8 +908,8 @@ export const schedulerService = {
       SELECT s.id, s.name, s.phone, s.timezone, s.interests,
              s.family_info AS "familyInfo",
              s.family_info_encrypted AS "familyInfoEncrypted",
-             s.medical_notes AS "medicalNotes",
-             s.medical_notes_encrypted AS "medicalNotesEncrypted",
+             s.profile_notes AS "profileNotes",
+             s.profile_notes_encrypted AS "profileNotesEncrypted",
              s.preferred_call_times AS "preferredCallTimes",
              s.preferred_call_times_encrypted AS "preferredCallTimesEncrypted",
              s.is_active AS "isActive",
@@ -919,6 +920,9 @@ export const schedulerService = {
              s.call_context_snapshot_encrypted AS "callContextSnapshotEncrypted"
       FROM seniors s
       WHERE s.is_active = true
+        ${isSchedulerConsentGateEnabled()
+          ? sql`AND s.callable = true AND s.consent_status = 'granted'`
+          : sql``}
     `);
     const allSeniors = (results.rows || []).map(decryptSeniorPhi);
 
@@ -1041,8 +1045,8 @@ export const schedulerService = {
       SELECT s.id, s.name, s.phone, s.timezone, s.interests,
              s.family_info AS "familyInfo",
              s.family_info_encrypted AS "familyInfoEncrypted",
-             s.medical_notes AS "medicalNotes",
-             s.medical_notes_encrypted AS "medicalNotesEncrypted",
+             s.profile_notes AS "profileNotes",
+             s.profile_notes_encrypted AS "profileNotesEncrypted",
              s.preferred_call_times AS "preferredCallTimes",
              s.preferred_call_times_encrypted AS "preferredCallTimesEncrypted",
              s.is_active AS "isActive",
@@ -1053,6 +1057,9 @@ export const schedulerService = {
              s.call_context_snapshot_encrypted AS "callContextSnapshotEncrypted"
       FROM seniors s
       WHERE s.is_active = true
+      ${isSchedulerConsentGateEnabled()
+        ? sql`AND s.callable = true AND s.consent_status = 'granted'`
+        : sql``}
       AND NOT EXISTS (
         SELECT 1 FROM conversations c
         WHERE c.senior_id = s.id

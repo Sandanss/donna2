@@ -143,14 +143,14 @@ Pipecat API inputs are validated via Pydantic models before reaching handlers:
 
 | Schema | Validates |
 |--------|----------|
-| `CreateSeniorRequest` | name (1-255 chars), phone (E.164), timezone, interests, `family_info`, `medical_notes`, `preferred_call_times` |
+| `CreateSeniorRequest` | name (1-255 chars), phone (E.164), timezone, interests, `family_info`, `preferred_call_times`, `additional_info` |
 | `UpdateSeniorRequest` | Same fields, all optional |
-| `CreateMemoryRequest` | type (10 allowed values), content (1-5000 chars), importance (0-100) |
-| `CreateReminderRequest` | type (5 allowed values), title (1-255), scheduled_time, cron |
+| `CreateMemoryRequest` | type (7 non-medical allowed values), content (1-5000 chars), importance (0-100) |
+| `CreateReminderRequest` | type (`custom` or `social`), title (1-255), scheduled_time, cron |
 | `InitiateCallRequest` | seniorId/senior_id; server resolves phone after authorization |
 | `AdminLoginRequest` | email, password |
 
-Node/frontend API inputs are validated through Zod. Senior create/update accepts timezone, interests, `familyInfo`, medical notes, preferred call times, city/state/zip, and `additionalInfo`. Onboarding additionally validates Donna language, interest detail text, reminders, call schedule, and `topicsToAvoid`.
+Node/frontend API inputs are validated through Zod. Senior create/update accepts timezone, interests, `familyInfo`, preferred call times, city/state/zip, and `additionalInfo`; deprecated `medicalNotes` input is stripped and not persisted. Onboarding additionally validates Donna language, interest detail text, reminders, call schedule, and `topicsToAvoid`.
 
 Caregiver/admin call initiation does not accept arbitrary client-supplied phone numbers. The API accepts a senior ID, checks authorization, then resolves the stored senior phone number server-side.
 
@@ -168,7 +168,7 @@ Donna has sanitization helpers, but this is not a blanket guarantee that every l
 | `mask_name("David Zuluaga")` | Full name | `David Z.` |
 | `truncate("long content", 30)` | Full text | `long content...` (truncated) |
 
-Use these helpers for Railway/Sentry log output and avoid logging raw transcripts, reminder bodies, medical notes, profile context, caregiver notes, search queries, WebSocket params, or `ws_token` values.
+Use these helpers for Railway/Sentry log output and avoid logging raw transcripts, reminder bodies, profile notes, profile context, caregiver notes, search queries, WebSocket params, or `ws_token` values. (The legacy `medical_notes` column has been deprecated by migration 014/026 + renamed by 016/028 — but historical log-discipline guidance still applies if any legacy values surface.)
 
 ---
 
@@ -190,7 +190,7 @@ Redis/shared-state call payloads are also treated as PHI. Pipecat writes `call_m
 
 The remaining high-risk PHI fields now follow the same companion-column pattern:
 
-- Senior profile PHI: `family_info_encrypted` (relationship, Donna language, date of birth, interest detail text, topics to avoid), `medical_notes_encrypted`, `preferred_call_times_encrypted`, `additional_info_encrypted`, and `call_context_snapshot_encrypted`.
+- Senior profile PHI: `family_info_encrypted` (relationship, Donna language, date of birth, interest detail text, topics to avoid), `preferred_call_times_encrypted`, `additional_info_encrypted`, and `call_context_snapshot_encrypted`. The legacy `medical_notes` / `medical_notes_encrypted` fields are deprecated, nulled by migration 014/026, stripped on writes, and not decrypted into runtime senior objects.
 - Reminders: `title_encrypted`, `description_encrypted`, and `reminder_deliveries.user_response_encrypted`.
 - Daily call context: `daily_call_context.context_encrypted`.
 - Notifications: `content_encrypted` and `metadata_encrypted`.
@@ -272,7 +272,7 @@ Before deploying any public Railway environment, including staging and productio
 - Verify the EAS `development`, `preview`, and `production` environments include `EXPO_PUBLIC_API_URL` and `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY` before building mobile binaries.
 - Set `REDIS_URL` before running more than one Pipecat instance.
 - Set Pipecat `LOG_LEVEL=INFO` for Railway dev/staging/prod before smoke testing or promotion.
-- Verify Railway logs do not contain prompt context, transcripts, medical notes, caregiver notes, raw WebSocket parameters, or `ws_token` values.
+- Verify Railway logs do not contain prompt context, transcripts, profile notes, caregiver notes, raw WebSocket parameters, or `ws_token` values.
 - Smoke test real Telnyx webhook signatures, `/ws` token rejection/reuse, inbound audio, outbound audio, and a call longer than five minutes.
 
 ### PHI Encryption Migration Runbook
@@ -287,6 +287,8 @@ The code and schema support encrypted-only new writes, but each deployed databas
 6. Re-run export and reminder-call smoke tests, then review Railway logs for PHI leakage.
 
 Operational lookup/display fields such as senior name, phone, timezone, city/state/ZIP, and interests remain plaintext for now. Treat them as minimized PII/operational data, not as a substitute for the encrypted PHI fields.
+
+The follow-up plan to remove remaining plaintext risk, add identifier lookup hashes, introduce key rotation, and add privacy release gates is tracked in [`docs/plans/2026-05-25-data-at-rest-encryption-hardening-plan.md`](../plans/2026-05-25-data-at-rest-encryption-hardening-plan.md).
 
 ### Current Security Gaps And Operational Caveats
 

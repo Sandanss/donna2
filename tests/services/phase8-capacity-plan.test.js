@@ -130,6 +130,7 @@ describe('phase 8 capacity planner', () => {
           { priority_lane: 'hard_reminder', status: 'deferred', count: 5, name: 'Jane Example' },
           { priority_lane: 'unknown_lane', status: 'queued', count: 3, transcript: 'Donna Phi Sentinel' },
         ]))
+        .mockResolvedValueOnce(result([]))
         .mockResolvedValueOnce(result([{ count: 0, reminder_text: 'Donna Phi Sentinel' }])),
     };
     const capacityRegistryReader = vi.fn().mockResolvedValue({
@@ -169,7 +170,7 @@ describe('phase 8 capacity planner', () => {
       projectedHourlyCost: 0.75,
       withinHourlyBudget: true,
     });
-    expect(database.execute).toHaveBeenCalledTimes(2);
+    expect(database.execute).toHaveBeenCalledTimes(3);
     expect(capacityRegistryReader).toHaveBeenCalledWith({
       now: new Date('2035-03-18T13:30:00.000Z'),
     });
@@ -181,6 +182,7 @@ describe('phase 8 capacity planner', () => {
     const database = {
       execute: vi.fn()
         .mockResolvedValueOnce(result([{ priority_lane: 'manual', status: 'queued', count: 150 }]))
+        .mockResolvedValueOnce(result([]))
         .mockResolvedValueOnce(result([{ count: 0 }])),
     };
 
@@ -203,6 +205,36 @@ describe('phase 8 capacity planner', () => {
     expect(report.checks.find(check => check.name === 'hourly_cost_budget')).toMatchObject({
       status: 'failed',
     });
+  });
+
+  it('includes current ready backlog in scale recommendations and scale-down guards', async () => {
+    const database = {
+      execute: vi.fn()
+        .mockResolvedValueOnce(result([]))
+        .mockResolvedValueOnce(result([
+          { priority_lane: 'manual', status: 'queued', count: 10 },
+        ]))
+        .mockResolvedValueOnce(result([{ count: 0 }])),
+    };
+
+    const report = await buildPhase8CapacityPlan({
+      database,
+      capacityRegistryReader: vi.fn().mockResolvedValue({
+        configured: true,
+        backend: 'redis',
+        instances: [readyReplica(), readyReplica()],
+      }),
+      now: new Date('2035-03-18T13:30:00.000Z'),
+      windowStart: new Date('2035-03-18T14:00:00.000Z'),
+      currentReplicas: 4,
+      minReplicas: 2,
+      maxCallsPerReplica: 50,
+    });
+
+    expect(report.demand.total).toBe(10);
+    expect(report.demandBreakdown.currentBacklog.total).toBe(10);
+    expect(report.recommendation.action).toBe('hold');
+    expect(report.recommendation.scaleDownSafe).toBe(false);
   });
 
   it('parses operator CLI options without exposing env values', () => {

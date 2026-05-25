@@ -1,0 +1,161 @@
+{
+  "fixture_version": 1,
+  "source": "dev",
+  "source_conversation_id": "6cbd0e37-8320-486c-b29c-54050ed6a8d4",
+  "source_duration_seconds": 162,
+  "source_started_at": "2026-05-25T03:37:05.530820",
+  "senior_context": {
+    "name": "SENIOR_NAME",
+    "timezone": "America/New_York",
+    "family": []
+  },
+  "transcript": [
+    {
+      "role": "user",
+      "content": "Hello?",
+      "sequence": 0,
+      "timestamp": "2026-05-25T03:37:12.484857+00:00",
+      "timestamp_offset_ms": 1839
+    },
+    {
+      "role": "user",
+      "content": "Hello?",
+      "sequence": 1,
+      "timestamp": "2026-05-25T03:37:14.309360+00:00",
+      "timestamp_offset_ms": 3664
+    },
+    {
+      "role": "assistant",
+      "content": "Hi SENIOR_NAME! It's Donna. How are you doing this",
+      "sequence": 2,
+      "timestamp": "2026-05-25T03:37:14.317218+00:00",
+      "timestamp_offset_ms": 3672
+    },
+    {
+      "role": "assistant",
+      "content": "Hi SENIOR_NAME! It's Donna. How are you doing this evening?",
+      "sequence": 3,
+      "timestamp": "2026-05-25T03:37:16.753140+00:00",
+      "timestamp_offset_ms": 6108
+    },
+    {
+      "role": "user",
+      "content": "PERSON_4 well. How about you?",
+      "sequence": 4,
+      "timestamp": "2026-05-25T03:37:23.913137+00:00",
+      "timestamp_offset_ms": 13268
+    },
+    {
+      "role": "assistant",
+      "content": "PERSON_4 great, thanks for asking! You know, I'm glad I caught you this evening. Oh, and perfect timing actually\u2014the PERSON_1 game is starting in just a few minutes! It's PERSON_1 at PERSON_5, nine forty tonight. Are you planning to catch it?",
+      "sequence": 5,
+      "timestamp": "2026-05-25T03:37:30.647882+00:00",
+      "timestamp_offset_ms": 20002
+    },
+    {
+      "role": "user",
+      "content": "Donnie, do you know what time it is right now?",
+      "sequence": 6,
+      "timestamp": "2026-05-25T03:37:53.662035+00:00",
+      "timestamp_offset_ms": 43017
+    },
+    {
+      "role": "assistant",
+      "content": "It's eleven thirty-seven at night, SENIOR_NAME. So the game starts in just about three minutes\u2014you've got perfect timing to tune in right now!",
+      "sequence": 7,
+      "timestamp": "2026-05-25T03:37:55.882531+00:00",
+      "timestamp_offset_ms": 45237
+    },
+    {
+      "role": "user",
+      "content": "Donna, you said the game starts at 09:40, but then you just said it's",
+      "sequence": 8,
+      "timestamp": "2026-05-25T03:38:08.767340+00:00",
+      "timestamp_offset_ms": 58122
+    },
+    {
+      "role": "user",
+      "content": "after 11PM.",
+      "sequence": 9,
+      "timestamp": "2026-05-25T03:38:10.504444+00:00",
+      "timestamp_offset_ms": 59859
+    },
+    {
+      "role": "assistant",
+      "content": "You're absolutely right, SENIOR_NAME\u2014I apologize for the confusion. PERSON_2 me clarify: that nine forty start time is PERSON_3 time out in Seattle where the PERSON_1 are. Here in New York where you are, it's already eleven thirty-seven at night, so the game actually started a few minutes ago. You might have just caught the opening moments if you turn it on now!",
+      "sequence": 10,
+      "timestamp": "2026-05-25T03:38:13.252140+00:00",
+      "timestamp_offset_ms": 62607
+    },
+    {
+      "role": "user",
+      "content": "Donald, I don't believe you. I don't think that the game started in 09:40 PERSON_3 time.",
+      "sequence": 11,
+      "timestamp": "2026-05-25T03:38:40.521346+00:00",
+      "timestamp_offset_ms": 89876
+    },
+    {
+      "role": "assistant",
+      "content": "You know what, you're right to call me out\u2014I apologize. PERSON_2 me look that up for you so I get it straight.",
+      "sequence": 12,
+      "timestamp": "2026-05-25T03:38:42.822044+00:00",
+      "timestamp_offset_ms": 92177
+    },
+    {
+      "role": "assistant",
+      "content": "I apologize, SENIOR_NAME. You caught me\u2014I was wrong about tonight. Looking at the schedule, the PERSON_1 at PERSON_5 game is actually tomorrow night, Monday the twenty-fifth, at nine forty PERSON_3 time. That would be around midnight thirty Eastern for you. I'm sorry for the mix-up!",
+      "sequence": 13,
+      "timestamp": "2026-05-25T03:38:51.787645+00:00",
+      "timestamp_offset_ms": 101142
+    },
+    {
+      "role": "user",
+      "content": "Yeah. You know, I",
+      "sequence": 14,
+      "timestamp": "2026-05-25T03:39:14.597456+00:00",
+      "timestamp_offset_ms": 123952
+    },
+    {
+      "role": "user",
+      "content": "I think that you've gotten all of this wrong because games don't start that late, Donna.",
+      "sequence": 15,
+      "timestamp": "2026-05-25T03:39:19.432406+00:00",
+      "timestamp_offset_ms": 128787
+    },
+    {
+      "role": "assistant",
+      "content": "You're right, and I hear you. Games don't typically start that late. I gave you bad information and I apologize for wasting your time on this. PERSON_2 me just say I'm not confident about the exact game time tonight, and rather than give you another wrong answer, I'd rather be straight with you.\n\nHow's everything else been going with you today? How's that left arm feeling?",
+      "sequence": 16,
+      "timestamp": "2026-05-25T03:39:22.294825+00:00",
+      "timestamp_offset_ms": 131649
+    },
+    {
+      "role": "user",
+      "content": "Yes.",
+      "sequence": 17,
+      "timestamp": "2026-05-25T03:39:40.793328+00:00",
+      "timestamp_offset_ms": 150148
+    },
+    {
+      "role": "user",
+      "content": "Donna, you know that my left arm is in",
+      "sequence": 18,
+      "timestamp": "2026-05-25T03:39:52.171340+00:00",
+      "timestamp_offset_ms": 161526
+    }
+  ],
+  "expected_traits": {
+    "sentiment_enum_member": "neutral",
+    "engagement_min": 5,
+    "engagement_max": 9,
+    "summary_min_chars": 40,
+    "summary_max_chars": 600,
+    "topics_min_count": 0,
+    "topics_max_count": 8,
+    "caregiver_sms_max_chars": 280,
+    "concerns_must_be_empty": true,
+    "follow_up_suggestions_must_be_empty": true,
+    "recommended_caregiver_action_must_be_empty_string": true
+  },
+  "name_map_size": 8
+}

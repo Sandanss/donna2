@@ -72,14 +72,12 @@ export const weeklyReportService = {
 
     // 5. Aggregate analysis data
     const allTopics = [];
-    const allConcerns = [];
     const allPositive = [];
     const allHighlights = [];
     const engagementScores = [];
 
     for (const a of analyses) {
       if (a.topics) allTopics.push(...a.topics);
-      if (a.concerns) allConcerns.push(...(Array.isArray(a.concerns) ? a.concerns : []));
       if (a.positiveObservations) allPositive.push(...a.positiveObservations);
       if (a.followUpSuggestions) allHighlights.push(...a.followUpSuggestions);
       if (a.engagementScore) engagementScores.push(a.engagementScore);
@@ -102,7 +100,6 @@ export const weeklyReportService = {
       },
       calls: { count: callCount, totalMinutes, avgEngagement },
       topics,
-      concerns: allConcerns,
       positiveObservations,
       reminders: reminderStats,
       engagementTrend: engagementScores,
@@ -114,7 +111,7 @@ export const weeklyReportService = {
    * Build an inline HTML email template for the weekly report.
    */
   buildEmailHTML(report) {
-    const { senior, period, calls, topics, concerns, positiveObservations, reminders, engagementTrend, highlights } = report;
+    const { senior, period, calls, topics, positiveObservations, reminders, engagementTrend, highlights } = report;
 
     // Engagement trend indicator
     let trendText = 'No data';
@@ -136,18 +133,6 @@ export const weeklyReportService = {
 
     const positiveList = positiveObservations.length > 0
       ? positiveObservations.map(p => `<li style="margin-bottom: 4px; color: #333;">${escapeHtml(p)}</li>`).join('')
-      : '';
-
-    const concernsList = concerns.length > 0
-      ? concerns.map(c => {
-          const severity = c.severity || 'low';
-          const bgColor = severity === 'high' ? '#fee2e2' : severity === 'medium' ? '#fef3c7' : '#f3f4f6';
-          const borderColor = severity === 'high' ? '#ef4444' : severity === 'medium' ? '#f59e0b' : '#9ca3af';
-          return `<div style="padding: 12px; margin-bottom: 8px; background: ${bgColor}; border-left: 3px solid ${borderColor}; border-radius: 4px;">
-            <strong style="text-transform: capitalize;">${escapeHtml(c.type || severity)} concern</strong>
-            <p style="margin: 4px 0 0; color: #555;">${escapeHtml(c.description || '')}</p>
-          </div>`;
-        }).join('')
       : '';
 
     const highlightsList = highlights.length > 0
@@ -200,14 +185,6 @@ export const weeklyReportService = {
         <ul style="margin: 0; padding-left: 20px; font-size: 14px;">${topicsList}</ul>
       </div>
 
-      ${concerns.length > 0 ? `
-      <!-- Concerns -->
-      <div style="margin-bottom: 24px;">
-        <h3 style="margin: 0 0 8px; color: #dc2626; font-size: 15px;">Concerns</h3>
-        ${concernsList}
-      </div>
-      ` : ''}
-
       ${positiveObservations.length > 0 ? `
       <!-- Positive Observations -->
       <div style="margin-bottom: 24px; background: #f0fdf4; border-radius: 8px; padding: 16px;">
@@ -227,9 +204,9 @@ export const weeklyReportService = {
       </div>
 
       ${highlights.length > 0 ? `
-      <!-- Follow-up Suggestions -->
+      <!-- Conversation Ideas -->
       <div style="margin-bottom: 24px;">
-        <h3 style="margin: 0 0 8px; color: #1a1a1a; font-size: 15px;">Suggestions for Next Week</h3>
+        <h3 style="margin: 0 0 8px; color: #1a1a1a; font-size: 15px;">Conversation Ideas for Next Week</h3>
         <ul style="margin: 0; padding-left: 20px; font-size: 14px;">${highlightsList}</ul>
       </div>
       ` : ''}
@@ -239,7 +216,7 @@ export const weeklyReportService = {
     <!-- Footer -->
     <div style="text-align: center; padding: 16px; color: #999; font-size: 12px;">
       <p style="margin: 0;">Powered by <a href="https://consumer-ruddy.vercel.app" style="color: #4A5D4F; text-decoration: none;">Donna</a></p>
-      <p style="margin: 4px 0 0;">Your AI companion for elderly care</p>
+      <p style="margin: 4px 0 0;">Your AI companion for family connection</p>
     </div>
 
   </div>

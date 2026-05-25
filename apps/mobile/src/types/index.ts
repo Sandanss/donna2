@@ -20,7 +20,7 @@ export interface Senior {
 export interface Reminder {
   id: string;
   seniorId: string;
-  type: "medication" | "appointment" | "custom" | "wellness" | "social";
+  type: "custom" | "social";
   title: string;
   description?: string;
   scheduledTime?: string;
@@ -66,14 +66,14 @@ export interface CallAnalysis {
 
 /**
  * Matches the notification_preferences table in the backend.
- * Fields correspond to: callCompleted, concernDetected, reminderMissed,
+ * Fields correspond to: callCompleted, reminderMissed,
  * weeklySummary, smsEnabled (legacy inactive), emailEnabled, quietHours*, timezone,
  * weeklyReport*.
  */
 export interface NotificationPreferences {
   caregiverId?: string;
   callCompleted?: boolean;
-  concernDetected?: boolean;
+  concernDetected?: boolean; // Legacy field only; health/care alerts are not shown.
   reminderMissed?: boolean;
   weeklySummary?: boolean;
   smsEnabled?: boolean; // Legacy compatibility only; SMS notifications are inactive.
