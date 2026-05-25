@@ -321,7 +321,12 @@ async def _run_simulated_call_inner(
             logger.debug("[SimRunner] EndFrame queue error (likely already ended): {}", exc)
 
     # -----------------------------------------------------------------
-    # 7. Post-call processing
+    # 7. Drain fire-and-forget tool work
+    # -----------------------------------------------------------------
+    await _drain_tool_background_tasks(session_state)
+
+    # -----------------------------------------------------------------
+    # 8. Post-call processing
     # -----------------------------------------------------------------
     if run_post_call_processing:
         try:
@@ -336,7 +341,7 @@ async def _run_simulated_call_inner(
             logger.warning("[SimRunner] Post-call processing failed: {}", exc)
 
     # -----------------------------------------------------------------
-    # 8. Cleanup
+    # 9. Cleanup
     # -----------------------------------------------------------------
     _cancel_task(pipeline_task)
 
@@ -552,3 +557,28 @@ def _collect_tool_call_details(session_state: dict, collector) -> list[dict]:
             add(metadata.get("tool"), metadata.get("arguments"))
 
     return details
+
+
+async def _drain_tool_background_tasks(session_state: dict) -> None:
+    """Wait briefly for tool side-effect tasks spawned during simulation."""
+    tasks = [
+        task for task in session_state.get("_tool_background_tasks", [])
+        if isinstance(task, asyncio.Task)
+    ]
+    if not tasks:
+        return
+    try:
+        results = await asyncio.wait_for(
+            asyncio.gather(*tasks, return_exceptions=True),
+            timeout=10,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("[SimRunner] Timed out waiting for tool background tasks")
+        return
+
+    for result in results:
+        if isinstance(result, Exception):
+            logger.warning(
+                "[SimRunner] Tool background task failed: {err}",
+                err=str(result),
+            )

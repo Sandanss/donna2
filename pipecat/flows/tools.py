@@ -1086,7 +1086,8 @@ def make_discovery_flows_tools(session_state: dict) -> dict[str, FlowsFunctionSc
             except Exception as e:
                 logger.error("record_discovery_fact background store failed: {err}", err=str(e))
 
-        asyncio.create_task(_background_store())
+        task = asyncio.create_task(_background_store())
+        session_state.setdefault("_tool_background_tasks", []).append(task)
         return {"status": "success", "result": f"Captured {category}: {content[:60]}"}
 
     schemas: dict[str, FlowsFunctionSchema] = {}

@@ -123,7 +123,7 @@ async def seed_test_senior(senior: TestSenior | None = None) -> TestSenior:
 
     Returns the ``TestSenior`` instance (with its generated ``id``).
     """
-    from db import execute, query_one
+    from db import execute
 
     senior = senior or TestSenior()
     notes_column = await _senior_profile_notes_column()
@@ -131,9 +131,9 @@ async def seed_test_senior(senior: TestSenior | None = None) -> TestSenior:
     # Insert senior -- ON CONFLICT guards against re-runs
     await execute(
         f"""INSERT INTO seniors (id, name, phone, timezone, interests,
-               {notes_column}, cached_news, is_active)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, true)
-           ON CONFLICT (id) DO NOTHING""",
+               {notes_column}, cached_news, is_active, consent_status, callable)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, true, 'pending', true)
+            ON CONFLICT (id) DO NOTHING""",
         uuid.UUID(senior.id),
         senior.name,
         senior.phone,

@@ -71,10 +71,19 @@ async def test_senior():
 
     Uses pytest_asyncio.fixture (not pytest.fixture) so the async generator
     is materialised correctly under pytest-asyncio strict mode (1.x).
+    The DB pool is closed after each test because asyncpg pools are bound to
+    the event loop that created them, while pytest-asyncio gives these tests
+    fresh loops.
     """
-    senior = await seed_test_senior(_fresh_test_senior())
-    yield senior
-    await cleanup_test_senior(senior.id)
+    from db import close_pool
+
+    senior = _fresh_test_senior()
+    try:
+        await seed_test_senior(senior)
+        yield senior
+    finally:
+        await cleanup_test_senior(senior.id)
+        await close_pool()
 
 
 def _fresh_test_senior(template: TestSenior | None = None) -> TestSenior:
