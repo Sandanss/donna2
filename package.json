@@ -6,7 +6,9 @@
   "scripts": {
     "start": "node --disable-warning=DEP0040 index.js",
     "dev": "node --disable-warning=DEP0040 --watch index.js",
-    "install:apps": "npm ci --prefix apps/admin-v2 && npm ci --prefix apps/website && npm ci --prefix apps/observability && npm ci --prefix apps/mobile",
+    "install:apps": "npm ci --prefix apps/admin-v2 && npm ci --prefix apps/website && npm ci --prefix apps/observability && npm ci --prefix apps/todos && npm ci --prefix apps/mobile",
+    "dev:todos": "npm run dev --prefix apps/todos",
+    "build:todos": "npm run build --prefix apps/todos",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
     "test": "vitest run",

@@ -31,8 +31,8 @@ async def find_by_phone(phone: str, *, active_only: bool = True) -> dict | None:
     row = await query_one(
         """SELECT id, name, phone, timezone, interests, family_info,
                   family_info_encrypted,
-                  medical_notes, preferred_call_times, is_active,
-                  medical_notes_encrypted, preferred_call_times_encrypted,
+                  preferred_call_times, is_active,
+                  preferred_call_times_encrypted,
                   city, state, zip_code, additional_info,
                   additional_info_encrypted, call_context_snapshot,
                   call_context_snapshot_encrypted, cached_news,
@@ -57,14 +57,13 @@ async def create(data: dict) -> dict:
            family_info_encrypted, medical_notes, medical_notes_encrypted,
            preferred_call_times, preferred_call_times_encrypted,
            city, state, zip_code, additional_info, additional_info_encrypted)
-           VALUES ($1, $2, $3, $4, NULL, $5, NULL, $6, NULL, $7, $8, $9, $10, NULL, $11)
+           VALUES ($1, $2, $3, $4, NULL, $5, NULL, NULL, NULL, $6, $7, $8, $9, NULL, $10)
            RETURNING *""",
         data.get("name"),
         phone,
         data.get("timezone", "America/New_York"),
         data.get("interests"),
         encrypt_json(data.get("familyInfo")),
-        encrypt(data.get("medicalNotes")),
         encrypt_json(data.get("preferredCallTimes")),
         data.get("city"),
         data.get("state"),
@@ -86,7 +85,6 @@ async def update(senior_id: str, data: dict) -> dict | None:
         "preferredCallTimes": ("preferred_call_times", "preferred_call_times_encrypted"),
     }
     encrypted_text_fields = {
-        "medicalNotes": ("medical_notes", "medical_notes_encrypted"),
         "additionalInfo": ("additional_info", "additional_info_encrypted"),
     }
 

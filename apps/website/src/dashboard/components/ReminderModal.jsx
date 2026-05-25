@@ -69,7 +69,7 @@ export default function ReminderModal({ reminder, schedule = [], onSave, onClose
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g., Take morning vitamins"
+              placeholder="e.g., Call Emma after lunch"
               required
             />
           </div>
@@ -90,7 +90,7 @@ export default function ReminderModal({ reminder, schedule = [], onSave, onClose
               className="db-input db-textarea"
               value={faqs}
               onChange={(e) => setFaqs(e.target.value)}
-              placeholder="e.g., The vitamins are in the kitchen cabinet on the bottom row. Take them with breakfast or a snack if you haven't..."
+              placeholder="e.g., Emma usually answers after 1 PM. Ask how her trip went."
               style={{ minHeight: 100 }}
             />
             <div className="db-helper-text">

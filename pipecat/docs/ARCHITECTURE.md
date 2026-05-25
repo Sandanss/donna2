@@ -45,8 +45,8 @@ Telnyx Audio ──► FastAPIWebsocketTransport
                         ▼
               ┌─────────────────────┐
               │   Quick Observer     │  Layer 1: Instant regex (0ms)
-              │   (BLOCKING)         │  → patterns: health, goodbye,
-              │   (regex patterns)   │    emotion, cognitive, activity
+              │   (BLOCKING)         │  → patterns: goodbye, emotion,
+              │   (regex patterns)   │    family, activity
               │                      │  → Injects guidance for THIS turn
               │   Goodbye detected → │  → EndFrame after configurable delay
               └─────────┬───────────┘
@@ -129,7 +129,7 @@ The pipeline processors don't call each other directly. They communicate through
    - `_prefetch_cache` — `PrefetchCache` instance, written by Director memory prefetch and read by proactive memory injection
    - `_news_injected` — Boolean flag, set by Director after injecting news context (one-shot per call)
    - `news_context` — Pre-fetched news string, read by Director for dynamic injection when `should_mention_news` is true
-   - `_last_quick_analysis` — `AnalysisResult` from Quick Observer, read by prefetch engine for family/health/activity signals
+   - `_last_quick_analysis` — `AnalysisResult` from Quick Observer, read by prefetch engine for family/activity signals
 
 3. **Pipeline task reference** — Both QuickObserver and Director receive a `set_pipeline_task(task)` call after pipeline creation. This lets them queue `EndFrame` directly to force call termination, bypassing the normal frame flow.
 
@@ -177,14 +177,11 @@ Instant regex-based analysis across Quick Observer categories:
 
 | Category | Patterns | Effect |
 |----------|----------|--------|
-| **Health** | 30+ patterns (pain, falls, medication, symptoms) | Health signals in context |
 | **Emotion** | 25+ patterns with valence/intensity | Emotional tone detection |
 | **Family** | 25+ relationship patterns including pets | Context enrichment |
-| **Safety** | Scams, strangers, emergencies | Safety concern flags |
 | **Engagement** | Response length analysis | Engagement level tracking |
 | **Goodbye** | Strong/weak goodbye detection | **EndFrame after configurable delay** |
 | **Factual/Curiosity** | Question patterns ("what year", "how tall") | Direct-answer guidance |
-| **Cognitive** | Confusion, repetition, time disorientation | Cognitive signals |
 
 **Guidance injection**: When patterns match, Quick Observer builds a guidance string (e.g., `[HEALTH] They mentioned pain. Ask how they are feeling.`) and pushes it as an `LLMMessagesAppendFrame` with `run_llm=False`. This appends a user-role message to Claude's context before the next LLM call, steering the response without adding latency.
 
@@ -264,7 +261,7 @@ The Director classifies calls into 5 analytical phases (including "rapport" betw
 Director output is condensed into a single-line string injected as a `[Director guidance]` user message:
 
 ```
-main/medium/warm | REMIND: Take medication | (concerned)
+main/medium/warm | REMIND: Call Emma | (engaged)
 winding_down/high/gentle | WINDING DOWN: Summarize key points, begin warm sign-off.
 closing/medium/warm | CLOSING: Say a warm goodbye. Keep it brief.
 ```
@@ -287,10 +284,10 @@ User speaking...
       │
       ├─ 1st wave (0ms): Regex extraction
       │   Topics (_TOPIC_PATTERNS from conversation_tracker)
-      │   Entities ("my grandson", "my doctor")
+      │   Entities ("my grandson", "my friend")
       │   Names ("My grandson Jake" → "Jake")
       │   Activities ("went to church", "played bingo")
-      │   Quick Observer signals (family, health, activity)
+      │   Quick Observer signals (family, activity)
       │   → memory.search() → cache
       │
       └─ 2nd wave (~70ms): Query Director analysis (Groq)
@@ -408,8 +405,8 @@ The opening phase is merged into main — the bot starts directly in main (or re
 When the telephony client disconnects, `run_post_call()` in `services/post_call.py` executes:
 
 1. **Complete conversation** — Updates DB with duration, status, transcript
-2. **Call analysis** — Gemini Flash generates summary, concerns, engagement score (1-10), mood, caregiver takeaways, recommended caregiver action, and follow-up suggestions. The encrypted JSON still includes a legacy `caregiver_sms` key, but SMS delivery is inactive.
-2.5. **Caregiver notes + notifications** — Marks caregiver notes delivered only when assistant transcript evidence shows Donna delivered them. POSTs to Node.js API for call_completed + concern_detected alerts, raising on non-2xx responses and retrying transient failures once. Node sends email/in-app notification records; SMS is inactive.
+2. **Call analysis** — Gemini Flash generates a companion-call summary, engagement score (1-10), mood, and caregiver takeaways. Legacy concern/action/follow-up fields remain empty for compatibility. The encrypted JSON still includes a legacy `caregiver_sms` key, but SMS delivery is inactive.
+2.5. **Caregiver notes + notifications** — Marks caregiver notes delivered only when assistant transcript evidence shows Donna delivered them. POSTs to Node.js API for call_completed notifications, raising on non-2xx responses and retrying transient failures once. Node sends email/in-app notification records; SMS is inactive.
 3. **Summary persistence** — Writes analysis summary to `conversations.summary` (enables `get_recent_summaries()` and cross-call context)
 3.5. **Interest discovery** — Maps new topics to predefined interest categories and updates `seniors.interests` plus editable `familyInfo.interestDetails`
 3.6. **Interest scores** — Computes engagement scores per interest topic
@@ -559,7 +556,7 @@ pipecat/
 │   ├── test_regression_scenarios.py ← Scenario-based regression tests
 │   ├── helpers/                     pipeline_builder, assertions
 │   ├── mocks/                       mock_llm, mock_services, mock_stt, mock_transport, mock_tts
-│   ├── scenarios/                   emotional_support, medication_reminder, memory_recall, etc.
+│   ├── scenarios/                   emotional_support, reminder, memory_recall, etc.
 │   ├── llm_simulation/              conversation_runner, senior_simulator, observer
 │   ├── conftest.py                  shared fixtures
 │   └── TESTING_DESIGN.md            test architecture docs
@@ -629,7 +626,7 @@ Running separate backends is an explicit decision. Pipecat handles real-time voi
 | **Voice LLM** | Claude Haiku 4.5 (`claude-haiku-4-5-20251001`) | AnthropicLLMService (prompt caching enabled) |
 | **Director** | Groq (`gpt-oss-20b`) | Primary fast provider |
 | **Director Fallback** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Full guidance fallback when Groq unavailable |
-| **Post-Call** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Summary, concerns, engagement |
+| **Post-Call** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Summary, engagement, caregiver takeaways |
 | **STT** | Deepgram Nova 3 | Telnyx 16kHz L16 is passed through as internal 16kHz PCM before STT; language follows `familyInfo.donnaLanguage` |
 | **TTS** | ElevenLabs by default; Cartesia behind provider flag | Telnyx calls request 16kHz PCM; optional Spanish voice IDs selected for Spanish calls |
 | **VAD** | Silero | confidence=0.68, start_secs=0.3, min_volume=0.5; stop_secs=1.2 (senior calls), 0.8 (onboarding) |

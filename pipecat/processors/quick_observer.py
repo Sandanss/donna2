@@ -3,8 +3,8 @@
 Runs synchronously on each TranscriptionFrame before the LLM processes it.
 Injects guidance via LLMMessagesAppendFrame for the current response.
 
-Pattern data lives in processors/patterns.py (268 patterns, 19 categories).
-This file contains only analysis logic and the FrameProcessor wrapper.
+Pattern data lives in processors/patterns.py. This file imports only the
+companion-call categories used for guidance and the FrameProcessor wrapper.
 """
 
 import asyncio
@@ -14,13 +14,12 @@ from pipecat.frames.frames import EndFrame, Frame, TranscriptionFrame, LLMMessag
 from pipecat.processors.frame_processor import FrameProcessor
 
 from processors.patterns import (
-    HEALTH_PATTERNS, FAMILY_PATTERNS, EMOTION_PATTERNS, SAFETY_PATTERNS,
+    FAMILY_PATTERNS, EMOTION_PATTERNS,
     SOCIAL_PATTERNS, ACTIVITY_PATTERNS, TIME_PATTERNS, ENVIRONMENT_PATTERNS,
-    ADL_PATTERNS, COGNITIVE_PATTERNS, HELP_REQUEST_PATTERNS, END_OF_LIFE_PATTERNS,
-    HYDRATION_PATTERNS, TRANSPORTATION_PATTERNS, NEWS_PATTERNS, GOODBYE_PATTERNS,
+    HELP_REQUEST_PATTERNS, END_OF_LIFE_PATTERNS,
+    NEWS_PATTERNS, GOODBYE_PATTERNS,
     QUESTION_PATTERNS, ENGAGEMENT_PATTERNS, REMINDER_ACK_PATTERNS,
-    SAFETY_GUIDANCE, EOL_GUIDANCE, ADL_GUIDANCE, COGNITIVE_GUIDANCE,
-    HYDRATION_GUIDANCE, TRANSPORT_GUIDANCE, HEALTH_GUIDANCE, EMOTION_GUIDANCE,
+    EOL_GUIDANCE, EMOTION_GUIDANCE,
 )
 
 
@@ -48,20 +47,14 @@ def _has_goodbye_continuation(text: str) -> bool:
 
 @dataclass
 class AnalysisResult:
-    health_signals: list = field(default_factory=list)
     family_signals: list = field(default_factory=list)
     emotion_signals: list = field(default_factory=list)
-    safety_signals: list = field(default_factory=list)
     social_signals: list = field(default_factory=list)
     activity_signals: list = field(default_factory=list)
     time_signals: list = field(default_factory=list)
     environment_signals: list = field(default_factory=list)
-    adl_signals: list = field(default_factory=list)
-    cognitive_signals: list = field(default_factory=list)
     help_request_signals: list = field(default_factory=list)
     end_of_life_signals: list = field(default_factory=list)
-    hydration_signals: list = field(default_factory=list)
-    transport_signals: list = field(default_factory=list)
     news_signals: list = field(default_factory=list)
     goodbye_signals: list = field(default_factory=list)
     is_question: bool = False
@@ -78,7 +71,7 @@ class AnalysisResult:
 # =============================================================================
 
 def quick_analyze(user_message: str, recent_history: list[dict] | None = None) -> AnalysisResult:
-    """Analyze user message with 268 regex patterns. Returns AnalysisResult with guidance."""
+    """Analyze user message with companion-call regex patterns."""
     result = AnalysisResult()
     if not user_message:
         return result
@@ -97,20 +90,14 @@ def quick_analyze(user_message: str, recent_history: list[dict] | None = None) -
                 else:
                     target.append(p.signal)
 
-    _scan(HEALTH_PATTERNS, result.health_signals, sev=True)
     _scan(FAMILY_PATTERNS, result.family_signals)
     _scan(EMOTION_PATTERNS, result.emotion_signals, emo=True)
-    _scan(SAFETY_PATTERNS, result.safety_signals, sev=True)
     _scan(SOCIAL_PATTERNS, result.social_signals)
     _scan(ACTIVITY_PATTERNS, result.activity_signals)
     _scan(TIME_PATTERNS, result.time_signals)
     _scan(ENVIRONMENT_PATTERNS, result.environment_signals)
-    _scan(ADL_PATTERNS, result.adl_signals, sev=True)
-    _scan(COGNITIVE_PATTERNS, result.cognitive_signals, sev=True)
     _scan(HELP_REQUEST_PATTERNS, result.help_request_signals)
     _scan(END_OF_LIFE_PATTERNS, result.end_of_life_signals, sev=True)
-    _scan(HYDRATION_PATTERNS, result.hydration_signals, sev=True)
-    _scan(TRANSPORTATION_PATTERNS, result.transport_signals, sev=True)
 
     # News — also sets needs_web_search
     for p in NEWS_PATTERNS:
@@ -167,36 +154,12 @@ def quick_analyze(user_message: str, recent_history: list[dict] | None = None) -
 def _build_guidance(r: AnalysisResult) -> str | None:
     lines: list[str] = []
 
-    if r.safety_signals:
-        sig = r.safety_signals[0]["signal"]
-        lines.append(f"[SAFETY] {SAFETY_GUIDANCE.get(sig, 'Safety concern detected. Ask if they are okay.')}")
-
     if r.end_of_life_signals:
         sig = r.end_of_life_signals[0]["signal"]
         lines.append(f"[END OF LIFE] {EOL_GUIDANCE.get(sig, 'Sensitive topic. Be very gentle and listen.')}")
 
-    if r.adl_signals:
-        sig = r.adl_signals[0]["signal"]
-        lines.append(f"[DAILY LIVING] {ADL_GUIDANCE.get(sig, 'They mentioned difficulty with daily tasks. Ask how they are managing.')}")
-
-    if r.cognitive_signals:
-        sig = r.cognitive_signals[0]["signal"]
-        lines.append(f"[COGNITIVE] {COGNITIVE_GUIDANCE.get(sig, 'Possible cognitive concern. Be patient and reassuring.')}")
-
-    if r.hydration_signals:
-        sig = r.hydration_signals[0]["signal"]
-        lines.append(f"[NUTRITION] {HYDRATION_GUIDANCE.get(sig, 'Nutrition concern. Ask about their eating and drinking.')}")
-
-    if r.transport_signals:
-        sig = r.transport_signals[0]["signal"]
-        lines.append(f"[TRANSPORT] {TRANSPORT_GUIDANCE.get(sig, 'Transportation came up. Ask how they are getting around.')}")
-
     if r.help_request_signals:
         lines.append("[HELP REQUEST] They're asking for help. Address their request directly and clearly.")
-
-    if r.health_signals:
-        sig = r.health_signals[0]["signal"]
-        lines.append(f"[HEALTH] {HEALTH_GUIDANCE.get(sig, 'Health topic mentioned. Ask how they are feeling.')}")
 
     neg = [e for e in r.emotion_signals if e["valence"] == "negative"]
     pos = [e for e in r.emotion_signals if e["valence"] == "positive"]
@@ -252,35 +215,8 @@ def _build_token_recommendation(r: AnalysisResult) -> dict | None:
     if crit_eol:
         return {"max_tokens": 350, "reason": "crisis_support"}
 
-    if any(s["severity"] == "high" for s in r.safety_signals):
-        return {"max_tokens": 300, "reason": "safety_concern"}
-
-    if any(s["severity"] == "high" for s in r.adl_signals):
-        return {"max_tokens": 250, "reason": "functional_concern"}
-
-    if any(s["severity"] == "high" for s in r.cognitive_signals):
-        return {"max_tokens": 250, "reason": "cognitive_concern"}
-
-    if any(s["severity"] == "high" for s in r.hydration_signals):
-        return {"max_tokens": 220, "reason": "nutrition_concern"}
-
-    if any(s["severity"] == "high" for s in r.health_signals):
-        return {"max_tokens": 250, "reason": "health_safety"}
-
-    if any(s["severity"] == "medium" for s in r.health_signals):
-        return {"max_tokens": 200, "reason": "health_mention"}
-
     if r.end_of_life_signals:
         return {"max_tokens": 250, "reason": "end_of_life_topic"}
-
-    if any(s["severity"] == "medium" for s in r.adl_signals):
-        return {"max_tokens": 200, "reason": "functional_mention"}
-
-    if any(s["severity"] == "medium" for s in r.cognitive_signals):
-        return {"max_tokens": 200, "reason": "cognitive_mention"}
-
-    if any(s["severity"] == "high" for s in r.transport_signals):
-        return {"max_tokens": 200, "reason": "mobility_isolation"}
 
     if r.help_request_signals:
         return {"max_tokens": 200, "reason": "help_request"}
@@ -302,7 +238,7 @@ def _build_token_recommendation(r: AnalysisResult) -> dict | None:
     if r.engagement_level == "high":
         return {"max_tokens": 150, "reason": "high_engagement"}
 
-    if r.is_question and not r.health_signals and not high_neg:
+    if r.is_question and not high_neg:
         return {"max_tokens": 100, "reason": "simple_question"}
 
     if r.family_signals:

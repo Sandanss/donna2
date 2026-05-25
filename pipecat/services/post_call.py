@@ -1,7 +1,7 @@
 """Post-call processing — runs after the telephony client disconnects.
 
-Orchestrates: conversation completion, call analysis (Gemini Flash),
-memory extraction, daily context save, reminder cleanup, and cache clearing.
+    Orchestrates: conversation completion, call analysis (Gemini Flash),
+    memory extraction, daily context save, reminder cleanup, and cache clearing.
 
 Extracted from bot.py to keep the pipeline assembly module focused.
 """
@@ -773,8 +773,8 @@ async def _summarize_onboarding_call(transcript: list | str, call_sid: str) -> s
         "- Caller's name (if given)\n"
         "- Who they're calling about (parent, grandparent, themselves) and that person's name\n"
         "- What they learned about Donna\n"
-        "- Any concerns or questions they raised\n"
-        "- Any details about the senior (interests, health, living situation)\n"
+        "- Any questions they raised\n"
+        "- Any details about the senior (interests, hobbies, living situation)\n"
         "- Whether they seemed interested in signing up\n\n"
         "Write 2-4 sentences as a brief context note that Donna can reference on the next call. "
         "Be specific — use names and details, not vague summaries.\n\n"
@@ -975,7 +975,6 @@ async def _trigger_caregiver_notification(
                         "caregiver_sms": analysis.get("caregiver_sms"),
                         "topics": analysis.get("topics_discussed", []),
                         "engagement_score": analysis.get("engagement_score"),
-                        "concerns": analysis.get("concerns", []),
                         "positive_observations": analysis.get(
                             "positive_observations", []
                         ),
@@ -994,52 +993,3 @@ async def _trigger_caregiver_notification(
                 cs=call_sid,
                 err=str(e),
             )
-
-        # Trigger concern_detected for high-severity concerns
-        for concern in analysis.get("concerns") or []:
-            if isinstance(concern, dict) and concern.get("severity") == "high":
-                try:
-                    response = await _post_notification_with_retry(
-                        client,
-                        f"{node_url}/api/notifications/trigger",
-                        {
-                            "event_type": "concern_detected",
-                            "senior_id": str(senior_id),
-                            "data": {
-                                "call_sid": call_sid,
-                                "concern": _format_concern_for_notification(concern),
-                                "severity": concern.get("severity"),
-                                "type": concern.get("type") or concern.get("category"),
-                                "recommended_action": concern.get("recommended_action"),
-                            },
-                        },
-                        headers,
-                    )
-                    logger.info(
-                        "[{cs}] Triggered concern_detected notification status={status}",
-                        cs=call_sid,
-                        status=response.status_code,
-                    )
-                except Exception as e:
-                    logger.error(
-                        "[{cs}] concern_detected notification failed: {err}",
-                        cs=call_sid,
-                        err=str(e),
-                    )
-
-
-def _format_concern_for_notification(concern: dict) -> str:
-    """Build the Node-expected privacy-bounded concern string."""
-    if not isinstance(concern, dict):
-        return str(concern or "")[:300]
-
-    text_parts = [
-        concern.get("description"),
-        concern.get("summary"),
-        concern.get("concern"),
-        concern.get("recommended_action"),
-    ]
-    text = " ".join(str(part).strip() for part in text_parts if part).strip()
-    if not text:
-        text = "High-severity concern detected during Donna's call."
-    return text[:300]

@@ -67,7 +67,6 @@ export const createSeniorSchema = z.object({
   timezone: timezoneSchema.default('America/New_York'),
   interests: z.array(z.string().max(100)).max(20).optional(),
   familyInfo: z.record(z.unknown()).optional(),
-  medicalNotes: z.string().max(10000).optional(),
   preferredCallTimes: z.record(z.unknown()).optional(),
   isActive: z.boolean().default(true),
   city: z.string().max(100).optional(),
@@ -82,7 +81,6 @@ export const updateSeniorSchema = z.object({
   timezone: timezoneSchema.optional(),
   interests: z.array(z.string().max(100)).max(20).optional(),
   familyInfo: z.record(z.unknown()).optional(),
-  medicalNotes: z.string().max(10000).optional(),
   preferredCallTimes: z.record(z.unknown()).optional(),
   isActive: z.boolean().optional(),
   city: z.string().max(100).optional(),
@@ -101,10 +99,7 @@ const memoryTypeEnum = z.enum([
   'fact',
   'preference',
   'event',
-  'concern',
   'relationship',
-  'health',
-  'medication',
   'family',
   'interest',
   'routine',
@@ -139,10 +134,7 @@ export const memorySearchQuerySchema = z.object({
 // =============================================================================
 
 const reminderTypeEnum = z.enum([
-  'medication',
-  'appointment',
   'custom',
-  'wellness',
   'social',
 ]);
 
@@ -387,7 +379,6 @@ export const updateScheduleSchema = z.object({
 
 export const notificationPreferencesSchema = z.object({
   callCompleted: z.boolean().optional(),
-  concernDetected: z.boolean().optional(),
   reminderMissed: z.boolean().optional(),
   weeklySummary: z.boolean().optional(),
   callSummaries: z.boolean().optional(),
@@ -402,7 +393,7 @@ export const notificationPreferencesSchema = z.object({
 });
 
 export const notificationTriggerSchema = z.object({
-  event_type: z.enum(['call_completed', 'concern_detected', 'reminder_missed']),
+  event_type: z.enum(['call_completed', 'reminder_missed']),
   senior_id: uuidSchema,
   data: z.object({}).passthrough(), // flexible payload
 });

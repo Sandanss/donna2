@@ -37,7 +37,7 @@ SEARCH_MEMORIES_SCHEMA = {
     "properties": {
         "query": {
             "type": "string",
-            "description": "What to search for (e.g., 'gardening', 'grandson birthday', 'medication')",
+            "description": "What to search for (e.g., 'gardening', 'grandson birthday', 'favorite music')",
         },
     },
     "required": ["query"],
@@ -64,7 +64,8 @@ def _web_search_schema(today_date: date | None = None) -> dict:
             "or anything you're unsure about. Always include the current year in "
             "queries about recent events, scores, or elections. "
             "Never include names, phone numbers, addresses, caregiver names, or private "
-            "medical history in the query. Use anonymous general wording for health questions. "
+            "medical history in the query. Do not use this tool for medical, medication, "
+            "diagnosis, symptom, or emergency questions. "
             "IMPORTANT: Before calling this tool, always say a brief natural filler "
             "like 'Let me look that up for you', 'One moment while I check on that', "
             "or 'Hmm, let me find out'. This gives the senior something to hear while "
@@ -79,7 +80,8 @@ def _web_search_schema(today_date: date | None = None) -> dict:
                 "type": "string",
                 "description": (
                     f"What to search for (include {today_date.year} for recent events). "
-                    "Do not include personal names, phone numbers, addresses, or private history."
+                    "Do not include personal names, phone numbers, addresses, private history, "
+                    "or medical questions."
                 ),
             },
         },
@@ -104,16 +106,16 @@ CREATE_REMINDER_SCHEMA = {
         "<frequency> — does that sound right?') and only call this tool after they confirm. "
         "Compute scheduled_time in the senior's local timezone (from system prompt 'Current time') "
         "and emit ISO 8601 WITH offset. AFTER the tool returns success, briefly confirm aloud "
-        "(e.g., 'Got it — I saved that and I'll call you at that time'). Do NOT use this for "
-        "medication reminders the family already manages — only when the senior themselves asks."
+        "(e.g., 'Got it — I saved that and I'll call you at that time'). Use this for "
+        "everyday routines and social tasks only."
     ),
     "properties": {
         "title": {
             "type": "string",
             "description": (
                 "Short human-readable title (max 200 chars), in the same language the "
-                "senior is speaking. Examples: 'Doctor appointment', 'Cita con el médico', "
-                "'Take blood pressure pill', 'Llamar a María'. Do NOT include the date/time "
+                "senior is speaking. Examples: 'Water the plants', 'Llamar a María', "
+                "'Put out the trash'. Do NOT include the date/time "
                 "in the title — that goes in scheduled_time."
             ),
         },
@@ -129,12 +131,8 @@ CREATE_REMINDER_SCHEMA = {
         },
         "type": {
             "type": "string",
-            "enum": ["medication", "appointment", "custom", "wellness", "social"],
-            "description": (
-                "Category. Use 'medication' for pills/meds, 'appointment' for doctor/dentist/"
-                "salon visits, 'social' for calls/visits to family/friends, 'wellness' for "
-                "exercise/water/walks, 'custom' otherwise."
-            ),
+            "enum": ["custom", "social"],
+            "description": "Category. Use 'social' for calls/visits to family/friends, 'custom' otherwise.",
         },
         "description": {
             "type": "string",
@@ -189,7 +187,7 @@ MARK_REMINDER_SCHEMA = {
 
 SAVE_DETAIL_SCHEMA = {
     "name": "save_important_detail",
-    "description": "Save an important detail the senior mentioned that should be remembered for future calls. Use for significant life events, health changes, new interests, family updates, or emotional state changes.",
+    "description": "Save an important detail the senior mentioned that should be remembered for future calls. Use for significant life events, new interests, family updates, or emotional state changes.",
     "properties": {
         "detail": {
             "type": "string",
@@ -197,7 +195,7 @@ SAVE_DETAIL_SCHEMA = {
         },
         "category": {
             "type": "string",
-            "enum": ["health", "family", "preference", "life_event", "emotional", "activity"],
+            "enum": ["family", "preference", "life_event", "emotional", "activity"],
             "description": "Category of the detail",
         },
     },
@@ -225,6 +223,15 @@ _ADDRESS_RE = re.compile(
     re.I,
 )
 _SPACE_RE = re.compile(r"\s+")
+_MEDICAL_SEARCH_RE = re.compile(
+    r"\b("
+    r"medicine|medication|pill|prescription|pharmacy|dose|dosage|"
+    r"metformin|lisinopril|symptom|side effect|diagnos|doctor|hospital|"
+    r"urgent care|emergency|911|pain|dizzy|dizziness|blood pressure|"
+    r"diabetes|insulin|chest pain|shortness of breath"
+    r")\b",
+    re.I,
+)
 _MAX_WEB_SEARCH_QUERY_CHARS = 240
 
 
@@ -287,8 +294,7 @@ def sanitize_web_search_query(query: str, session_state: dict | None = None) -> 
     for term in sorted(_known_private_terms(session_state), key=len, reverse=True):
         sanitized = re.sub(rf"\b{re.escape(term)}\b", "", sanitized, flags=re.I)
 
-    # Genericize first-person health phrasing. This still lets Donna answer a
-    # general medication/symptom question without exposing whose question it is.
+    # Legacy privacy guard for any medical wording that reaches this sanitizer.
     if re.search(r"\b(medicine|medication|pill|metformin|lisinopril|dizzy|pain|doctor|symptom|side effect)\b", sanitized, re.I):
         for term in sorted(_known_location_terms(session_state), key=len, reverse=True):
             sanitized = re.sub(rf"\b{re.escape(term)}\b", "", sanitized, flags=re.I)
@@ -362,6 +368,16 @@ def make_tool_handlers(session_state: dict) -> dict:
 
         if not query:
             return {"status": "success", "result": "No query provided."}
+
+        if _MEDICAL_SEARCH_RE.search(query):
+            logger.info("Tool: web_search blocked medical query")
+            return {
+                "status": "success",
+                "result": (
+                    "Donna is not a medical or emergency service. Suggest they contact "
+                    "a trusted person or qualified professional for medical questions."
+                ),
+            }
 
         sanitized_query = sanitize_web_search_query(query, session_state)
         if not sanitized_query:
@@ -503,11 +519,10 @@ def make_tool_handlers(session_state: dict) -> dict:
             try:
                 from services.memory import store
                 category_to_type = {
-                    "health": "health",
                     "family": "relationship",
                     "preference": "preference",
                     "life_event": "fact",
-                    "emotional": "concern",
+                    "emotional": "fact",
                     "activity": "preference",
                 }
                 await store(
@@ -545,7 +560,7 @@ def make_tool_handlers(session_state: dict) -> dict:
                 "result": "I need a title. Ask them what to remind them about.",
             }
 
-        if reminder_type not in {"medication", "appointment", "custom", "wellness", "social"}:
+        if reminder_type not in {"custom", "social"}:
             reminder_type = "custom"
 
         if frequency not in {"daily", "weekly", "one-time"}:

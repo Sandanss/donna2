@@ -10,13 +10,6 @@ function getScoreColor(score: number | null | undefined): string {
   return 'text-admin-danger';
 }
 
-function formatConcerns(concerns: CallAnalysis['concerns']): string {
-  if (!Array.isArray(concerns)) return '';
-  return concerns
-    .map((c) => (typeof c === 'string' ? c : (c as any).description || JSON.stringify(c)))
-    .join(', ');
-}
-
 export default function CallAnalyses() {
   const { showToast } = useToast();
   const [analyses, setAnalyses] = useState<CallAnalysis[]>([]);
@@ -45,7 +38,6 @@ export default function CallAnalyses() {
         ) : (
           analyses.map((a) => {
             const scoreColor = getScoreColor(a.engagementScore);
-            const concernText = formatConcerns(a.concerns);
 
             return (
               <div key={a.id} className="bg-gray-50 border border-gray-100 rounded-xl p-3.5 mb-3">
@@ -77,14 +69,6 @@ export default function CallAnalyses() {
                         {t}
                       </span>
                     ))}
-                  </div>
-                )}
-
-                {/* Concerns */}
-                {concernText && (
-                  <div className="mt-2">
-                    <span className="text-xs font-semibold text-admin-danger">Concerns: </span>
-                    <span className="text-sm text-admin-text-light">{concernText}</span>
                   </div>
                 )}
 

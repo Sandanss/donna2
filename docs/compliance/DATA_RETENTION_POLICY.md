@@ -74,10 +74,10 @@ Known gaps to close:
 | **Semantic memories** | `memories.content_encrypted`; legacy `memories.content` placeholder/fallback | Yes (HIGH) | 2 years from creation OR 1 year after senior becomes inactive | `memories.created_at` or `seniors.is_active` + last call date | Automated purge job: DELETE row (including embedding vector) |
 | **Call analyses** | `call_analyses.analysis_encrypted`; legacy structured columns fallback | Yes (MEDIUM) | 1 year from creation | `call_analyses.created_at` | Automated purge job: DELETE row |
 | **Daily call context** | `daily_call_context.context_encrypted`; legacy structured columns fallback | Yes (MEDIUM) | 90 days from call date | `daily_call_context.call_date` | Automated purge job: DELETE row |
-| **Reminder definitions** | `reminders.title_encrypted`, `description_encrypted`; legacy title/description fallback | Yes (medication names/schedules) | Retained while active + 1 year after deactivation | `reminders.is_active` = false date | Automated purge job: DELETE row + associated deliveries |
+| **Reminder definitions** | `reminders.title_encrypted`, `description_encrypted`; legacy title/description fallback | Possible/Yes if user-entered text contains health details | Retained while active + 1 year after deactivation | `reminders.is_active` = false date | Automated purge job: DELETE row + associated deliveries |
 | **Reminder deliveries** | `reminder_deliveries.user_response_encrypted`; legacy `user_response` fallback | Yes (LOW) | 90 days from delivery date | `reminder_deliveries.created_at` | Automated purge job: DELETE row |
 | **Senior profiles** | `seniors` | Yes (HIGH) | Retained while active + 1 year after last call | `seniors.is_active` + last `conversations.started_at` | Manual review + DELETE row (cascades to all related data) |
-| **Senior medical notes** | `seniors.medical_notes_encrypted`; legacy `medical_notes` fallback | Yes (CRITICAL) | Same as senior profile | Same as senior profile | Cleared when senior is purged |
+| **Deprecated senior medical notes** | `seniors.medical_notes_encrypted`; legacy `medical_notes` fallback | Yes (CRITICAL) if legacy data exists | Deprecated; migration 014/026 nulls existing values | Migration deployment | Set both columns to NULL; new writes are stripped |
 | **Senior family/additional profile context** | `seniors.family_info_encrypted`, `additional_info_encrypted`; legacy `family_info` / `additional_info` fallback | Yes (HIGH) | Same as senior profile | Same as senior profile | Cleared when senior is purged |
 | **Caregiver relationships** | `caregivers` | Low | Retained while linked + 90 days after unlinking | Manual unlinking date | Manual review + DELETE row |
 | **Caregiver notes** | `caregiver_notes.content_encrypted`; legacy/plaintext fallback if present | Yes (MEDIUM/HIGH) | Retained while active + 1 year after note deactivation/deletion or senior inactivity | Note status/date or senior inactivity | Automated purge target; current implementation coverage gap |
@@ -130,7 +130,7 @@ Known gaps to close:
 
 ### Call Analyses (1 year)
 
-- Post-call analyses detect health concerns and track engagement over time. One year of analysis history is sufficient for identifying trends and patterns.
+- Post-call analyses summarize companion-call engagement and conversation context. Donna no longer creates health/care concern alerts.
 - After 1 year, the raw analysis data is no longer actionable and should be purged.
 
 ### Daily Call Context (90 days)
@@ -145,7 +145,7 @@ Known gaps to close:
 
 ### Reminder Definitions (active + 1 year after deactivation)
 
-- Reminder definitions can contain medication names, routines, schedules, and caregiver-provided context.
+- Reminder definitions can contain user-entered routines, schedules, caregiver-provided context, and possible health details if a user puts them in free text. Donna no longer offers a medication reminder type.
 - Policy target: retain active reminders while needed for care continuity, then purge inactive definitions and associated deliveries after the retention window.
 - Current gap: the May 5 audit found inactive reminder definitions are not covered by observed retention services.
 
@@ -320,7 +320,7 @@ Under HIPAA (and potentially state privacy laws like CCPA), individuals have rig
 - Donna must act on the request within **60 days** (one 30-day extension permitted).
 - Amendments may be denied if the PHI is accurate, was not created by Donna, or is not available for access.
 
-**Implementation**: Admin dashboard should support editing senior profiles, memories, and medical notes with audit logging of all changes.
+**Implementation**: Admin dashboard should support editing senior profiles and memories with audit logging of all changes. Deprecated medical notes are not editable and are nulled by migration 014/026.
 
 ### Right to an Accounting of Disclosures (45 CFR 164.528)
 

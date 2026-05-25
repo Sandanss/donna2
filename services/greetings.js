@@ -225,7 +225,7 @@ function getGreeting({ seniorName, timezone, interests, lastCallSummary, recentM
 
 /**
  * Extract a short, conversational context phrase from a call summary
- * e.g. "Discussed grandson Tommy's soccer game and upcoming doctor visit"
+ * e.g. "Discussed grandson Tommy's soccer game and weekend plans"
  *   -> "Tommy's soccer game"
  */
 function extractContextPhrase(summary) {

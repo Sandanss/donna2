@@ -52,7 +52,7 @@ export default function Step5_Reminders({ data, update }) {
                 type="text"
                 value={reminder.title}
                 onChange={(e) => updateReminder(i, 'title', e.target.value)}
-                placeholder="e.g. Take morning vitamins"
+                placeholder="e.g. Call Emma after lunch"
               />
             </div>
             <div className="ob-form-group" style={{ marginBottom: 0 }}>
@@ -61,7 +61,7 @@ export default function Step5_Reminders({ data, update }) {
                 className="ob-textarea"
                 value={reminder.description}
                 onChange={(e) => updateReminder(i, 'description', e.target.value)}
-                placeholder="e.g. The vitamins are in the kitchen cabinet on the bottom row. Take them with breakfast or a snack if you haven't yet."
+                placeholder="e.g. Emma usually answers after 1 PM. Ask how her trip went."
                 rows={3}
               />
             </div>
@@ -75,7 +75,7 @@ export default function Step5_Reminders({ data, update }) {
       </button>
 
       <div className="ob-reminder-tip">
-        <em>The more detailed you make the reminders, the better!</em>
+        <em>Keep reminders focused on everyday routines and personal preferences.</em>
       </div>
     </div>
   );

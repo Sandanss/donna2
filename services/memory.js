@@ -13,6 +13,7 @@ const DECAY_HALF_LIFE_DAYS = 30; // Importance halves every 30 days
 const ACCESS_BOOST = 10; // Boost importance by 10 per access
 const MAX_IMPORTANCE = 100;
 const ARCHIVE_THRESHOLD_DAYS = 90; // Consider archiving after 90 days without access
+const ALLOWED_MEMORY_TYPES = new Set(['fact', 'preference', 'event', 'relationship', 'family', 'interest', 'routine']);
 
 let openai = null;
 const getOpenAI = () => {
@@ -206,12 +207,12 @@ export const memoryService = {
       .slice(0, limit);
   },
 
-  // Get critical memories (health concerns, high importance) - Tier 1
+  // Get high-importance memories - Tier 1
   async getCritical(seniorId, limit = 3) {
     const rows = await db.select().from(memories)
       .where(and(
         eq(memories.seniorId, seniorId),
-        sql`(type = 'concern' OR importance >= 80)`
+        sql`importance >= 80`
       ))
       .orderBy(desc(memories.importance))
       .limit(limit);
@@ -233,9 +234,11 @@ export const memoryService = {
   formatGroupedMemories(groups) {
     const typeLabels = {
       relationship: 'Family/Friends',
-      concern: 'Concerns',
+      family: 'Family/Friends',
       preference: 'Preferences',
       event: 'Recent events',
+      interest: 'Interests',
+      routine: 'Routines',
       fact: 'Facts'
     };
 
@@ -250,7 +253,7 @@ export const memoryService = {
   },
 
   // Build context string for conversation using tiered injection
-  // Tier 1 (Critical): Health concerns, high importance - always included
+  // Tier 1: High-importance memories - always included
   // Tier 2 (Contextual): Relevant to current topic - included when topic provided
   // Tier 3 (Background): General facts - included on first turn only
   async buildContext(seniorId, currentTopic = null, senior = null, isFirstTurn = true) {
@@ -323,14 +326,16 @@ export const memoryService = {
     // Use Gemini/OpenAI to extract facts and memories from transcript
     // This is called after a conversation ends
 
-    const prompt = `Analyze this conversation and extract important facts, preferences, events, or concerns about the person. Return a JSON array of memories.
+    const prompt = `Analyze this conversation and extract important facts, preferences, events, relationships, family details, interests, or routines about the person. Return a JSON array of memories.
+
+Do not extract medical, health, safety, or care concerns. Donna is a companion product, not a medical monitoring product.
 
 Conversation:
 ${transcript}
 
 Return format:
 [
-  {"type": "fact|preference|event|concern|relationship", "content": "...", "importance": 50-100}
+  {"type": "fact|preference|event|relationship|family|interest|routine", "content": "...", "importance": 50-100}
 ]
 
 Only include genuinely important or memorable information. Be concise.`;
@@ -352,9 +357,11 @@ Only include genuinely important or memorable information. Be concise.`;
 
       if (Array.isArray(memoriesArray)) {
         for (const mem of memoriesArray) {
+          if (!mem.content) continue;
+          const type = ALLOWED_MEMORY_TYPES.has(mem.type) ? mem.type : 'fact';
           await this.store(
             seniorId,
-            mem.type || 'fact',
+            type,
             mem.content,
             conversationId,
             mem.importance || 50
