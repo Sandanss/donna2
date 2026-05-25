@@ -26,6 +26,11 @@
 | Change cross-replica Pipecat capacity reporting | `pipecat/services/capacity.py` (publisher) + `services/pipecat-capacity.js` (Node reader) |
 | Change shared-state / Redis fallback behavior | `pipecat/lib/redis_client.py` (Redis + Upstash fail-closed) + `services/redis-rate-limit-store.js` (Node SlowAPI store) |
 | Change call dial-authority guard | `services/call-queue.js` (`acquireOutboundCallGuard`, `markOutboundCallGuardInitiatingIfCallable`) — guards live in `outbound_call_guards` |
+| Change post-call job workflow / DAG / provider semaphores | `services/post-call-jobs.js` (job types, dependency graph, retry policies, provider locks) + `scripts/run-post-call-worker-once.js` (shadow worker) |
+| Inspect or replay post-call dead letters | `routes/post-call-jobs.js` (`GET /api/post-call-jobs/dead-letter`, `POST /api/post-call-jobs/:id/replay`) |
+| Plan or actuate Pipecat replica capacity | `scripts/phase8-capacity-plan.js` (planner, PHI-free) + `services/phase8-autoscaler.js` (Railway actuator + operator override) + `services/railway-scaling.js` (CLI shell) |
+| Operator overrides / one-shot autoscaler / capacity plan API | `routes/scale-operations.js` (`/api/scale-operations/phase8/{plan,autoscale-once,override}`, admin-only) |
+| Run Phase 5/7 live A/B + canary reports | `scripts/phase5-live-ab-report.js`, `scripts/phase7-canary-report.js`; runbooks `docs/operations/scale-2000-phase{5,7}-*.md` |
 | Run scale-2000 drills / Phase 0 baseline / live Telnyx drill | `scripts/collect-phase0-scaling-baseline.js`, `scripts/run-live-telnyx-drill.js`, `pipecat/scripts/redis_shared_state_drill.py`; runbooks under `docs/operations/scale-2000-*.md` |
 | Change per-senior call settings | `pipecat/services/seniors.py` (`get_call_settings()`) |
 | Change caregiver notes delivery | `pipecat/services/caregivers.py` + `pipecat/flows/tools.py` |
@@ -45,11 +50,27 @@
 | Change admin API middleware/auth | `middleware/*.js` (Node.js) |
 | Change database schema | `db/schema.js` (Drizzle ORM, shared app/API schema) + `pipecat/db/migrations/` (Pipecat/shared runtime additions) |
 | Add/modify frontend E2E tests | `tests/e2e/` + `playwright.config.ts` — see [guide](docs/guides/FRONTEND_TESTING.md) |
+| Run / extend mock call testing (LLM-vs-LLM Donna conversations) | `pipecat/tests/simulation/` — see [guide](docs/guides/MOCK_CALL_TESTING.md) for full anatomy + scenarios; `pipecat/scripts/run_simulated_demo.py` for one-off transcripts |
 | Change data retention policies | `pipecat/services/data_retention.py` (Python) + `services/data-retention.js` (Node.js) |
 | Change audit logging | `pipecat/services/audit.py` (Python) + `services/audit.js` (Node.js) |
 | Change token revocation | `pipecat/services/token_revocation.py` (Python) + `services/token-revocation.js` (Node.js) |
 | Change field encryption | `pipecat/lib/encryption.py` (Python) + `lib/encryption.js` (Node.js) |
 | Review HIPAA compliance docs | `docs/compliance/` (overview, BAAs, breach notification, retention, vendor security) |
+
+---
+
+## Current Architecture Status (`zuludev`)
+
+Donna currently has **two outbound-call architectures in the same codebase**:
+
+| Architecture | Status | Main files | Scale posture |
+|---|---|---|---|
+| **Legacy scheduler / dialer** | Still deployed and kept as rollback authority | `services/scheduler.js`, `routes/calls.js`, `pipecat/api/routes/telnyx.py` | Good for today's lower-volume runtime, but not the 2,000-user burst target. It uses one Node scheduler leader, in-process dedupe maps, fixed legacy dial concurrency, and inline post-call work. |
+| **Queue + capacity architecture** | Implemented on `zuludev`, gated by rollout flags | `services/call-queue.js`, `services/call-schedules.js`, `services/pipecat-capacity.js`, `pipecat/services/capacity.py`, `services/post-call-jobs.js`, `services/phase8-autoscaler.js` | The path to 2,000 active seniors: durable queue rows, Postgres leases/guards, Redis capacity heartbeats/reservations, canary cohorts, post-call job DAG, and pre-window replica planning. |
+
+Do not describe the queue system as fully cut over until the environment is running `CALL_ARCHITECTURE_MODE=queue_primary` with `CALL_QUEUE_ALLOW_REAL_DIAL=true` and the Phase 7/8 evidence has been saved. Until then, legacy and queue code intentionally coexist.
+
+The documented path beyond 2,000 users is in [`docs/plans/2026-05-18-scale-to-2000-users-technical-plan.md`](docs/plans/2026-05-18-scale-to-2000-users-technical-plan.md#8-forward-path-to-10000-users). The 10k path is **not a completed runtime**; it is a forward plan built on the queue architecture, with explicit triggers for `ops.*`/partitioned operational tables, Redis Cluster or multi-region Redis, caller-ID pool strategy, provider sharding/failover, workflow-engine execution for post-call work, and larger retention/archive strategy.
 
 ---
 
@@ -256,7 +277,12 @@ Config: `playwright.config.ts` (root). Guide: [`docs/guides/FRONTEND_TESTING.md`
 │   ├── backfill-reminder-delivery-keys.js  Race-safe delivery_key backfill with collision detection
 │   ├── backfill-call-schedules.js        preferredCallTimes → senior_call_schedules migration
 │   ├── run-live-telnyx-drill.js          Phase 0/5 staging live-call drill (consenting test phones only)
-│   └── validate-call-rollout-config.js   Validate CALL_ARCHITECTURE_MODE + queue flags before flip
+│   ├── validate-call-rollout-config.js   Validate CALL_ARCHITECTURE_MODE + queue flags before flip
+│   ├── phase5-live-ab-report.js          Phase 5 live A/B report (aggregate counters, PHI-free)
+│   ├── phase7-canary-report.js           Phase 7 canary daily report (reuses Phase 5 + adds allowlist size, 7-day SLO, PHI sentinel, P0/P1 incidents)
+│   ├── phase8-capacity-plan.js           Phase 8 pre-window capacity planner (reads call_queue + heartbeats; emits scale_up/hold/scale_down/wait_for_readiness)
+│   ├── run-phase8-autoscaler-once.js     Phase 8 autoscaler single-tick driver (dry-run unless `--confirm-scale`)
+│   └── run-post-call-worker-once.js      Phase 6 post-call worker shadow runner (artifact_verification mode by default; `--confirm-db-writes` to apply)
 ├── .github/workflows/
 │   ├── ci.yml                   PR pipeline: tests → staging deploy → smoke tests
 │   └── deploy.yml               Production deploy on push to main
@@ -285,6 +311,9 @@ Serves all API endpoints that frontends consume. Also runs the reminder schedule
 │   ├── daily-context.js Daily context queries
 │   ├── conversations.js Conversation history
 │   ├── call-analyses.js Analysis results
+│   ├── post-call-jobs.js Phase 6 admin: list dead-letter jobs + replay one (`requireAdmin`)
+│   ├── scale-operations.js Phase 8 admin: capacity plan, autoscaler one-shot, operator override (`requireAdmin`)
+│   ├── canary.js       Phase 7 admin canary cohort membership (`requireAdmin`, senior IDs only)
 │   └── health.js, helpers.js, index.js
 │
 ├── services/            Dual implementation with pipecat/services/
@@ -293,6 +322,10 @@ Serves all API endpoints that frontends consume. Also runs the reminder schedule
 │   ├── call-schedules.js Materializer: normalizes preferredCallTimes → senior_call_schedules → call_queue rows
 │   ├── pipecat-capacity.js Node reader of pipecat:instance:* heartbeats (Redis/Upstash/local fallback)
 │   ├── redis-rate-limit-store.js Distributed rate-limit store for Node SlowAPI equivalent
+│   ├── post-call-jobs.js Phase 6 post-call DAG: 8 job types, dependency graph, retry policies, provider semaphores (db/geminiFlash/openAiEmbeddings/resend), dead-letter handling
+│   ├── phase8-autoscaler.js Phase 8 actuator: reads capacity plan, applies Railway scale (dry-run by default), operator overrides
+│   ├── railway-scaling.js Railway CLI shell (`railway scale REGION=REPLICAS`)
+│   ├── canary-cohort.js Phase 7 canary membership source of truth; env allowlist remains emergency fallback
 │   ├── context-cache.js Pre-cache senior context
 │   ├── memory.js        Semantic memory, pgvector
 │   ├── call-analyses.js Post-call analysis API queries
@@ -320,7 +353,7 @@ Serves all API endpoints that frontends consume. Also runs the reminder schedule
 │   ├── schema.js        Drizzle tables for seniors, reminders, notifications, waitlist, audit logs, etc.
 │   ├── client.js        Neon PostgreSQL + Drizzle ORM init
 │   ├── setup-pgvector.js
-│   └── migrations/      010_call_queue_foundation.sql (6 queue tables: senior_call_schedules, call_queue, call_attempts, post_call_jobs, outbound_call_guards, scheduler_shadow_comparisons) + 011_call_queue_concurrent_indexes.sql (CREATE INDEX CONCURRENTLY — run outside transactions) + 012_post_call_job_state_machine.sql
+│   └── migrations/      Queue rollout tables/indexes: senior_call_schedules, call_queue, call_attempts, post_call_jobs, outbound_call_guards, scheduler_shadow_comparisons, canary_cohort_membership. There are byte-identical numbered compatibility copies for the queue foundation/index/job migrations; follow the Phase 1 runbook before live apply.
 │
 ├── validators/schemas.js  Zod validation schemas
 ├── lib/                   logger.js, sanitize.js, encryption.js (AES-256-GCM PHI encryption)
@@ -334,17 +367,20 @@ Serves all API endpoints that frontends consume. Also runs the reminder schedule
 ```
 docs/
 ├── operations/                   Operational runbooks (active rollouts)
-│   ├── scale-2000-phase0-readiness.md   Phase 0 baseline + decision-log gate
-│   ├── scale-2000-phase1-migration-runbook.md  Queue/idempotency migration order + safety
-│   ├── scale-2000-live-drills.md        Staging dual-path scheduler + live Telnyx drill
-│   └── templates/                       phase0-cost-assumptions JSON templates
+│   ├── scale-2000-phase0-readiness.md         Phase 0 baseline + decision-log gate
+│   ├── scale-2000-phase1-migration-runbook.md Queue/idempotency migration order + safety
+│   ├── scale-2000-live-drills.md              Staging dual-path scheduler + live Telnyx drill
+│   ├── scale-2000-phase5-live-ab-runbook.md   Phase 5 live A/B and rollback timing drill
+│   ├── scale-2000-phase7-canary-runbook.md    Phase 7 5→10→25 senior live canary + daily report
+│   ├── scale-2000-phase8-capacity-runbook.md  Phase 8 pre-window capacity plan + autoscaler tick
+│   └── templates/                             phase0-cost-assumptions JSON templates
 ├── architecture/                 Architecture suite (current, authoritative)
 │   (see also: pipecat/docs/LEARNINGS.md for engineering learnings)
 │   ├── OVERVIEW.md               High-level architecture
 │   ├── ARCHITECTURE.md           System architecture reference
 │   ├── FEATURES.md               Complete product feature inventory
 │   ├── SECURITY.md               Authentication, validation, PII
-│   ├── SCALABILITY.md            Admission control, pooling, Redis
+│   ├── SCALABILITY.md            Legacy vs queue scale architecture, 2,000-user target, and 10k path
 │   ├── COST.md                   Per-call cost breakdown
 │   ├── TESTING.md                3-level test architecture
 │   └── PERFORMANCE.md            Latency, prefetch, circuit breakers

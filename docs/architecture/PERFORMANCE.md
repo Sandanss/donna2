@@ -68,7 +68,7 @@ The dispatcher reads available capacity from a cross-replica registry before iss
 |---|---|---|
 | `instance_id` | Pipecat env (`HOSTNAME` / `RAILWAY_REPLICA_ID`) | dedupe heartbeats |
 | `active_calls` | Pipecat in-process counter | per-instance occupancy |
-| `inbound_active_calls` | Pipecat counter (calls without `is_outbound=true`) | inbound-lane reserve |
+| `inbound_active_calls` | Pipecat counter (calls without `is_outbound=true`) | subtract inbound load from outbound capacity |
 | `max_calls` | Pipecat `MAX_CALLS` config | per-instance ceiling |
 | `pending_start_count` | active reservations not yet attached to a call | overbook protection |
 | `draining` | `_is_draining()` global | dispatcher excludes the replica |
@@ -79,9 +79,44 @@ Publisher: `pipecat/services/capacity.py` writes to `pipecat:instance:{id}` ever
 
 **Lease mechanics**: `services/call-queue.js:leaseQueuedCalls` uses `FOR UPDATE SKIP LOCKED` over `call_queue` and writes `(lease_owner, lease_expires_at)`. `reconcileQueueLeases` recovers expired leases and expires overdue queued rows past `latest_at`.
 
-**Lane policy**: `DEFAULT_LANE_RESERVE_POLICY` reserves capacity for `reminders`, `manual`, `scheduled`, and `inbound` lanes so a flood of one lane cannot starve another. Lane reserves are computed against the *summed available slots across replicas*, not a single replica's slack.
+**Lane policy**: `DEFAULT_LANE_RESERVE_POLICY` reserves queue dispatch capacity for `manual`, `hard_reminder`, `reminder_retry`, `scheduled_checkin`, `welfare`, and `low_priority_retry`. Inbound calls are not queue-leased; they are reflected in `inbound_active_calls` and reduce available outbound capacity through the heartbeat totals. Lane reserves are computed against the summed available slots across replicas, not a single replica's slack.
 
 **Rate-limit at the edge**: `pipecat/api/middleware/rate_limit.py` uses Redis storage when `REDIS_RATE_LIMITS_ENABLED=true` (fail-closed via `swallow_errors=False`). Service-to-service traffic from the labeled dispatcher API key bypasses the per-IP public limit — see [SECURITY.md](SECURITY.md) for the carve-out shape.
+
+---
+
+## Post-Call Job Workflow (Phase 6)
+
+**Active files**: `services/post-call-jobs.js`, `scripts/run-post-call-worker-once.js`, `db/migrations/012_post_call_job_state_machine.sql`
+
+Post-call work runs out-of-band so the hang-up critical path stays bounded. Jobs lease via `FOR UPDATE SKIP LOCKED` on `post_call_jobs`, respect the dependency DAG (`depends_on UUID[]` — no job leases while any prerequisite is unfinished), and execute under per-provider semaphores so external rate limits cannot be exceeded by a worker stampede.
+
+**Provider concurrency caps:** `db=200`, `anthropicHaiku=1`, `geminiFlash=1`, `openAiEmbeddings=1`, `resend=1`. Each post-call job type maps to exactly one provider lane (`analysis → geminiFlash`, `memory_extraction → openAiEmbeddings`, `caregiver_notifications → resend`, etc.), so the entire fleet of workers holds at most N concurrent leases per external dependency regardless of replica count.
+
+**Retry policy:** default `maxAttempts=5` with backoff `[30, 120, 480, 1920]` seconds; `analysis` and `memory_extraction` use a longer schedule (`[60, 300, 1800, 7200]`). After `maxAttempts`, the job is moved to `dead_letter` with a PHI-free reason code; the partial index `idx_post_call_jobs_dead_letter` keeps dead-letter scans cheap.
+
+**Shadow rollout:** `scripts/run-post-call-worker-once.js` defaults to `handler-mode=artifact_verification`, which leases real jobs and computes the would-be output without writing. `--confirm-db-writes` is required to actually mutate the database. Use this mode for Phase 6 backlog-drain and provider-concurrency evidence before committing artifacts.
+
+---
+
+## Capacity Planning (Phase 8)
+
+**Active files**: `scripts/phase8-capacity-plan.js`, `services/phase8-autoscaler.js`, `services/railway-scaling.js`
+
+The Phase 8 planner reads future `call_queue` rows for a window plus live `pipecat:instance:*` heartbeats, and emits a single `recommendation`:
+
+| Action | Trigger |
+|---|---|
+| `scale_up` | projected window load > current usable capacity (after lane reserves), and `hourly_cost_budget` check passes |
+| `wait_for_readiness` | one or more current replicas have not crossed the warm-up gate yet — do not count them as usable |
+| `hold` | current count meets the window |
+| `scale_down` | current count > target + safety; only applied if operator confirms checks pass |
+
+**Warm-up window:** `PHASE8_WARMUP_MINUTES` (default 20) + `PHASE8_READY_MINUTES_BEFORE_WINDOW` (default 10). The autoscaler must apply `scale_up` early enough that new replicas finish warmup before the window opens; the planner is invoked at least 30 minutes ahead of a known call window per the runbook.
+
+**Budget guard:** `hourly_cost_budget` is checked as `cost-per-replica-hour × targetReplicas ≤ hourly-budget`. A failed budget check short-circuits `scale_up` even if traffic would justify it; the operator gets a planner output explaining the gap and must use the admin override path to proceed.
+
+**Defaults are safety-first.** `PHASE8_AUTOSCALER_DRY_RUN=true` and `PHASE8_AUTOSCALER_CONFIRM_SCALE=false` mean the long-running autoscaler loop is off by default. Production enables it only after Phase 7 exits cleanly. Every actuation writes an audit row with `operation=phase8_operator_override` (when manual) or the planner's reason code. Lane reserves from the dispatcher are summed across replicas the same way they are at lease time — the planner cannot recommend a target that violates the active lane policy.
 
 ---
 

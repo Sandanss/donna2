@@ -212,6 +212,15 @@ Runs automatically after every call disconnect:
 - Graceful shutdown with active call tracking (7s drain on SIGTERM)
 - Enhanced /health endpoint (database + circuit breaker states)
 
+### Scale Rollout
+- Legacy Node scheduler/dialer remains available as the current/rollback path
+- Queue architecture behind `CALL_ARCHITECTURE_MODE` supports shadow materialization, dry-run dispatch, canary queue dialing, queue-primary dialing, and legacy rollback
+- Durable `call_queue`, `call_attempts`, and `outbound_call_guards` prevent duplicate dialing across legacy and queue paths
+- Pipecat capacity heartbeats and queue reservations coordinate outbound dispatch across replicas
+- Phase 7 canary cohort membership is stored in `canary_cohort_membership`, with env allowlist as emergency fallback
+- Phase 8 capacity planner/autoscaler recommends Railway replica changes for known call windows; dry-run by default
+- The 10,000-user path is documented as forward work built on the queue architecture, not completed runtime support
+
 ### Deployment
 - Three environments: dev, staging, production
 - CI/CD: PRs → tests → staging deploy → smoke tests → production
@@ -278,4 +287,4 @@ Starts Director analysis before the user finishes speaking:
 
 ---
 
-*Last updated: April 2026 — current Director/provider and tool architecture*
+*Last updated: May 2026 — current Director/provider, tool architecture, and scale rollout status*

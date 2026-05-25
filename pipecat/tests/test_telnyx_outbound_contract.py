@@ -42,3 +42,17 @@ def test_node_outbound_call_contract_rejects_missing_senior_id():
 
     with pytest.raises(ValidationError):
         TelnyxOutboundCallRequest.model_validate(payload)
+
+
+def test_node_outbound_call_contract_accepts_queue_reservation_fields():
+    payload = load_fixture("check-in")
+    payload["queueId"] = "queue-1"
+    payload["reservationId"] = "reservation-1"
+
+    request = TelnyxOutboundCallRequest.model_validate(payload)
+    serialized = request.model_dump(by_alias=True, mode="json", exclude_none=True)
+
+    assert request.queue_id == "queue-1"
+    assert request.reservation_id == "reservation-1"
+    assert serialized["queueId"] == "queue-1"
+    assert serialized["reservationId"] == "reservation-1"

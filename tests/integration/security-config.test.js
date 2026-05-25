@@ -62,6 +62,36 @@ describe('security config', () => {
     expect(errors).toEqual([]);
   });
 
+  it('accepts Upstash shared state when Pipecat Redis is required', () => {
+    const errors = validateNodeSecurityConfig({
+      ENVIRONMENT: 'production',
+      JWT_SECRET: 'not-the-default-secret',
+      DONNA_API_KEYS: 'pipecat:key-one',
+      FIELD_ENCRYPTION_KEY: fieldKey(),
+      CLERK_SECRET_KEY: 'clerk-secret',
+      PIPECAT_PUBLIC_URL: 'https://pipecat.example.com',
+      PIPECAT_REQUIRE_REDIS: 'true',
+      UPSTASH_REDIS_REST_URL: 'https://redis.example.com',
+      UPSTASH_REDIS_REST_TOKEN: 'token',
+    });
+
+    expect(errors).toEqual([]);
+  });
+
+  it('requires shared state when Redis rate limits are enabled in production', () => {
+    const errors = validateNodeSecurityConfig({
+      ENVIRONMENT: 'production',
+      JWT_SECRET: 'not-the-default-secret',
+      DONNA_API_KEYS: 'pipecat:key-one',
+      FIELD_ENCRYPTION_KEY: fieldKey(),
+      CLERK_SECRET_KEY: 'clerk-secret',
+      PIPECAT_PUBLIC_URL: 'https://pipecat.example.com',
+      REDIS_RATE_LIMITS_ENABLED: 'true',
+    });
+
+    expect(errors).toContain('REDIS_URL or UPSTASH_REDIS_REST_URL/UPSTASH_REDIS_REST_TOKEN is required when REDIS_RATE_LIMITS_ENABLED=true');
+  });
+
   it('validates 32-byte base64url field encryption keys', () => {
     expect(isValidFieldEncryptionKey(fieldKey())).toBe(true);
     expect(isValidFieldEncryptionKey('too-short')).toBe(false);

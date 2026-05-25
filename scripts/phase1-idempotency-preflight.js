@@ -108,7 +108,7 @@ async function checkReminderDeliveryBackfillCollisions(database) {
     'delivery_key',
   ]);
   const name = 'reminder_deliveries_delivery_key_backfill_collisions';
-  const migration = 'db/migrations/010_call_queue_concurrent_indexes.sql';
+  const migration = 'db/migrations/011_call_queue_concurrent_indexes.sql';
 
   if (!availability.available) {
     return missingCheck({ name, migration, missing: availability.missing });
@@ -134,13 +134,13 @@ export async function runPhase1IdempotencyPreflight({ database = db } = {}) {
   const checks = [
     await countDuplicateKeys(database, {
       name: 'conversations_call_sid_unique_ready',
-      migration: 'db/migrations/010_call_queue_concurrent_indexes.sql',
+      migration: 'db/migrations/011_call_queue_concurrent_indexes.sql',
       tableName: 'conversations',
       columnName: 'call_sid',
     }),
     await countDuplicateKeys(database, {
       name: 'reminder_deliveries_delivery_key_unique_ready',
-      migration: 'db/migrations/010_call_queue_concurrent_indexes.sql',
+      migration: 'db/migrations/011_call_queue_concurrent_indexes.sql',
       tableName: 'reminder_deliveries',
       columnName: 'delivery_key',
     }),

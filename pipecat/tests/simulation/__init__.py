@@ -36,6 +36,21 @@ from tests.simulation.pipeline import (
     build_live_sim_pipeline,
 )
 from tests.simulation.runner import run_simulated_call
+from tests.simulation.concurrent import (
+    ConcurrentCallOutcome,
+    ConcurrentCallSpec,
+    ConcurrentRunSummary,
+    run_simulated_calls_concurrent,
+)
+from tests.simulation.cohort import (
+    DEFAULT_THRESHOLDS,
+    CohortComparison,
+    CohortSloReport,
+    CohortSloThresholds,
+    SloBreach,
+    build_cohort_report,
+    compare_cohorts,
+)
 from tests.simulation.transport import (
     AudioCallerTransport,
     CallerEvent,
@@ -43,6 +58,10 @@ from tests.simulation.transport import (
     CallResult,
     ResponseCollector,
     TextCallerTransport,
+    TtsProvider,
+    cartesia_tts_provider,
+    elevenlabs_tts_provider,
+    silence_tts_provider,
 )
 
 __all__ = [
@@ -53,16 +72,31 @@ __all__ = [
     "CallerEvent",
     "CallerTransport",
     "CallResult",
+    "CohortComparison",
+    "CohortSloReport",
+    "CohortSloThresholds",
+    "ConcurrentCallOutcome",
+    "ConcurrentCallSpec",
+    "ConcurrentRunSummary",
+    "DEFAULT_THRESHOLDS",
     "LiveSimComponents",
     "LiveSimScenario",
     "ResponseCollector",
+    "SloBreach",
     "TestSenior",
     "TextCallerTransport",
+    "TtsProvider",
+    "build_cohort_report",
+    "cartesia_tts_provider",
+    "elevenlabs_tts_provider",
+    "silence_tts_provider",
     "build_live_sim_pipeline",
     "build_session_state",
     "cleanup_test_senior",
+    "compare_cohorts",
     "create_test_conversation",
     "run_simulated_call",
+    "run_simulated_calls_concurrent",
     "seed_test_senior",
     "memory_recall_scenario",
     "memory_seed_scenario",

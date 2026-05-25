@@ -23,7 +23,7 @@ describe('Telnyx service Node to Pipecat contract', () => {
   beforeEach(() => {
     process.env = {
       ...originalEnv,
-      DONNA_API_KEYS: 'pipecat:test-pipecat-key,node:test-node-key',
+      DONNA_API_KEYS: 'pipecat:test-pipecat-key,node:test-node-key,dispatcher:test-dispatcher-key',
       PIPECAT_PUBLIC_URL: '',
       PIPECAT_BASE_URL: '',
     };
@@ -72,6 +72,47 @@ describe('Telnyx service Node to Pipecat contract', () => {
 
     const [, options] = fetch.mock.calls[0];
     expect(JSON.parse(options.body)).toEqual(fixture);
+  });
+
+  it('preserves queue reservation fields sent to Pipecat', async () => {
+    const fixture = {
+      ...loadFixture('check-in'),
+      queueId: 'queue-1',
+      reservationId: 'reservation-1',
+    };
+
+    await initiateTelnyxOutboundCall({
+      ...fixture,
+      baseUrl: 'https://pipecat.example.test',
+    });
+
+    const [, options] = fetch.mock.calls[0];
+    expect(JSON.parse(options.body)).toEqual(fixture);
+  });
+
+  it('uses the dispatcher service key for queue dispatcher calls without sending the label to Pipecat', async () => {
+    const fixture = {
+      ...loadFixture('check-in'),
+      queueId: 'queue-1',
+      reservationId: 'reservation-1',
+      serviceLabel: 'dispatcher',
+    };
+
+    await initiateTelnyxOutboundCall({
+      ...fixture,
+      baseUrl: 'https://pipecat.example.test',
+    });
+
+    const [, options] = fetch.mock.calls[0];
+    expect(options.headers).toMatchObject({
+      'x-api-key': 'test-dispatcher-key',
+    });
+    expect(JSON.parse(options.body)).toEqual({
+      seniorId: fixture.seniorId,
+      callType: fixture.callType,
+      queueId: 'queue-1',
+      reservationId: 'reservation-1',
+    });
   });
 
   it('posts the prewarm payload subset Pipecat expects before reminder calls', async () => {

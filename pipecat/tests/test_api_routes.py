@@ -32,6 +32,13 @@ class FakeSharedState:
         self.data[key] = value
         self.ttls[key] = ttl
 
+    async def set_if_absent(self, key, value, ttl=None):
+        if key in self.data:
+            return False
+        self.data[key] = value
+        self.ttls[key] = ttl
+        return True
+
     async def get(self, key):
         return self.data.get(key)
 
@@ -87,6 +94,27 @@ class TestHealthEndpoint:
         data = response.json()
         assert data["status"] == "degraded"
         assert data["database"] == "error"
+
+    @patch("db.check_health", new_callable=AsyncMock, return_value=True)
+    @patch("db.client.get_pool_stats", new_callable=AsyncMock, return_value={})
+    def test_health_degraded_when_required_shared_state_missing(self, mock_pool_stats, mock_db_health, client, monkeypatch):
+        from lib.redis_client import reset_shared_state_for_tests
+
+        monkeypatch.setenv("PIPECAT_REQUIRE_REDIS", "true")
+        monkeypatch.delenv("REDIS_URL", raising=False)
+        monkeypatch.delenv("UPSTASH_REDIS_REST_URL", raising=False)
+        monkeypatch.delenv("UPSTASH_REDIS_REST_TOKEN", raising=False)
+        reset_shared_state_for_tests()
+        try:
+            response = client.get("/health")
+        finally:
+            reset_shared_state_for_tests()
+
+        assert response.status_code == 503
+        data = response.json()
+        assert data["status"] == "degraded"
+        assert data["shared_state"]["ok"] is False
+        assert data["shared_state"]["error"] == "shared_state_not_configured"
 
 
 class TestTelnyxAndCallContext:
@@ -169,6 +197,55 @@ class TestTelnyxAndCallContext:
             assert mock_answered.await_count == 1
         finally:
             telnyx._recent_telnyx_event_ids.clear()
+
+    def test_telnyx_events_deduplicate_event_ids_in_shared_state(self, client):
+        from api.routes import telnyx
+
+        state = FakeSharedState()
+        payload = {
+            "data": {
+                "id": "evt-shared-duplicate",
+                "event_type": "call.answered",
+                "payload": {"call_control_id": "v3:test-call"},
+            }
+        }
+
+        with patch("lib.redis_client.get_shared_state", return_value=state), \
+             patch.object(telnyx, "_handle_call_answered", new=AsyncMock()) as mock_answered:
+            first = client.post("/telnyx/events", json=payload)
+            second = client.post("/telnyx/events", json=payload)
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert second.json() == {"received": True, "duplicate": True}
+        assert state.ttls["telnyx:event:evt-shared-duplicate"] == 600
+        assert mock_answered.await_count == 1
+
+    def test_telnyx_events_fail_closed_when_required_dedupe_unavailable(self, client, monkeypatch):
+        from lib.redis_client import reset_shared_state_for_tests
+
+        monkeypatch.setenv("PIPECAT_REQUIRE_REDIS", "true")
+        monkeypatch.delenv("REDIS_URL", raising=False)
+        monkeypatch.delenv("UPSTASH_REDIS_REST_URL", raising=False)
+        monkeypatch.delenv("UPSTASH_REDIS_REST_TOKEN", raising=False)
+        reset_shared_state_for_tests()
+
+        try:
+            response = client.post(
+                "/telnyx/events",
+                json={
+                    "data": {
+                        "id": "evt-requires-shared-state",
+                        "event_type": "call.answered",
+                        "payload": {"call_control_id": "v3:test-call"},
+                    }
+                },
+            )
+        finally:
+            reset_shared_state_for_tests()
+
+        assert response.status_code == 503
+        assert response.json()["detail"] == "Shared webhook dedupe unavailable"
 
     @pytest.mark.asyncio
     async def test_bot_loads_metadata_from_local_state_first(self):
@@ -365,13 +442,20 @@ class TestTelnyxAndCallContext:
                  patch.object(telnyx, "_prepare_reminder_context", new=AsyncMock(return_value=(None, None))), \
                  patch.object(telnyx, "_store_senior_metadata", new=AsyncMock(return_value={})) as mock_store:
                 result = await telnyx.create_telnyx_outbound_call(
-                    telnyx.TelnyxOutboundCallRequest(seniorId="senior-1", callType="check-in")
+                    telnyx.TelnyxOutboundCallRequest(
+                        seniorId="senior-1",
+                        callType="check-in",
+                        queueId="queue-1",
+                        reservationId="reservation-1",
+                    )
                 )
 
             dial_payload = mock_post.await_args.args[1]
             metadata = call_metadata["v3:test-call"]
 
             assert result["callSid"] == "v3:test-call"
+            assert result["queueId"] == "queue-1"
+            assert result["reservationId"] == "reservation-1"
             assert "stream_url" not in dial_payload
             assert "stream_auth_token" not in dial_payload
             assert dial_payload["answering_machine_detection"] == "premium"
@@ -383,6 +467,8 @@ class TestTelnyxAndCallContext:
             assert metadata["telnyx_amd_status"] == "pending"
             assert metadata["telnyx_voicemail_detected"] is False
             assert metadata["senior"]["id"] == "senior-1"
+            assert metadata["queue_id"] == "queue-1"
+            assert metadata["reservation_id"] == "reservation-1"
             mock_store.assert_awaited_once()
         finally:
             call_metadata.clear()
@@ -708,6 +794,66 @@ class TestTelnyxAndCallContext:
             assert metadata["conversation_id"] == "conv-1"
             assert call_metadata["v3:test-call"]["telnyx_stream_started"] is True
             mock_start.assert_awaited_once_with("v3:test-call", "token-123")
+        finally:
+            call_metadata.clear()
+
+    @pytest.mark.asyncio
+    async def test_maybe_start_telnyx_stream_uses_shared_start_lock(self):
+        from api.routes import telnyx
+        from api.routes.call_context import call_metadata
+
+        state = FakeSharedState()
+        call_metadata.clear()
+        call_metadata["v3:test-call"] = {
+            "ws_token": "token-123",
+            "ws_token_expires_at": time.time() + 300,
+            "ws_token_consumed": False,
+            "telephony_provider": "telnyx",
+            "telnyx_start_stream_after_answer": True,
+            "telnyx_answered": True,
+            "telnyx_context_ready": True,
+            "telnyx_stream_started": False,
+        }
+
+        try:
+            with patch("lib.redis_client.get_shared_state", return_value=state), \
+                 patch.object(telnyx, "_persist_metadata", new=AsyncMock()), \
+                 patch.object(telnyx, "_start_telnyx_stream", new=AsyncMock()) as mock_start:
+                first = await telnyx._maybe_start_telnyx_stream("v3:test-call", reason="test")
+
+            assert first is True
+            assert state.ttls["telnyx:stream_started:v3:test-call"] == 7200
+            mock_start.assert_awaited_once_with("v3:test-call", "token-123")
+        finally:
+            call_metadata.clear()
+
+    @pytest.mark.asyncio
+    async def test_maybe_start_telnyx_stream_suppresses_duplicate_shared_claim(self):
+        from api.routes import telnyx
+        from api.routes.call_context import call_metadata
+
+        state = FakeSharedState()
+        state.data["telnyx:stream_started:v3:test-call"] = {"claimed_at": time.time()}
+        call_metadata.clear()
+        call_metadata["v3:test-call"] = {
+            "ws_token": "token-123",
+            "ws_token_expires_at": time.time() + 300,
+            "ws_token_consumed": False,
+            "telephony_provider": "telnyx",
+            "telnyx_start_stream_after_answer": True,
+            "telnyx_answered": True,
+            "telnyx_context_ready": True,
+            "telnyx_stream_started": False,
+        }
+
+        try:
+            with patch("lib.redis_client.get_shared_state", return_value=state), \
+                 patch.object(telnyx, "_start_telnyx_stream", new=AsyncMock()) as mock_start:
+                started = await telnyx._maybe_start_telnyx_stream("v3:test-call", reason="test")
+
+            assert started is False
+            assert call_metadata["v3:test-call"]["telnyx_stream_started"] is False
+            mock_start.assert_not_awaited()
         finally:
             call_metadata.clear()
 

@@ -66,6 +66,40 @@ class TestPostCallProcessing:
             mock_cache_clear.assert_called_once_with("senior-test-001")
 
     @pytest.mark.asyncio
+    async def test_post_call_enqueues_job_graph_when_enabled(self, session_state, monkeypatch):
+        """Queue materialization is gated, PHI-free, and does not replace inline processing yet."""
+        monkeypatch.setenv("POST_CALL_QUEUE_ENABLED", "true")
+        session_state["_transcript"] = [
+            {"role": "user", "content": "Hello Donna"},
+            {"role": "assistant", "content": "Hello!"},
+        ]
+
+        tracker = ConversationTrackerProcessor(session_state=session_state)
+        tracker.state.topics_discussed = ["greeting"]
+        tracker.state.advice_given = []
+
+        with patch("services.post_call_jobs.maybe_enqueue_post_call_job_graph", new_callable=AsyncMock) as mock_enqueue, \
+             patch("services.conversations.complete", new_callable=AsyncMock), \
+             patch("services.call_analysis.analyze_completed_call", new_callable=AsyncMock, return_value={"summary": "Good call"}), \
+             patch("services.call_analysis.save_call_analysis", new_callable=AsyncMock), \
+             patch("services.memory.extract_from_conversation", new_callable=AsyncMock), \
+             patch("services.interest_discovery.discover_new_interests", return_value=[]), \
+             patch("services.interest_discovery.compute_interest_scores", new_callable=AsyncMock, return_value={}), \
+             patch("services.interest_discovery.update_interest_scores", new_callable=AsyncMock), \
+             patch("services.daily_context.save_call_context", new_callable=AsyncMock), \
+             patch("services.context_cache.clear_cache"), \
+             patch("services.scheduler.clear_reminder_context_async", new_callable=AsyncMock):
+
+            from services.post_call import run_post_call
+            await run_post_call(session_state, tracker, duration_seconds=60)
+
+        mock_enqueue.assert_awaited_once_with(
+            conversation_id="conv-test-001",
+            call_sid="CA-test-001",
+            senior_id="senior-test-001",
+        )
+
+    @pytest.mark.asyncio
     async def test_post_call_with_unacknowledged_reminder(self, reminder_session_state):
         """Undelivered reminders should trigger mark_call_ended_without_acknowledgment."""
         reminder_session_state["_transcript"] = [
@@ -310,6 +344,130 @@ class TestPostCallProcessing:
         assert args[6] == 4
         token_usage_json = json.loads(args[11])
         assert token_usage_json["llm_invocation_count"] == 5
+
+    @pytest.mark.asyncio
+    async def test_persist_call_metrics_third_retry_overwrites_not_accumulates(self, session_state):
+        """Three INSERT->UPDATE cycles must overwrite, not accumulate.
+
+        Background: each invocation of `_persist_call_metrics` issues an
+        INSERT. On UniqueViolation it falls back to UPDATE with the SAME
+        parameters. A second / third invocation for the same call_sid (e.g.
+        from a retried post-call job) must therefore overwrite the existing
+        row to reflect the latest input — never sum prior columns.
+        """
+        from services.post_call import _persist_call_metrics
+
+        class UniqueViolationError(Exception):
+            sqlstate = "23505"
+
+        # Three successive post-call snapshots for the same call_sid. Every
+        # numeric value differs so accumulation would be obvious if it ever
+        # crept in.
+        snapshots = [
+            {
+                "error_count": 1,
+                "metrics": {
+                    "token_usage": {"prompt_tokens": 100, "completion_tokens": 50},
+                    "turn_count": 4,
+                    "llm_ttfb_values": [200, 400],  # avg 300
+                },
+            },
+            {
+                "error_count": 2,
+                "metrics": {
+                    "token_usage": {"prompt_tokens": 200, "completion_tokens": 80},
+                    "turn_count": 5,
+                    "llm_ttfb_values": [500],  # avg 500
+                },
+            },
+            {
+                "error_count": 7,
+                "metrics": {
+                    "token_usage": {"prompt_tokens": 333, "completion_tokens": 110},
+                    "turn_count": 6,
+                    "llm_ttfb_values": [800],  # avg 800
+                },
+            },
+        ]
+
+        captured_args = []
+
+        with patch("db.client.execute", new_callable=AsyncMock) as mock_execute:
+            # For each invocation: INSERT raises UniqueViolationError, then
+            # UPDATE succeeds. So for 3 invocations we need 6 calls with
+            # alternating exception / success.
+            mock_execute.side_effect = [
+                UniqueViolationError(), None,
+                UniqueViolationError(), None,
+                UniqueViolationError(), None,
+            ]
+
+            for snap in snapshots:
+                session_state["_call_metrics"] = snap["metrics"]
+                await _persist_call_metrics(
+                    session_state, 60, None, error_count=snap["error_count"]
+                )
+                # Capture the UPDATE args (the second call of each pair).
+                captured_args.append(mock_execute.await_args_list[-1].args)
+
+        # 3 invocations × 2 execute calls each = 6 total
+        assert mock_execute.await_count == 6
+
+        # Each captured UPDATE must be `UPDATE call_metrics ... WHERE call_sid = $1`.
+        for args in captured_args:
+            assert "UPDATE call_metrics" in args[0]
+
+        # Verify each UPDATE reflects ONLY its own snapshot's values
+        # (overwrites, never accumulates).
+        for idx, snap in enumerate(snapshots):
+            args = captured_args[idx]
+            # Positional args after the SQL string:
+            # $1=call_sid, $2=senior_id, $3=call_type, $4=duration_seconds,
+            # $5=end_reason, $6=turn_count, $7=phase_durations, $8=latency,
+            # $9=breaker_states, $10=tools_used, $11=token_usage, $12=error_count,
+            # $13=context_trace_encrypted
+            turn_count = args[6]
+            latency_json = json.loads(args[8])
+            token_usage_json = json.loads(args[11])
+            error_count = args[12]
+
+            assert error_count == snap["error_count"], f"error_count drifted at retry #{idx + 1}"
+            assert turn_count == snap["metrics"]["turn_count"]
+            assert token_usage_json["prompt_tokens"] == snap["metrics"]["token_usage"]["prompt_tokens"]
+
+            # Latency average reflects only THIS invocation's samples — if it
+            # were accumulating, the average would skew lower across retries.
+            expected_avg = round(
+                sum(snap["metrics"]["llm_ttfb_values"]) / len(snap["metrics"]["llm_ttfb_values"])
+            )
+            assert latency_json["llm_ttfb_avg_ms"] == expected_avg
+
+        # Final row reflects the LAST snapshot, not the sum.
+        final_args = captured_args[-1]
+        final_token_usage = json.loads(final_args[11])
+        final_latency = json.loads(final_args[8])
+
+        assert final_args[12] == 7  # NOT 1 + 2 + 7 == 10
+        assert final_token_usage["prompt_tokens"] == 333  # NOT 100 + 200 + 333
+        assert final_latency["llm_ttfb_avg_ms"] == 800  # NOT some accumulated value
+
+    @pytest.mark.asyncio
+    async def test_persist_call_metrics_updates_duplicate_call_sid(self, session_state):
+        from services.post_call import _persist_call_metrics
+
+        class UniqueViolationError(Exception):
+            sqlstate = "23505"
+
+        session_state["_call_metrics"] = {"token_usage": {}, "turn_count": 2}
+
+        with patch("db.client.execute", new_callable=AsyncMock) as mock_execute:
+            mock_execute.side_effect = [UniqueViolationError(), None]
+            await _persist_call_metrics(session_state, 60, None, error_count=0)
+
+        assert mock_execute.await_count == 2
+        update_sql = mock_execute.await_args_list[1].args[0]
+        assert "UPDATE call_metrics" in update_sql
+        assert "WHERE call_sid = $1" in update_sql
 
     @pytest.mark.asyncio
     async def test_post_call_discovers_new_interests(self, session_state):

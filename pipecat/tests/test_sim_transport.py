@@ -8,7 +8,7 @@ CallResult data classes.
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from pipecat.frames.frames import (
@@ -554,14 +554,19 @@ class TestCallerTransportProtocol:
 
 
 def _make_mock_task() -> MagicMock:
-    """Create a mock PipelineTask with a recording queue_frame."""
+    """Create a mock PipelineTask with a recording queue_frame.
+
+    Pipecat 0.0.101's PipelineTask.queue_frame is async, so the mock uses
+    AsyncMock to match. Tests that drove the old sync signature continue
+    to work because they only inspect task._queued_frames.
+    """
     task = MagicMock()
     task._queued_frames: list[Frame] = []
 
-    def _queue(frame):
+    async def _queue(frame):
         task._queued_frames.append(frame)
 
-    task.queue_frame = MagicMock(side_effect=_queue)
+    task.queue_frame = AsyncMock(side_effect=_queue)
     return task
 
 
@@ -700,19 +705,41 @@ class TestTextCallerTransport:
 
 
 # ---------------------------------------------------------------------------
-# AudioCallerTransport — Phase 2 stub
+# AudioCallerTransport — constructor sanity checks
 # ---------------------------------------------------------------------------
+#
+# Frame-push mechanics, silence appending, and the realtime-vs-non-realtime
+# behaviors are covered by tests/test_simulation_audio_transport.py.
 
 
 class TestAudioCallerTransport:
-    """Tests for the AudioCallerTransport Phase 2 stub."""
+    """Construction sanity for the implemented AudioCallerTransport."""
 
-    def test_audio_caller_transport_raises_not_implemented(self):
-        """Constructing AudioCallerTransport raises NotImplementedError."""
+    def test_audio_caller_transport_constructs_with_required_args(self):
+        """AudioCallerTransport requires a TTS provider; pure construction
+        does not raise once one is supplied."""
+        from tests.simulation.transport import silence_tts_provider
+
         task = _make_mock_task()
         collector = ResponseCollector()
 
-        with pytest.raises(NotImplementedError, match="Phase 2"):
+        transport = AudioCallerTransport(
+            pipeline_task=task,
+            response_collector=collector,
+            tts_provider=silence_tts_provider(),
+        )
+        assert transport.collector is collector
+        assert transport.sample_rate == 16000
+
+    def test_audio_caller_transport_requires_tts_provider(self):
+        """Omitting tts_provider must raise TypeError (the previous stub
+        accepted any kwargs and raised NotImplementedError instead)."""
+        from tests.simulation.transport import silence_tts_provider  # noqa: F401
+
+        task = _make_mock_task()
+        collector = ResponseCollector()
+
+        with pytest.raises(TypeError):
             AudioCallerTransport(
                 pipeline_task=task,
                 response_collector=collector,

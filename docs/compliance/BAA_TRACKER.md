@@ -4,10 +4,10 @@
 
 | Field | Value |
 |-------|-------|
-| Last Updated | May 5, 2026 |
+| Last Updated | May 18, 2026 |
 | Owner | TBD |
 | Review Cadence | Quarterly |
-| Related Docs | [HIPAA Overview](HIPAA_OVERVIEW.md), [Vendor Security Evaluation](VENDOR_SECURITY_EVALUATION.md), [May 5 Audit](../audits/2026-05-05-codebase-audit.md) |
+| Related Docs | [HIPAA Overview](HIPAA_OVERVIEW.md), [Vendor Security Evaluation](VENDOR_SECURITY_EVALUATION.md), [May 5 Audit](../audits/2026-05-05-codebase-audit.md), [2,000-User Phase 0 Readiness](../operations/scale-2000-phase0-readiness.md) |
 
 ---
 
@@ -47,6 +47,29 @@ A **Business Associate Agreement (BAA)** is a legally binding contract required 
 | BAA Not Required | 2 | Vercel, GrowthBook |
 
 **Critical launch blocker: Zero BAAs are currently recorded as signed in this repo.** Active PHI flows send data to multiple vendors. Production PHI launch is blocked unless signed BAAs or documented legal determinations are verified outside the repo and then recorded here.
+
+## 2,000-User Scaling Phase 0 Inventory
+
+The 2,000-user scaling plan requires the capacity and BAA inventory below before live canary traffic. Populate measured peak, contract cap, owner, and target close date during Phase 0. Do not infer that a vendor is cleared for PHI just because technical scaling work exists.
+
+| Vendor / Service | Phase 0 Measurement | Contract Cap | BAA Status | Owner | Target Close |
+| --- | --- | --- | --- | --- | --- |
+| Anthropic Haiku input/output TPM | TBD | TBD | NOT SIGNED | TBD | TBD |
+| Anthropic Haiku concurrent calls | TBD | TBD | NOT SIGNED | TBD | TBD |
+| Deepgram concurrent streams | TBD | TBD | NOT SIGNED | TBD | TBD |
+| ElevenLabs concurrent TTS | TBD | TBD | NOT SIGNED / availability unclear | TBD | TBD |
+| Cartesia concurrent TTS fallback | TBD | TBD | NOT SIGNED / unlikely | TBD | TBD |
+| OpenAI embeddings RPM | TBD | TBD | NOT SIGNED | TBD | TBD |
+| OpenAI news / web search QPS | TBD | TBD | NOT SIGNED | TBD | TBD |
+| Tavily QPS | TBD | TBD | NOT SIGNED / unlikely | TBD | TBD |
+| Telnyx outbound concurrent channels | TBD | TBD | NOT SIGNED in repo | TBD | TBD |
+| Telnyx inbound concurrent channels | TBD | TBD | NOT SIGNED in repo | TBD | TBD |
+| Telnyx caller-ID pool / branded calling | TBD | TBD | NOT SIGNED in repo | TBD | TBD |
+| Neon pooled connections | TBD | TBD | NOT SIGNED | TBD | TBD |
+| Redis vendor | TBD | TBD | TBD by selected vendor | TBD | TBD |
+| Railway runtime/logging | TBD | TBD | NOT SIGNED / availability unclear | TBD | TBD |
+| Resend send rate | TBD | TBD | NOT SIGNED / availability unclear | TBD | TBD |
+| Sentry event volume | TBD | TBD | NOT SIGNED | TBD | TBD |
 
 ---
 

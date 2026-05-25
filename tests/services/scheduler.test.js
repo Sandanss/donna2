@@ -47,7 +47,10 @@ vi.mock('../../lib/growthbook.js', () => ({
   getValue: vi.fn(),
 }));
 
-const { schedulerService } = await import('../../services/scheduler.js');
+const {
+  filterLegacyExecutableCallPlan,
+  schedulerService,
+} = await import('../../services/scheduler.js');
 
 function buildScheduleSpec() {
   return {
@@ -98,6 +101,8 @@ function buildReminderSpec() {
 describe('schedulerService schedule-driven calls', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    delete process.env.CALL_ARCHITECTURE_MODE;
+    delete process.env.CALL_QUEUE_ALLOW_REAL_DIAL;
     mocks.initiateTelnyxOutboundCall.mockResolvedValue({
       callSid: 'v3:test-call',
       callControlId: 'v3:test-call',
@@ -106,6 +111,8 @@ describe('schedulerService schedule-driven calls', () => {
   });
 
   afterEach(() => {
+    delete process.env.CALL_ARCHITECTURE_MODE;
+    delete process.env.CALL_QUEUE_ALLOW_REAL_DIAL;
     vi.restoreAllMocks();
   });
 
@@ -158,6 +165,40 @@ describe('schedulerService schedule-driven calls', () => {
     );
   });
 
+  it('acquires a durable outbound guard in shadow mode before legacy dialing', async () => {
+    process.env.CALL_ARCHITECTURE_MODE = 'shadow_dispatch';
+    mocks.dbExecute
+      .mockResolvedValueOnce({ rows: [{ id: 'guard-1', guard_key: 'schedule:senior-1:2035-03-11:sched-1' }] })
+      .mockResolvedValueOnce({ rows: [{ id: 'guard-1', status: 'initiated' }] });
+    const spec = buildScheduleSpec();
+
+    const result = await schedulerService.triggerOutboundCall(spec, 'https://pipecat.example.test');
+
+    expect(result).toEqual(expect.objectContaining({
+      callSid: 'v3:test-call',
+      callControlId: 'v3:test-call',
+    }));
+    expect(mocks.dbExecute).toHaveBeenCalledTimes(2);
+    expect(mocks.initiateTelnyxOutboundCall).toHaveBeenCalledTimes(1);
+  });
+
+  it('suppresses legacy dialing when the durable guard is already held', async () => {
+    process.env.CALL_ARCHITECTURE_MODE = 'shadow_dispatch';
+    mocks.dbExecute
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ id: 'guard-1', guard_key: 'schedule:senior-1:2035-03-11:sched-1' }] });
+    const spec = buildScheduleSpec();
+
+    const result = await schedulerService.triggerOutboundCall(spec, 'https://pipecat.example.test');
+
+    expect(result).toBeNull();
+    expect(mocks.initiateTelnyxOutboundCall).not.toHaveBeenCalled();
+    expect(mocks.logger.info).toHaveBeenCalledWith(
+      'Outbound call suppressed by durable guard',
+      expect.objectContaining({ type: 'schedule', seniorId: 'senior-1' }),
+    );
+  });
+
   it('buildCallPlan deduplicates — scheduled calls prevent welfare for same senior', () => {
     const schedCalls = [{
       senior: { id: 'senior-1' },
@@ -194,11 +235,31 @@ describe('schedulerService schedule-driven calls', () => {
     expect(plan.map(spec => spec.type)).toEqual(['schedule', 'reminder', 'welfare']);
     expect(plan.map(spec => spec.senior.id)).toEqual(['senior-1', 'senior-3', 'senior-2']);
   });
+
+  it('filters canary-owned seniors out of legacy execution when queue canary dialing is live', () => {
+    const callPlan = [
+      { type: 'schedule', senior: { id: 'senior-1' } },
+      { type: 'schedule', senior: { id: 'senior-2' } },
+    ];
+
+    const legacyPlan = filterLegacyExecutableCallPlan(callPlan, {
+      mode: 'canary_queue',
+      allowRealDial: true,
+      canaryPercent: 0,
+      canarySeniorIds: ['senior-1'],
+    });
+
+    expect(legacyPlan).toEqual([
+      { type: 'schedule', senior: { id: 'senior-2' } },
+    ]);
+  });
 });
 
 describe('schedulerService reliability', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    delete process.env.CALL_ARCHITECTURE_MODE;
+    delete process.env.CALL_QUEUE_ALLOW_REAL_DIAL;
     mocks.initiateTelnyxOutboundCall.mockResolvedValue({
       callSid: 'v3:test-call',
       callControlId: 'v3:test-call',
@@ -207,6 +268,8 @@ describe('schedulerService reliability', () => {
   });
 
   afterEach(() => {
+    delete process.env.CALL_ARCHITECTURE_MODE;
+    delete process.env.CALL_QUEUE_ALLOW_REAL_DIAL;
     vi.restoreAllMocks();
   });
 

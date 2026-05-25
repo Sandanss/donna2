@@ -289,6 +289,8 @@ With ElevenLabs kept as the default, a full 120-minute trial costs about **$5.15
 
 Assumption: 1 user = 1 senior profile. Variable COGS only; fixed platform costs are below.
 
+These are cost scenarios, not architecture readiness claims. Current architecture work targets the 2,000-user burst milestone first; 10,000 users require the forward scale path documented in [`SCALABILITY.md`](SCALABILITY.md#path-to-10000-users) and the scale plan.
+
 ### 1,000 Users
 
 | Usage | ElevenLabs base | Future lower-TTS sensitivity |

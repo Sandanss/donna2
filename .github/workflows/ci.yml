@@ -39,6 +39,47 @@ jobs:
       - name: Run tests
         run: npm test
 
+      - name: Run PHI sentinel scan
+        # Scan the source tree explicitly so the gate is never a no-op when
+        # the default scan paths (logs/, tmp/, test-results/, ...) happen
+        # to be empty in the CI workspace. `docs/` is intentionally excluded:
+        # human-curated plan/runbook docs legitimately quote the sentinel
+        # strings as examples and are PR-reviewed for PHI.
+        run: npm run phi:sentinel -- --paths=services,routes,lib,scripts,middleware,db,pipecat/services,pipecat/api,pipecat/lib,pipecat/db,pipecat/scripts
+
+  # Tier-2 integration tests exercise the dispatcher's concurrency exit
+  # criteria (FOR UPDATE SKIP LOCKED, UNIQUE(guard_key) race, senior-delete
+  # tx race, reconciler real-clock recovery) against a real Postgres branch
+  # — not the in-process fake-db Tier-1 uses. Skips cleanly if
+  # TEST_DATABASE_URL isn't set so a fork PR without the secret still runs
+  # CI green. Serialized via concurrency so parallel PRs don't TRUNCATE each
+  # other's data mid-run on the shared tests-scale-2000 Neon branch.
+  node-tier2-tests:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: tier2-real-db
+      cancel-in-progress: false
+    needs: node-tests
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Tier-2 dispatcher tests against real Postgres
+        env:
+          TEST_DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
+        run: |
+          if [ -z "$TEST_DATABASE_URL" ]; then
+            echo "TEST_DATABASE_URL not set; Tier-2 tests will skip via skipIfNoDb()."
+          fi
+          npx vitest run tests/integration-real-db/
+
   frontend-tests:
     runs-on: ubuntu-latest
     steps:
@@ -74,6 +115,14 @@ jobs:
 
       - name: Run mocked frontend E2E
         run: npm run test:e2e:ci:mocked
+
+      - name: Run PHI sentinel scan
+        # Scan the source tree explicitly so the gate is never a no-op when
+        # the default scan paths (logs/, tmp/, test-results/, ...) happen
+        # to be empty in the CI workspace. `docs/` is intentionally excluded:
+        # human-curated plan/runbook docs legitimately quote the sentinel
+        # strings as examples and are PR-reviewed for PHI.
+        run: npm run phi:sentinel -- --paths=services,routes,lib,scripts,middleware,db,pipecat/services,pipecat/api,pipecat/lib,pipecat/db,pipecat/scripts
 
   mobile-checks:
     runs-on: ubuntu-latest

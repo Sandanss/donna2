@@ -194,7 +194,7 @@ YAML-based conversation scripts that simulate full calls:
 
 **Directory**: `pipecat/tests/load/`
 
-Built on Locust (Python-native, supports WebSocket via custom client):
+Built on Locust (Python-native, supports WebSocket via custom client). These load tests are useful historical harnesses, but some still simulate the legacy Twilio protocol. Do not treat them as proof of current Telnyx/queue capacity without updating the transport and comparing against the scale rollout scripts below.
 
 ### Test Files
 
@@ -213,7 +213,7 @@ Built on Locust (Python-native, supports WebSocket via custom client):
 | `tests/load/run_load_tests.sh` | Comprehensive runner with predefined scenarios |
 | `tests/load/monitor_health.sh` | Continuous health monitoring to CSV |
 
-### Predefined Scenarios
+### Historical Predefined Scenarios
 
 ```bash
 # Baseline: 50 concurrent, 2 minutes
@@ -234,6 +234,21 @@ bash tests/load/run_load_tests.sh spike
 # Database only
 bash tests/load/run_load_tests.sh db
 ```
+
+### Current Scale-Rollout Evidence Scripts
+
+| Script | Purpose |
+|---|---|
+| `scripts/collect-phase0-scaling-baseline.js` | PHI-free Phase 0 baseline metrics |
+| `scripts/generate-phase0-cost-model.js` | 2,000-user cost projection from baseline + assumptions |
+| `scripts/validate-call-rollout-config.js` | Validate `CALL_ARCHITECTURE_MODE` and queue flags before a flip |
+| `scripts/phase5-live-ab-report.js` | Live A/B aggregate checks for legacy vs queue treatment |
+| `scripts/phase7-canary-report.js` | Daily Phase 7 canary report and 7-day SLO evidence |
+| `scripts/phase8-capacity-plan.js` | PHI-free pre-window capacity plan |
+| `scripts/run-phase8-autoscaler-once.js` | One-shot capacity actuation driver, dry-run unless confirmed |
+| `scripts/run-post-call-worker-once.js` | Phase 6 post-call worker shadow/evidence runner |
+
+The 10,000-user path does not have a single "run this load test" proof. It is a trigger-based roadmap: prove 2,000 first, then add partitioning/ops tables, HA Redis, caller-ID pool strategy, provider sharding, and workflow-engine post-call execution when the scale plan's thresholds fire.
 
 ### Legacy Mock Twilio WebSocket Protocol (`twilio_mock.py`)
 Kept for historical load testing coverage. The active voice carrier is Telnyx; update this load test before using it for current production capacity planning. It simulates Twilio Media Stream messages:

@@ -20,6 +20,7 @@ apps/mobile/**/*.p8
 dist/
 .next/
 .vercel/
+*.tsbuildinfo
 
 # IDE
 .idea/

@@ -1,0 +1,22 @@
+{
+  "_source": "Derived from docs/BUSINESS_PLAN.md Unit Economics, Per-Call Cost (10-minute average). Fixed monthly infra assumptions are planning placeholders and require founder approval before Phase 7.",
+  "avgConnectedMinutes": 10,
+  "callsPerSeniorPerMonth": 30,
+  "telnyxPerMinuteUsd": 0.011,
+  "deepgramPerMinuteUsd": 0.008,
+  "ttsCharsPerMinute": 900,
+  "ttsPerThousandCharsUsd": 0.02,
+  "anthropicInputTokensPerMinute": 1500,
+  "anthropicOutputTokensPerMinute": 300,
+  "anthropicCacheReadTokensPerMinute": 8000,
+  "anthropicInputPerMillionTokensUsd": 0.8,
+  "anthropicOutputPerMillionTokensUsd": 4,
+  "anthropicCacheReadPerMillionTokensUsd": 0.08,
+  "openAiEmbeddingPerCallUsd": 0.005,
+  "tavilySearchesPerCall": 0.5,
+  "tavilyPerSearchUsd": 0.07,
+  "railwayMonthlyUsd": 300,
+  "neonMonthlyUsd": 300,
+  "redisMonthlyUsd": 100,
+  "sentryMonthlyUsd": 0
+}

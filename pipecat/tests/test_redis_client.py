@@ -6,7 +6,16 @@ import time
 import httpx
 import pytest
 
-from lib.redis_client import InMemoryState, RedisState, UpstashRestState, create_shared_state
+import lib.redis_client as redis_client
+from lib.redis_client import (
+    InMemoryState,
+    RedisState,
+    UpstashRestState,
+    check_shared_state_health,
+    create_shared_state,
+    require_shared_state,
+    reset_shared_state_for_tests,
+)
 
 
 class _FakeResponse:
@@ -64,6 +73,94 @@ def test_create_shared_state_falls_back_to_memory():
     assert state.is_shared is False
 
 
+def test_require_shared_state_rejects_memory_when_required(monkeypatch):
+    monkeypatch.setenv("PIPECAT_REQUIRE_REDIS", "true")
+    monkeypatch.delenv("REDIS_URL", raising=False)
+    monkeypatch.delenv("UPSTASH_REDIS_REST_URL", raising=False)
+    monkeypatch.delenv("UPSTASH_REDIS_REST_TOKEN", raising=False)
+    reset_shared_state_for_tests()
+    try:
+        with pytest.raises(RuntimeError, match="PIPECAT_REQUIRE_REDIS=true"):
+            require_shared_state("test operation")
+    finally:
+        reset_shared_state_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_shared_state_health_fails_closed_when_required_without_config(monkeypatch):
+    monkeypatch.setenv("PIPECAT_REQUIRE_REDIS", "true")
+    monkeypatch.delenv("REDIS_URL", raising=False)
+    monkeypatch.delenv("UPSTASH_REDIS_REST_URL", raising=False)
+    monkeypatch.delenv("UPSTASH_REDIS_REST_TOKEN", raising=False)
+    reset_shared_state_for_tests()
+    try:
+        health = await check_shared_state_health()
+    finally:
+        reset_shared_state_for_tests()
+
+    assert health == {
+        "required": True,
+        "configured": False,
+        "backend": "memory",
+        "shared": False,
+        "available": False,
+        "ok": False,
+        "error": "shared_state_not_configured",
+    }
+
+
+@pytest.mark.asyncio
+async def test_shared_state_health_reports_degraded_optional_upstash_outage(monkeypatch):
+    monkeypatch.delenv("PIPECAT_REQUIRE_REDIS", raising=False)
+    monkeypatch.setenv("UPSTASH_REDIS_REST_URL", "https://example.upstash.io")
+    monkeypatch.setenv("UPSTASH_REDIS_REST_TOKEN", "token")
+    state = UpstashRestState("https://example.upstash.io", "token")
+    state._client = _FailingClient()
+    monkeypatch.setattr(redis_client, "_state", state)
+    try:
+        health = await check_shared_state_health()
+    finally:
+        reset_shared_state_for_tests()
+
+    assert health == {
+        "required": False,
+        "configured": True,
+        "backend": "upstash",
+        "shared": True,
+        "available": False,
+        "ok": True,
+        "error": "shared_state_unreachable",
+        "degraded": True,
+        "fallback": "local_memory",
+    }
+
+
+@pytest.mark.asyncio
+async def test_shared_state_health_fails_required_upstash_outage(monkeypatch):
+    monkeypatch.setenv("PIPECAT_REQUIRE_REDIS", "true")
+    monkeypatch.setenv("UPSTASH_REDIS_REST_URL", "https://example.upstash.io")
+    monkeypatch.setenv("UPSTASH_REDIS_REST_TOKEN", "token")
+    state = UpstashRestState("https://example.upstash.io", "token")
+    state._client = _FailingClient()
+    monkeypatch.setattr(redis_client, "_state", state)
+    try:
+        health = await check_shared_state_health()
+    finally:
+        reset_shared_state_for_tests()
+
+    assert health == {
+        "required": True,
+        "configured": True,
+        "backend": "upstash",
+        "shared": True,
+        "available": False,
+        "ok": False,
+        "error": "shared_state_unreachable",
+        "degraded": True,
+        "fallback": None,
+    }
+
+
 def test_upstash_rest_state_adds_https_scheme_when_missing():
     state = UpstashRestState("example.upstash.io/", "token")
 
@@ -91,6 +188,18 @@ async def test_upstash_rest_state_set_and_get_json_with_ttl():
         1800,
     ]
     assert client.commands[1][1] == ["GET", "call_metadata:CA123"]
+
+
+@pytest.mark.asyncio
+async def test_upstash_rest_state_ping():
+    client = _FakeClient([
+        {"result": "PONG"},
+    ])
+    state = UpstashRestState("https://example.upstash.io/", "token")
+    state._client = client
+
+    assert await state.ping() is True
+    assert client.commands[0][1] == ["PING"]
 
 
 @pytest.mark.asyncio

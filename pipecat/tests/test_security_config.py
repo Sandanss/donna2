@@ -88,6 +88,16 @@ def test_validate_production_config_accepts_required_values(monkeypatch):
     assert validate_production_config() == []
 
 
+def test_validate_production_config_requires_redis_url_for_rate_limits(monkeypatch):
+    test_validate_production_config_accepts_required_values(monkeypatch)
+    monkeypatch.setenv("REDIS_RATE_LIMITS_ENABLED", "true")
+    monkeypatch.delenv("REDIS_URL", raising=False)
+
+    errors = validate_production_config()
+
+    assert "REDIS_URL is required when REDIS_RATE_LIMITS_ENABLED=true" in errors
+
+
 def test_validate_production_config_rejects_narrowband_telnyx(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "production")
     monkeypatch.setenv("TELEPHONY_PROVIDER", "telnyx")

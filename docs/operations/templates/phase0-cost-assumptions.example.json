@@ -1,0 +1,21 @@
+{
+  "avgConnectedMinutes": null,
+  "callsPerSeniorPerMonth": 30,
+  "telnyxPerMinuteUsd": null,
+  "deepgramPerMinuteUsd": null,
+  "ttsCharsPerMinute": null,
+  "ttsPerThousandCharsUsd": null,
+  "anthropicInputTokensPerMinute": null,
+  "anthropicOutputTokensPerMinute": null,
+  "anthropicCacheReadTokensPerMinute": null,
+  "anthropicInputPerMillionTokensUsd": null,
+  "anthropicOutputPerMillionTokensUsd": null,
+  "anthropicCacheReadPerMillionTokensUsd": null,
+  "openAiEmbeddingPerCallUsd": null,
+  "tavilySearchesPerCall": null,
+  "tavilyPerSearchUsd": null,
+  "railwayMonthlyUsd": null,
+  "neonMonthlyUsd": null,
+  "redisMonthlyUsd": null,
+  "sentryMonthlyUsd": null
+}

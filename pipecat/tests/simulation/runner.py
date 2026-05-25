@@ -239,16 +239,25 @@ async def run_simulated_call(
                 result.end_reason = "caller_goodbye"
             break
 
-        # If the caller already said goodbye, wait for pipeline to detect it
+        # If the caller already said goodbye, wait for pipeline to detect it.
+        # Default end_reason to "caller_goodbye" unconditionally — previously
+        # this only got set on TimeoutError, so when Quick Observer didn't
+        # fire EndFrame (call too short for the min-call-age guard, or Donna
+        # kept responding) the run finished with `end_reason="unknown"`.
         if caller_is_goodbye:
-            # Give the Quick Observer time to detect the goodbye and fire EndFrame
+            result.end_reason = "caller_goodbye"
             try:
                 end_event = await components.caller_transport.receive_response(timeout=10)
                 if end_event.type == "end":
                     pipeline_ended = True
-                    result.end_reason = session_state.get("_end_reason", "goodbye")
+                    result.end_reason = session_state.get("_end_reason", "goodbye_endframe")
+                # Else: another response came back; we still asked for goodbye
+                # so end_reason stays "caller_goodbye". Quick Observer may not
+                # have flipped to EndFrame because of the min-call-age guard
+                # or because Donna chose to keep talking.
             except asyncio.TimeoutError:
-                result.end_reason = "caller_goodbye"
+                # Default already set; keep "caller_goodbye".
+                pass
             break
     else:
         # max_turns exhausted

@@ -16,12 +16,13 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass, field
-from typing import Protocol, runtime_checkable
+from typing import Awaitable, Callable, Protocol, runtime_checkable
 
 from pipecat.frames.frames import (
     EndFrame,
     Frame,
     FunctionCallFromLLM,
+    InputAudioRawFrame,
     InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
@@ -29,6 +30,8 @@ from pipecat.frames.frames import (
     TextFrame,
     TranscriptionFrame,
     TTSSpeakFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
 )
 from pipecat.pipeline.task import PipelineTask
 from pipecat.processors.frame_processor import FrameProcessor
@@ -417,7 +420,7 @@ class TextCallerTransport:
                     timestamp="",
                     language="en",
                 )
-                self._task.queue_frame(frame)
+                await self._task.queue_frame(frame)
                 await asyncio.sleep(self.INTERIM_GAP_MS / 1000.0)
 
             # Step 2: Emit full text as final interim if last chunk was a subset
@@ -428,7 +431,7 @@ class TextCallerTransport:
                     timestamp="",
                     language="en",
                 )
-                self._task.queue_frame(full_interim)
+                await self._task.queue_frame(full_interim)
                 await asyncio.sleep(self.INTERIM_GAP_MS / 1000.0)
 
         # Step 3: Silence gap (exceeds Director's 250ms threshold)
@@ -444,7 +447,7 @@ class TextCallerTransport:
             timestamp="",
             language="en",
         )
-        self._task.queue_frame(final)
+        await self._task.queue_frame(final)
 
     async def receive_response(self, timeout: float = 60.0) -> CallerEvent:
         """Wait for and return the next pipeline response event.
@@ -491,42 +494,256 @@ class CallerTransport(Protocol):
 
 
 # ---------------------------------------------------------------------------
-# AudioCallerTransport — Phase 2 audio-loop stub
+# AudioCallerTransport — audio-loop caller transport
 # ---------------------------------------------------------------------------
 
 
-class AudioCallerTransport:
-    """Phase 2: Audio-loop caller transport (STUB -- not yet implemented).
+# A TTS provider is an async callable that turns text into raw PCM bytes
+# at a known sample rate (16-bit signed little-endian, mono). Built-in
+# providers are below; callers can also pass a custom provider for tests.
+TtsProvider = Callable[[str], Awaitable[bytes]]
 
-    Same interface as TextCallerTransport, but:
-    - send_utterance: text -> TTS -> audio frames -> pipeline STT
-    - receive_response: pipeline TTS -> audio -> STT -> text
 
-    This tests the full audio path except Twilio transport.
-    Catches STT/TTS edge cases (mumbling, overlapping, accent handling).
+def silence_tts_provider(
+    *,
+    duration_seconds: float = 1.0,
+    sample_rate: int = 16000,
+) -> TtsProvider:
+    """Return a TTS provider that produces silence regardless of input.
 
-    CallerAgent, scenarios, and assertions remain identical.
+    Useful for unit-testing the audio-frame-push mechanics of
+    AudioCallerTransport without making real TTS API calls. The downstream
+    STT will not transcribe silence into anything meaningful, so this stub
+    is only suitable for asserting that the transport produces the right
+    *frame shapes*, not that the pipeline transcribes the right *text*.
     """
+    # 16-bit signed PCM = 2 bytes per sample.
+    silence = b"\x00\x00" * int(sample_rate * duration_seconds)
+
+    async def _provider(_text: str) -> bytes:
+        return silence
+
+    return _provider
+
+
+def elevenlabs_tts_provider(
+    *,
+    api_key: str,
+    voice_id: str,
+    model: str = "eleven_flash_v2_5",
+    sample_rate: int = 16000,
+    timeout_seconds: float = 30.0,
+) -> TtsProvider:
+    """Return a TTS provider backed by ElevenLabs streaming TTS.
+
+    Requires a valid API key with quota; each call costs real money. Gate
+    callers behind a pytest mark such as ``audio_simulation`` so unit tests
+    don't burn quota.
+
+    Output is PCM at ``sample_rate`` Hz, 16-bit signed mono.
+    """
+    import aiohttp
+
+    output_format = f"pcm_{sample_rate}"
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream"
+
+    async def _provider(text: str) -> bytes:
+        headers = {
+            "xi-api-key": api_key,
+            "Content-Type": "application/json",
+            "Accept": "audio/pcm",
+        }
+        payload = {"text": text, "model_id": model, "output_format": output_format}
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                url,
+                json=payload,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=timeout_seconds),
+            ) as resp:
+                if resp.status >= 400:
+                    raise RuntimeError(f"elevenlabs_http_{resp.status}")
+                return await resp.read()
+
+    return _provider
+
+
+def cartesia_tts_provider(
+    *,
+    api_key: str,
+    voice_id: str,
+    model: str = "sonic-3",
+    sample_rate: int = 16000,
+    timeout_seconds: float = 30.0,
+) -> TtsProvider:
+    """Return a TTS provider backed by Cartesia ``/tts/bytes``."""
+    import aiohttp
+
+    url = "https://api.cartesia.ai/tts/bytes"
+
+    async def _provider(text: str) -> bytes:
+        headers = {
+            "Cartesia-Version": "2024-06-10",
+            "X-API-Key": api_key,
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model_id": model,
+            "voice": {"mode": "id", "id": voice_id},
+            "output_format": {"container": "raw", "encoding": "pcm_s16le", "sample_rate": sample_rate},
+            "transcript": text,
+        }
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                url,
+                json=payload,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=timeout_seconds),
+            ) as resp:
+                if resp.status >= 400:
+                    raise RuntimeError(f"cartesia_http_{resp.status}")
+                return await resp.read()
+
+    return _provider
+
+
+class AudioCallerTransport:
+    """Audio-loop caller transport — text → real TTS → audio frames → real STT.
+
+    Replaces ``TextCallerTransport`` for tests that need to exercise the full
+    audio path (STT misrecognition, codec drift, sample-rate mismatches).
+    Use the same ``ResponseCollector``-based ``receive_response`` API as the
+    text transport so existing scenario assertions work unchanged.
+
+    Pipeline requirements:
+    - The pipeline must include a *real* STT service (e.g. ``DeepgramSTTService``)
+      between the input transport and the rest of the pipeline. The default
+      ``build_live_sim_pipeline`` SKIPS real STT — callers using this transport
+      need an alternate pipeline build that wires real STT in.
+    - The pipeline's input transport must accept ``InputAudioRawFrame``.
+      ``TestInputTransport`` from ``tests/mocks/mock_transport.py`` does.
+
+    Lifecycle of one ``send_utterance(text)``:
+      1. Emit ``UserStartedSpeakingFrame`` so VAD-aware processors see speech
+         onset.
+      2. Call ``tts_provider(text)`` to get PCM bytes at the configured
+         sample rate.
+      3. Slice the bytes into ``chunk_duration_ms`` chunks and push each as
+         an ``InputAudioRawFrame``, sleeping the chunk duration between
+         frames to mimic real-time audio.
+      4. Append ``trailing_silence_ms`` of zero PCM so VAD detects end of
+         speech (Pipecat Silero VAD ``stop_secs=1.2`` by default — the
+         caller can tune ``trailing_silence_ms`` per pipeline).
+      5. Emit ``UserStoppedSpeakingFrame``.
+      6. Mark the injection time on the ``ResponseCollector`` so latency
+         measurement starts from the end of caller speech, matching what
+         a real phone call would measure.
+
+    Cost: ~$0.005 per turn for ElevenLabs at the cheapest tier. A 10-turn
+    simulated call ≈ $0.05. Compare with ~$0.001/turn for ``TextCallerTransport``.
+    Use TextCallerTransport for breadth, AudioCallerTransport for audio-bug
+    regression tests.
+    """
+
+    DEFAULT_CHUNK_DURATION_MS: int = 100
+    DEFAULT_TRAILING_SILENCE_MS: int = 1500
+    DEFAULT_SAMPLE_RATE: int = 16000
 
     def __init__(
         self,
         pipeline_task: PipelineTask,
         response_collector: ResponseCollector,
-        **kwargs,
+        *,
+        tts_provider: TtsProvider,
+        sample_rate: int = DEFAULT_SAMPLE_RATE,
+        chunk_duration_ms: int = DEFAULT_CHUNK_DURATION_MS,
+        trailing_silence_ms: int = DEFAULT_TRAILING_SILENCE_MS,
+        emit_speaking_frames: bool = True,
+        realtime: bool = True,
+        user_id: str = "senior-test-001",
     ):
+        if chunk_duration_ms <= 0:
+            raise ValueError("chunk_duration_ms must be > 0")
+        if sample_rate <= 0:
+            raise ValueError("sample_rate must be > 0")
         self._task = pipeline_task
         self._collector = response_collector
-        raise NotImplementedError(
-            "AudioCallerTransport is Phase 2 — use TextCallerTransport for now"
-        )
-
-    async def send_utterance(self, text: str) -> None:
-        raise NotImplementedError
-
-    async def receive_response(self, timeout: float = 60.0) -> CallerEvent:
-        raise NotImplementedError
+        self._tts_provider = tts_provider
+        self._sample_rate = sample_rate
+        self._chunk_duration_ms = chunk_duration_ms
+        self._trailing_silence_ms = trailing_silence_ms
+        self._emit_speaking_frames = emit_speaking_frames
+        self._realtime = realtime
+        self._user_id = user_id
+        # 16-bit signed PCM = 2 bytes per sample, mono.
+        self._bytes_per_chunk = int(self._sample_rate * (self._chunk_duration_ms / 1000.0)) * 2
+        # Track frames pushed since the last reset for unit-test assertions.
+        self.audio_frames_pushed: int = 0
+        self.bytes_pushed: int = 0
 
     @property
     def collector(self) -> ResponseCollector:
-        """The ``ResponseCollector`` wired into the pipeline."""
         return self._collector
+
+    @property
+    def sample_rate(self) -> int:
+        return self._sample_rate
+
+    @property
+    def chunk_duration_ms(self) -> int:
+        return self._chunk_duration_ms
+
+    def _build_audio_frame(self, audio: bytes) -> InputAudioRawFrame:
+        return InputAudioRawFrame(
+            audio=audio,
+            sample_rate=self._sample_rate,
+            num_channels=1,
+        )
+
+    async def send_utterance(self, text: str) -> None:
+        """Synthesize ``text`` and push it through the pipeline as audio.
+
+        See class docstring for the full lifecycle.
+        """
+        if self._emit_speaking_frames:
+            await self._task.queue_frame(UserStartedSpeakingFrame())
+
+        audio_bytes = await self._tts_provider(text)
+        chunk_size = self._bytes_per_chunk
+        if chunk_size <= 0:
+            chunk_size = max(1, len(audio_bytes))
+
+        for offset in range(0, len(audio_bytes), chunk_size):
+            chunk = audio_bytes[offset:offset + chunk_size]
+            if not chunk:
+                continue
+            await self._task.queue_frame(self._build_audio_frame(chunk))
+            self.audio_frames_pushed += 1
+            self.bytes_pushed += len(chunk)
+            if self._realtime:
+                await asyncio.sleep(self._chunk_duration_ms / 1000.0)
+
+        # Trailing silence so VAD detects end-of-speech.
+        if self._trailing_silence_ms > 0:
+            silence_bytes = b"\x00\x00" * int(
+                self._sample_rate * (self._trailing_silence_ms / 1000.0)
+            )
+            for offset in range(0, len(silence_bytes), chunk_size):
+                chunk = silence_bytes[offset:offset + chunk_size]
+                if not chunk:
+                    continue
+                await self._task.queue_frame(self._build_audio_frame(chunk))
+                self.audio_frames_pushed += 1
+                self.bytes_pushed += len(chunk)
+                if self._realtime:
+                    await asyncio.sleep(self._chunk_duration_ms / 1000.0)
+
+        # Mark injection time AFTER the audio + silence finish so latency is
+        # measured from end-of-speech (matches what a real call observes).
+        self._collector.mark_injection_time()
+
+        if self._emit_speaking_frames:
+            await self._task.queue_frame(UserStoppedSpeakingFrame())
+
+    async def receive_response(self, timeout: float = 60.0) -> CallerEvent:
+        return await self._collector.wait_for_response(timeout)

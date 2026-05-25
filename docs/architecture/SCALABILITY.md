@@ -1,388 +1,316 @@
 # Scalability Architecture
 
-> How Donna scales to 8,000 daily users with 500 concurrent calls.
+> Current scale posture for `zuludev`: legacy outbound runtime, queue/capacity rollout to 2,000 users, and the forward path to 10,000 users.
 
 ---
 
-## Target Capacity
+## Status Summary
 
-| Metric | Target |
-|--------|--------|
-| Total users | 8,000 |
-| Daily calls | 8,000 (1 per user) |
-| Peak concurrent calls | 500 (morning 7-9 AM) |
-| Call duration | ~10 minutes average |
-| Zero tolerance for dropped calls | Users are elderly, depends on medication reminders |
+Donna has **two outbound-call architectures right now**.
 
----
+| Architecture | Status | Use |
+|---|---|---|
+| **Legacy scheduler/dialer** | Still present and kept as current/rollback authority | Good for today's smaller production load. It should not be scaled to 2,000 users by only raising `MAX_CONCURRENT_CALLS` or adding replicas. |
+| **Queue + capacity architecture** | Implemented on `zuludev`, gated by rollout flags | The path to 2,000 active seniors with daily calls and bursty windows. |
 
-## Admission Control
+The queue architecture is not "fully active" until production is running:
 
-**File**: `pipecat/main.py`
+- `CALL_ARCHITECTURE_MODE=queue_primary`
+- `CALL_QUEUE_ALLOW_REAL_DIAL=true`
+- `CALL_QUEUE_DISPATCHER_ENABLED=true`
+- `CALL_QUEUE_REQUIRE_DIAL_GUARD=true`
+- `CALL_QUEUE_USE_CAPACITY_REGISTRY=true`
+- `CALL_QUEUE_REQUIRE_CAPACITY_REGISTRY=true`
+- Redis/shared state required for scaled Pipecat
+- Phase 7/8 rollout evidence saved
 
-### Semaphore-Based Concurrency Limiting
-
-```python
-MAX_CALLS = settings.max_concurrent_calls
-_call_semaphore = asyncio.Semaphore(MAX_CALLS)
-```
-
-WebSocket handler flow:
-1. Accept WebSocket connection from Telnyx
-2. Parse the Telnyx start frame and validate `call_control_id` + `ws_token` before consuming active-call capacity
-3. Try to acquire `_call_semaphore` immediately
-4. If at capacity: close with code 1013 (Try Again Later)
-5. After capacity is reserved, consume the single-use `ws_token`
-6. Start STT/LLM/TTS services and increment `_active_calls`
-7. On disconnect: release semaphore in `finally` block
-
-### Telnyx Capacity Handling
-
-**File**: `pipecat/main.py`
-
-Call metadata is created by `pipecat/api/routes/telnyx.py`. The WebSocket handler validates the token before reserving active-call capacity, then closes with `1013` when the service is full.
-
-### Monitoring
-
-Health endpoint exposes real-time capacity:
-
-```json
-{
-  "active_calls": 12,
-  "peak_calls": 47,
-  "max_calls": 50,
-  "pool": { "size": 15, "idle": 8, "max": 50, "min": 5 }
-}
-```
+Until then, the legacy and queue paths intentionally coexist.
 
 ---
 
-## Database Optimization
+## Target Milestones
 
-### Connection Pool
+| Milestone | Status | Design point |
+|---|---|---|
+| Today's runtime | Legacy scheduler + Pipecat, with queue code available behind flags | Lower-volume production and rollback |
+| 2,000 active seniors | Active rollout target | Durable queue, capacity-aware dispatch, canary rollout, pre-window scaling |
+| 10,000 active seniors | Forward path, not completed runtime | Partitioned/ops data plane, HA or multi-region Redis, caller-ID pool, provider sharding/failover, workflow-engine post-call execution |
 
-**File**: `pipecat/db/client.py`
-
-| Setting | Default | Env Var | Purpose |
-|---------|---------|---------|---------|
-| min_size | 5 | `DB_POOL_MIN` | Warm connections ready |
-| max_size | 50 | `DB_POOL_MAX` | Upper bound for concurrent queries |
-
-Pool stats exposed on `/health` endpoint. Slow query logging at 100ms threshold.
-
-### Indexes (11 total)
-
-**File**: `db/migrations/001_add_indexes.sql`
-
-Applied to production Neon database using `CREATE INDEX CONCURRENTLY` (no table locks):
-
-| Index | Table | Impact |
-|-------|-------|--------|
-| `idx_conversations_call_sid` | conversations | WebSocket message lookup |
-| `idx_memories_senior_id` | memories | Memory search (4-8x per call) |
-| `idx_conversations_senior_started` | conversations | Context loading at call start |
-| `idx_reminders_active_scheduled` | reminders | Scheduler polling (every 60s) |
-| `idx_reminders_recurring` | reminders | Recurring reminder queries |
-| `idx_deliveries_reminder_scheduled` | reminder_deliveries | Delivery lookups |
-| `idx_deliveries_status` | reminder_deliveries | Status-based queries |
-| `idx_daily_context_senior_date` | daily_call_context | Daily context per call |
-| `idx_analyses_senior_created` | call_analyses | Post-call interest scoring |
-| `idx_memories_embedding_hnsw` | memories | **HNSW vector index** — O(log n) semantic search |
-
-The HNSW vector index is the highest-impact single change: turns O(n) full-table scan into O(log n) approximate nearest neighbor search for memory retrieval.
+The 2,000-user plan is [the scale plan](../plans/2026-05-18-scale-to-2000-users-technical-plan.md). The 10,000-user path is [scale plan §8](../plans/2026-05-18-scale-to-2000-users-technical-plan.md#8-forward-path-to-10000-users).
 
 ---
 
-## Scheduler And Outbound Call Initiation
+## Legacy Architecture
 
-**Active file**: `services/scheduler.js`
+**Primary files:**
 
-The Node.js scheduler is authoritative for production reminder and welfare calls. Pipecat's scheduler module remains for helper parity, reminder context handoff, and explicit Python-side experiments; it must stay disabled unless the architecture changes.
+- `services/scheduler.js`
+- `routes/calls.js`
+- `services/telnyx.js`
+- `pipecat/api/routes/telnyx.py`
+- `pipecat/main.py`
+- `pipecat/services/post_call.py`
 
-Node builds a unified call plan, prioritizes reminders over welfare checks, gates all calls through the senior's local calling window, retries service-to-service Telnyx outbound requests, and asks Pipecat `/telnyx/outbound` to create the calls.
+**Flow:**
 
-For scheduled reminder calls, the leader scheduler also runs a short lookahead sweep and prewarms reminder context before the call is due. It asks Pipecat `/telnyx/prewarm` to build the outbound senior context, stores that payload in a short-lived local cache keyed by `reminder_id + scheduled_for`, and reuses it on the later `/telnyx/outbound` request. If the warm entry is missing or stale, Pipecat falls back to live hydration.
-
-Pipecat's helper scheduler still supports parallel initiation with a limiter:
-
-```python
-sem = asyncio.Semaphore(10)  # 10 concurrent Telnyx call requests
-
-async def _limited_trigger(item):
-    async with sem:
-        return await trigger_reminder_call(...)
-
-results = await asyncio.gather(
-    *[_limited_trigger(item) for item in due],
-    return_exceptions=True,
-)
+```
+Node scheduler tick
+    |
+    v
+Build due scheduled/reminder/welfare plan
+    |
+    v
+Legacy in-process dedupe maps + local calling-window checks
+    |
+    v
+POST Pipecat /telnyx/outbound
+    |
+    v
+Telnyx call -> /telnyx/events -> /ws
+    |
+    v
+Pipecat call pipeline
+    |
+    v
+Inline post-call analysis/memory/snapshot work
 ```
 
-- 100 reminders × 10 parallel = ~50 seconds
+**Known limits:**
 
-### Retry with Exponential Backoff
-Telnyx call initiation retries on Node:
-- **Node.js** (`retryTelnyxCall()`): 3 attempts, 1s → 2s → 4s delays
+- One Node scheduler leader performs planning and dialing.
+- Several dedupe/cooldown decisions are in process memory.
+- Legacy execution uses a fixed dial concurrency limit.
+- Pipecat `MAX_CONCURRENT_CALLS` is per replica unless the queue dispatcher consumes the capacity registry.
+- Post-call work normally runs inline after disconnect.
+- Raising replica count multiplies DB pools and provider concurrency unless capped elsewhere.
 
-### Pending Context Cleanup
-In-memory Maps (`pendingReminderCalls`, `prefetchedContextByPhone`) have automatic TTL cleanup:
-- Entries older than 30 minutes are evicted every 5 minutes
-- Prevents unbounded memory growth during sustained operation
+The legacy path remains valuable as a rollback path, but it is not the target architecture for the 2,000-user burst.
 
 ---
 
-## Leader Election
+## 2,000-User Architecture
 
-**Files**: `pipecat/services/scheduler.py`, `services/scheduler.js`
+The new architecture changes outbound calling from "find due calls and fire them" to "materialize eligible calls, lease them by priority, and dial only when global voice capacity is available."
 
-Both backends use PostgreSQL advisory locks to ensure only one scheduler instance runs:
-
-```python
-SCHEDULER_LOCK_ID = 8675309
-
-async def _try_acquire_leader_lock() -> bool:
-    row = await query_one(
-        "SELECT pg_try_advisory_lock($1) AS acquired",
-        SCHEDULER_LOCK_ID,
-    )
-    return row and row.get("acquired", False)
+```
+Caregiver schedules / reminders
+    |
+    v
+senior_call_schedules + reminder schedules
+    |
+    v
+services/call-schedules.js materializer
+    |
+    v
+call_queue
+    |
+    v
+services/call-queue.js dispatcher
+    |
+    v
+Redis capacity reservation + outbound_call_guards row
+    |
+    v
+Pipecat /telnyx/outbound -> Telnyx -> /ws
+    |
+    v
+call_attempts + post_call_jobs
 ```
 
-- Lock is session-scoped (released on disconnect)
-- Non-blocking: `pg_try_advisory_lock` returns immediately
-- Same lock ID used by both Python and Node.js schedulers
-- If leader dies, another instance claims leadership on next poll cycle
+### Queue Tables
+
+| Table | Purpose |
+|---|---|
+| `senior_call_schedules` | Normalized recurring/one-time schedules derived from caregiver config |
+| `call_queue` | Durable outbound dispatch queue with status, priority lane, lease, and dedupe key |
+| `call_attempts` | Per-dispatch audit trail with `architecture`, `cohort`, and provider IDs |
+| `outbound_call_guards` | Shared legacy/queue dial-authority guard |
+| `scheduler_shadow_comparisons` | Side-by-side legacy/queue decision records during rollout |
+| `post_call_jobs` | Gated post-call job DAG and dead-letter state |
+| `canary_cohort_membership` | Phase 7 queue canary cohort source of truth |
+
+Current migrations use flat default-schema tables. The `ops.*` schema and partitioning ideas in the scale plan are forward-compatible targets, not implemented on the current branch.
+
+### Rollout Modes
+
+`CALL_ARCHITECTURE_MODE` drives the migration:
+
+| Mode | Legacy dials | Queue materializes | Queue dispatches | Queue places real calls |
+|---|---|---|---|---|
+| `legacy_only` | yes | no | no | no |
+| `shadow_materialize` | yes | yes | no | no |
+| `shadow_dispatch` | yes | yes | dry-run only | no |
+| `canary_queue` | non-canary only | yes | canary cohort | yes, if allowed |
+| `queue_primary` | no | yes | all eligible rows | yes |
+| `legacy_rollback` | yes | visibility only | no | no |
+
+`CALL_QUEUE_ALLOW_REAL_DIAL=true` is valid only in `canary_queue` or `queue_primary`.
+
+### Dial Authority
+
+`outbound_call_guards.guard_key` is the duplicate-call safety primitive. Legacy and queue paths build the same key for a call instance; only the process that wins the guard may dial. The queue path records attempts in `call_attempts` with `architecture='queue'`; legacy attempts use `architecture='legacy'`.
+
+### Capacity Coordination
+
+**Files:**
+
+- `pipecat/services/capacity.py`
+- `services/pipecat-capacity.js`
+- `services/call-queue.js`
+- `scripts/phase8-capacity-plan.js`
+
+Pipecat publishes PHI-free heartbeats to Redis:
+
+```
+pipecat:instance:{instance_id}
+```
+
+Heartbeat fields include:
+
+- `active_calls`
+- `inbound_active_calls`
+- `max_calls`
+- `pending_start_count`
+- `draining`
+- `ready`
+- `warmup_gate_green`
+- `db_pool_idle`
+- `circuit_breakers_open`
+
+The dispatcher reads fresh heartbeats, excludes unready/draining replicas, subtracts active calls and pending reservations, applies lane policy, then acquires a short-lived reservation before dialing.
+
+Current queue lane reserves are code-defined in `services/call-queue.js` for:
+
+- `manual`
+- `hard_reminder`
+- `reminder_retry`
+- `scheduled_checkin`
+- `welfare`
+- `low_priority_retry`
+
+Inbound calls are not leased through `call_queue`. They are accounted for through `inbound_active_calls` and total active-capacity subtraction.
+
+### Redis Shared State
+
+Redis is optional for single-instance development, but required for scaled Pipecat. Shared-state responsibilities:
+
+- capacity heartbeats
+- pending-start capacity reservations
+- encrypted call metadata
+- single-use WebSocket token state
+- Telnyx stream-start dedupe
+- rate-limit counters in scaled mode
+- encrypted short-lived reminder/call context
+
+When `PIPECAT_REQUIRE_REDIS=true`, Pipecat must fail closed if Redis/shared state is missing for operations that require shared state.
+
+### Readiness And Autoscaling
+
+**Files:**
+
+- `pipecat/services/readiness.py`
+- `pipecat/services/capacity.py`
+- `scripts/phase8-capacity-plan.js`
+- `services/phase8-autoscaler.js`
+- `routes/scale-operations.js`
+
+New Pipecat replicas should not count as available capacity until the warm-up gate is green. Phase 8 planning reads future `call_queue` demand plus live heartbeats and emits:
+
+- `scale_up`
+- `wait_for_readiness`
+- `hold`
+- `scale_down`
+
+Autoscaling is dry-run by default. Railway actuation requires explicit confirmation and must remain inside the Phase 0 cost budget unless an operator override is approved and audited.
+
+### Post-Call Scale Path
+
+**Files:**
+
+- `pipecat/services/post_call.py`
+- `pipecat/services/post_call_jobs.py`
+- `services/post-call-jobs.js`
+- `scripts/run-post-call-worker-once.js`
+- `routes/post-call-jobs.js`
+
+The active runtime still uses inline post-call work unless `POST_CALL_QUEUE_ENABLED=true`. The queued path writes a `post_call_jobs` DAG:
+
+- `metrics_finalize`
+- `reminder_recovery`
+- `analysis`
+- `memory_extraction`
+- `daily_context`
+- `caregiver_notifications`
+- `interest_discovery`
+- `snapshot_rebuild`
+
+The Node worker leases jobs with `FOR UPDATE SKIP LOCKED`, honors dependencies, applies provider semaphores, retries with backoff, and moves exhausted jobs to `dead_letter`.
+
+### Canary Membership
+
+**Files:**
+
+- `services/canary-cohort.js`
+- `routes/canary.js`
+- `db/migrations/013_canary_cohort_membership.sql`
+
+`canary_cohort_membership` is the steady-state source of truth for Phase 7 canary members. `CALL_QUEUE_COHORT_ALLOWLIST` remains an emergency/env fallback. Admin routes expose membership by senior ID and ramp phase only; they do not join names, phone numbers, reminder text, transcripts, or notes.
 
 ---
 
-## Redis Shared State (Multi-Instance)
+## 2,000-User Gates
 
-**File**: `pipecat/lib/redis_client.py`
+The new architecture should not be declared ready for 2,000 users until all of these are true:
 
-Optional Redis layer for multi-instance deployment. Activated by setting `REDIS_URL`, or by setting both `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`.
-
-### Dual Implementation
-
-| Class | Backend | When Used |
-|-------|---------|-----------|
-| `InMemoryState` | Python dict | Default (single instance) |
-| `RedisState` | Redis asyncio | When `REDIS_URL` is set |
-| `UpstashRestState` | Upstash Redis REST API | When `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` are set |
-
-Dev and production are wired to Railway Redis through `REDIS_URL` service references:
-- dev: `REDIS_URL=${{Redis.REDIS_URL}}`
-- production: `REDIS_URL=${{Redis-sJE8.REDIS_URL}}`
-
-Those URLs resolve on Railway private networking, so local `railway run` commands cannot use them directly from a developer machine. Use `railway ssh --service donna-pipecat --environment <env> ...` for Redis smoke tests that need to run inside the Railway network.
-
-`UpstashRestState` remains available as a code-level fallback for non-Railway deployments. It is not the active dev or production path. If an Upstash endpoint returns an HTTP/DNS error, it marks itself temporarily unavailable and callers continue on local state until the retry window passes. That keeps a single-replica deployment functional, but multi-replica routing still requires a valid Redis or Upstash endpoint.
-
-Both implement the same async interface:
-- `set(key, value, ttl)` / `get(key)` / `delete(key)`
-- `set_hash(key, field, value)` / `get_hash(key, field)`
-- `keys(pattern)` / `cleanup()`
-
-### What's Stored in Redis
-- `call_metadata:{call_control_id}` — encrypted call context for WebSocket handler (TTL: 30 min)
-- `reminder_ctx:{call_control_id}` — encrypted Pipecat-scheduler reminder context for outbound reminder calls (TTL: 30 min)
-
-These payloads can contain PHI-bearing memory context, reminders, transcript fragments, senior profile fields, and caregiver note content. Shared-state writes use `pipecat/lib/shared_state_phi.py`, which encrypts the dict before it enters Redis and still accepts legacy raw dict payloads during rollout.
-
-### Cross-Instance Flow
-1. `/telnyx/events` and `/telnyx/outbound` store call metadata in local dict + Redis
-2. `/ws` reads metadata from local dict first, falls back to Redis
-3. Pipecat-side reminder initiation stores reminder context in local dict + Redis
-4. Telnyx call setup reads reminder context from local dict first, falls back to Redis, then falls back to the database delivery row for Node-scheduled reminders
-5. On call completion, metadata and reminder context are cleaned from both local dict and Redis
+- Phase 0 evidence exists: 7-day baseline, vendor limits, cost model, caller-ID decision, migration timing.
+- Phase 1 queue/idempotency migrations have been applied safely or explicitly accepted as flat-table rollout.
+- Phase 3 scaled Pipecat primitives are verified under actual multi-replica Railway behavior.
+- Phase 5 live A/B and rollback drill have saved timings.
+- Phase 6 post-call stampede evidence exists with real provider caps and DB pool observations.
+- Phase 7 live canary has 7 clean days and saved daily reports.
+- Phase 8 capacity planning has dry-run and confirmed operator-reviewed evidence.
+- PHI sentinel scans are clear for logs, queue rows, Redis payloads, scripts, and reports.
 
 ---
 
-## Multi-Instance Readiness Checklist
+## Path To 10,000 Users
 
-| Requirement | Status | How |
-|-------------|--------|-----|
-| Shared call metadata | Ready | Redis client module |
-| Shared reminder context | Ready | Pipecat scheduler writes `reminder_ctx:{call_control_id}` with TTL; Telnyx setup loads local-first, Redis-second |
-| Scheduler deduplication | Ready | PostgreSQL advisory locks |
-| Connection pool per instance | Ready | Each instance creates own pool |
-| Health monitoring | Ready | Per-instance `/health` endpoint |
-| WebSocket affinity | Not required for current flow | Each Telnyx media stream stays on one WebSocket connection; Redis-backed metadata lets startup land on any Pipecat instance |
-| Rate limiting | Needed | Redis-backed slowapi (currently in-memory) |
-| Context cache sharing | Needed | Redis-backed cache (currently in-memory) |
+The 10,000-user path is incremental from the queue architecture. It is **not** complete runtime support today.
 
----
+| Transition | Trigger | Action |
+|---|---|---|
+| Operational table partitioning or `ops.*` schema | DB pool/write-pressure SLO breaches during burst, or roughly 3,000 daily users | Move hot queue/job/attempt tables to a dedicated operational schema or partitioned layout with an online migration plan. |
+| Redis Cluster / HA shared state | Redis incident, multi-region Pipecat, or shared-state latency/reliability pressure | Move from single-region key assumptions to HA or multi-region Redis and add region-aware key/schema routing. |
+| Caller-ID pool and reputation management | Answer rate falls below the Phase 0 baseline target as outbound volume grows | Add managed number pool, STIR/SHAKEN/reputation monitoring, and cohort-aware caller-ID assignment. |
+| Provider sharding/failover | Sustained STT/LLM/TTS/embedding 429s despite concurrency caps | Add provider routing/failover across STT, TTS, LLM, and embedding providers. |
+| Workflow-engine post-call execution | Post-call backlog, retries, or dead-letter operations outgrow the Postgres worker | Promote the Phase 6 DAG to Temporal, Inngest, or equivalent while keeping DB metadata/audit. |
+| Archive and retention tiering | Audit/log/storage cost grows faster than budget | Add archive lifecycle for old audit/log/job data while preserving HIPAA retention and export/delete semantics. |
+| Multi-region Pipecat | Latency/product signal requires it, not just capacity | Add region-aware queue routing, shared-state keys, Telnyx routing, and data-residency review. |
 
-## Production Rollout
-
-**File**: `pipecat/scripts/rollout.sh`
-
-Gradual cohort-based onboarding with health gates:
-
-```
-500 users → monitor 5min → pass? →
-  1,000 users → monitor 5min → pass? →
-    2,000 users → monitor 5min → pass? →
-      4,000 users → monitor 5min → pass? →
-        8,000 users → complete
-```
-
-Each cohort transition:
-1. Verify health (`/health` returns `status: ok`, `database: ok`)
-2. Enable the next batch of users
-3. Monitor for 5 minutes (health check every 30s)
-4. Check alerts: capacity >80%, circuit breakers open
-5. Abort if 3+ consecutive health failures
-
-### Alert Thresholds
-
-| Metric | Threshold | Action |
-|--------|-----------|--------|
-| Active calls | >80% of MAX_CONCURRENT_CALLS | Warning: approaching capacity |
-| Circuit breakers | Any in "open" state | Warning: external service failure |
-| Health failures | 3+ consecutive | Abort rollout |
-| DB pool idle | <5 connections | Warning: approaching exhaustion |
-
----
-
-## Environment Variables
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `MAX_CONCURRENT_CALLS` | 50 | Semaphore limit for concurrent WebSocket sessions |
-| `DB_POOL_MIN` | 5 | Minimum warm database connections |
-| `DB_POOL_MAX` | 50 | Maximum database connections |
-| `REDIS_URL` | *(empty)* | Optional — enables Redis protocol shared state. Dev and production use Railway Redis service references. |
-| `UPSTASH_REDIS_REST_URL` | *(empty)* | Optional fallback for non-Railway deployments — enables Upstash REST shared state when paired with token |
-| `UPSTASH_REDIS_REST_TOKEN` | *(empty)* | Optional fallback for non-Railway deployments — Upstash REST bearer token |
-| `SCHEDULER_ENABLED` | false | Pipecat-side scheduler toggle; keep false because Node `services/scheduler.js` is authoritative |
-| `TELEPHONY_INTERNAL_INPUT_SAMPLE_RATE` | 16000 | Internal STT input rate after telephony serializer conversion |
-| `ELEVENLABS_OUTPUT_SAMPLE_RATE` | 44100 | Non-phone ElevenLabs TTS output rate; active Telnyx calls override to 16kHz |
-| `CARTESIA_OUTPUT_SAMPLE_RATE` | 48000 | Non-phone Cartesia PCM output rate; active Telnyx calls override to 16kHz |
-| `GEMINI_INTERNAL_OUTPUT_SAMPLE_RATE` | 24000 | Internal Gemini Live output rate before telephony serializer conversion |
-
----
-
-## Load Test Results (March 2026)
-
-**Test setup**: Locust → Neon PostgreSQL (us-east-1), 204 seniors, 5,429 memories with 1536-dim embeddings, HNSW + B-tree indexes applied.
-
-### 100 Concurrent Users (via pooler)
-
-| Query | Requests | Failures | Avg | p50 | p95 | p99 |
-|-------|----------|----------|-----|-----|-----|-----|
-| Director memory retrieval (pgvector HNSW) | 5,492 | **0%** | 105ms | 98ms | 110ms | 460ms |
-| get_recent_summaries | 4,130 | **0%** | 98ms | 96ms | 110ms | 150ms |
-| get_critical_memories | 2,745 | **0%** | 98ms | 96ms | 110ms | 150ms |
-| get_due_reminders | 1,233 | **0%** | 98ms | 96ms | 110ms | 150ms |
-| **Total** | **13,803 / 60s** | **0%** | **100ms** | **96ms** | | |
-
-### 500 Concurrent Users (via pooler)
-
-| Query | Requests | Failures | Avg | p50 | p95 | p99 |
-|-------|----------|----------|-----|-----|-----|-----|
-| Director memory retrieval (pgvector HNSW) | 16,210 | **0%** | 737ms | 710ms | 820ms | 1.3s |
-| get_recent_summaries | 12,229 | **0%** | 728ms | 710ms | 810ms | 1.0s |
-| get_critical_memories | 8,120 | **0%** | 732ms | 710ms | 820ms | 1.2s |
-| get_due_reminders | 4,099 | **0%** | 725ms | 710ms | 800ms | 940ms |
-| **Total** | **40,658 / 90s (~450 req/s)** | **0%** | **731ms** | **710ms** | | |
-
-### 500 Concurrent Users (direct connection — FAILED)
-
-| Metric | Value |
-|--------|-------|
-| Failure rate | **69%** |
-| Error | `TooManyConnectionsError` — Neon direct connection limit exhausted |
-
-**Key finding**: Neon's PgBouncer pooler (`-pooler` hostname) is mandatory for >100 concurrent. Production already uses the pooled connection string.
-
-### What Latency Means
-
-The ~700ms at 500 users includes network round-trip from macOS to us-east-1 Neon. In production on Railway (also us-east-1), same-region latency is ~5-10ms. Expected production latency: **~50-100ms per query at 500 concurrent**.
-
----
-
-## External Provider Capacity Audit (April 2026)
-
-### Current Limits vs. 500 Concurrent Calls
-
-| Provider | Service | Current Limit | Need at 500 Concurrent | Status |
-|----------|---------|---------------|------------------------|--------|
-| **Anthropic** | Claude Haiku 4.5 | 1,000 RPM / 450K input TPM | ~1,000 RPM / ~5M input TPM | **BLOCKER** — input tokens 11x over limit |
-| **ElevenLabs** | TTS Streaming | ~5 concurrent (Creator tier) | 500 concurrent | **BLOCKER** — 100x under capacity |
-| **Deepgram** | STT Streaming (Nova 3) | Unknown (pay-as-you-go) | 500 concurrent streams | **VERIFY** — contact Deepgram |
-| **Telnyx** | Voice Calls | Active Voice API application | 500 concurrent | **VERIFY** — confirm account capacity and WebSocket media limits |
-| **OpenAI** | Embeddings | 3,000 RPM / 1M TPM | ~2,000-4,000 RPM | **AT RISK** — prefetch cache mitigates |
-| **Groq** | Director primary | Verify account limits | 500 concurrent Director calls | **VERIFY** — current primary Director provider |
-| **Gemini** | Director fallback + Analysis | 1,500 RPM (free tier) | Fallback Director + ~500 post-call burst | **AT RISK** — post-call bursts can contend with fallback Director |
-
-### Anthropic — HARD BLOCKER
-
-```
-Current tier rate limits:
-  Requests:      1,000 RPM
-  Input tokens:  450,000 TPM
-  Output tokens: 90,000 TPM
-
-500 concurrent calls × 2 LLM calls/min:
-  Requests:      1,000 RPM  → AT LIMIT
-  Input tokens:  ~5,000,000 TPM → 11x OVER LIMIT
-  Output tokens: ~500,000 TPM → 5.5x OVER LIMIT
-```
-
-**Fix**: Upgrade to Build tier (4,000 RPM / 2M input TPM) or Scale tier (8,000 RPM / 4M+ TPM). Contact Anthropic for custom limits at 500 concurrent.
-
-### ElevenLabs — HARD BLOCKER
-
-```
-Current plan: Creator ($22/mo)
-  Concurrent streams: ~5
-  Character limit: 148,460/month
-
-500 concurrent calls need:
-  Concurrent streams: 500
-  Characters/month: ~40M (8,000 calls × 10min × ~500 chars/min)
-```
-
-**Fix**: Upgrade to Enterprise plan. Even Scale tier (25 concurrent) is insufficient. Need custom agreement for 500 concurrent WebSocket streams.
-
-### Groq/Gemini Director Capacity — VERIFY
-
-Groq is the current primary Director provider (`GROQ_API_KEY`, `GROQ_DIRECTOR_MODEL`). Gemini remains the fallback for full guidance analysis and is also used for post-call analysis, so fallback Director traffic can contend with post-call bursts.
-
-**Fix**: Verify Groq RPM/concurrency limits for the Director workload and ensure Gemini limits cover fallback plus post-call analysis, or move Director fallback to a HIPAA-eligible paid tier.
-
-### OpenAI Embeddings — AT RISK
-
-```
-Current limits: 3,000 RPM / 1,000,000 TPM
-Peak demand: 500 calls × 4-8 memory retrieval/prefetch attempts per call = 2,000-4,000 RPM
-```
-
-Mitigated by predictive prefetch cache and Director-owned memory injection; most repeated memory requests hit the session cache at ~0ms and Claude no longer calls a separate `search_memories` tool in the live path. Real embedding API calls estimated at ~500-1,000 RPM after cache hits. **Should be OK** but monitor during rollout.
-
-### Required Actions Before 500 Concurrent
-
-| Action | Priority | Who | Estimated Cost |
-|--------|----------|-----|----------------|
-| Upgrade Anthropic tier to Build/Scale | **P0** | Account admin | ~$1,000-5,000/mo |
-| Upgrade ElevenLabs to Enterprise | **P0** | Account admin | Custom pricing |
-| Verify Groq Director limits and Gemini fallback/post-call headroom | **P0** | DevOps | Depends on plan |
-| Verify Deepgram concurrent stream limit | **P1** | Account admin | Contact sales |
-| Verify Telnyx concurrent call capacity | **P1** | Account admin | Check dashboard/support limits |
-| Set Railway instance to 8GB+ RAM | **P1** | DevOps | ~$20-40/mo |
-| Consider multi-instance (2-3 replicas) | **P2** | Engineering | Architecture work |
+The main discipline for 10k is the same as for 2k: do not count a future design as complete until runtime code, migration plan, operational runbook, and evidence exist.
 
 ---
 
 ## Key Files
 
 | File | Purpose |
-|------|---------|
-| `pipecat/main.py` | Semaphore, health endpoint, graceful shutdown |
-| `pipecat/db/client.py` | Connection pool, slow query logging |
-| `pipecat/lib/redis_client.py` | Redis/InMemory shared state |
-| `services/scheduler.js` | Active Node scheduler, call planning, reminder prewarm, outbound retries |
-| `pipecat/services/scheduler.py` | Pipecat-side scheduler helpers and Redis reminder-context handoff; disabled for active production scheduling |
-| `pipecat/api/routes/telnyx.py` | Telnyx webhooks, context prewarm, outbound call creation, call termination |
-| `pipecat/scripts/rollout.sh` | Production rollout script |
-| `db/migrations/001_add_indexes.sql` | Database index definitions |
+|---|---|
+| `services/scheduler.js` | Legacy scheduler/dialer plus dual-path materialization/dispatch orchestration |
+| `services/call-schedules.js` | Schedule normalization/materialization |
+| `services/call-queue.js` | Queue enqueue, lease, lane policy, guard, dispatcher, reconciler |
+| `services/pipecat-capacity.js` | Node reader/writer for Pipecat heartbeats and reservations |
+| `pipecat/services/capacity.py` | Pipecat heartbeat publisher and reservation cleanup |
+| `pipecat/services/readiness.py` | Replica warm-up/readiness gate |
+| `services/post-call-jobs.js` | Post-call job DAG, leases, retries, dead-letter handling |
+| `services/canary-cohort.js` | Phase 7 canary cohort source of truth |
+| `services/phase8-autoscaler.js` | Capacity planner actuator and Railway scale wrapper |
+| `routes/scale-operations.js` | Admin capacity planning and override API |
+| `routes/canary.js` | Admin canary membership API |
+| `scripts/phase8-capacity-plan.js` | PHI-free pre-window capacity plan |
+| `docs/plans/2026-05-18-scale-to-2000-users-technical-plan.md` | Full 2,000-user plan and 10k path |
+
+---
+
+## Historical Notes
+
+Older scalability docs and load tests refer to 8,000 users, 500 concurrent calls, Twilio media streams, and mock Twilio load tests. Treat those as historical unless a current architecture document or runtime file marks them active. The current scale milestone is 2,000 active seniors, with a documented forward path to 10,000.

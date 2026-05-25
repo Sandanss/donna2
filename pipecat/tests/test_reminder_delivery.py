@@ -1,6 +1,7 @@
 """Tests for services/reminder_delivery.py — delivery CRUD + prompt formatting."""
 
 import pytest
+from datetime import datetime, timezone
 from unittest.mock import patch, AsyncMock
 
 
@@ -13,6 +14,53 @@ class TestMarkDelivered:
             mock_exec.assert_called_once()
             assert "UPDATE reminders" in mock_exec.call_args[0][0]
             assert mock_exec.call_args[0][1] == "rem-001"
+
+
+class TestReminderDeliveryKey:
+    def test_builds_id_only_key_at_minute_precision(self):
+        from services.reminder_delivery import build_reminder_delivery_key
+
+        key = build_reminder_delivery_key(
+            "rem-001",
+            datetime(2035, 3, 11, 13, 30, 45, 123456, tzinfo=timezone.utc),
+        )
+
+        assert key == "reminder_delivery:rem-001:2035-03-11T13:30"
+
+
+class TestCreateOrUpdateDeliveryForCall:
+    @pytest.mark.asyncio
+    async def test_inserts_with_delivery_key_idempotency(self):
+        with patch("services.reminder_delivery.query_one", new_callable=AsyncMock, return_value={"id": "del-001"}) as mock_query:
+            from services.reminder_delivery import create_or_update_delivery_for_call
+
+            result = await create_or_update_delivery_for_call(
+                reminder_id="rem-001",
+                scheduled_for=datetime(2035, 3, 11, 13, 30),
+                call_sid="call-001",
+            )
+
+            assert result == {"id": "del-001"}
+            sql = mock_query.call_args[0][0]
+            assert "delivery_key" in sql
+            assert "ON CONFLICT (delivery_key)" in sql
+            assert mock_query.call_args[0][4] == "reminder_delivery:rem-001:2035-03-11T13:30"
+
+    @pytest.mark.asyncio
+    async def test_existing_delivery_backfills_delivery_key(self):
+        with patch("services.reminder_delivery.query_one", new_callable=AsyncMock, return_value={"id": "del-001"}) as mock_query:
+            from services.reminder_delivery import create_or_update_delivery_for_call
+
+            await create_or_update_delivery_for_call(
+                reminder_id="rem-001",
+                scheduled_for=datetime(2035, 3, 11, 13, 30),
+                call_sid="call-001",
+                existing_delivery_id="del-001",
+            )
+
+            sql = mock_query.call_args[0][0]
+            assert "delivery_key = COALESCE(delivery_key, $3)" in sql
+            assert mock_query.call_args[0][3] == "reminder_delivery:rem-001:2035-03-11T13:30"
 
 
 class TestMarkReminderAcknowledged:
@@ -130,6 +178,69 @@ class TestWaitForReminderByCallSid:
 
             assert result is None
             assert mock_query.await_count == 1
+
+
+class TestCreateOrUpdateDeliveryIdempotency:
+    """Category F: lifecycle idempotency on reminder_deliveries."""
+
+    @pytest.mark.asyncio
+    async def test_create_or_update_delivery_idempotent_on_duplicate_key(self):
+        """Two writes with the same delivery_key: 2nd must UPDATE (not INSERT)
+        and the row's attempt_count must increment correctly.
+
+        The implementation uses a single INSERT...ON CONFLICT (delivery_key)
+        DO UPDATE statement; a duplicate key triggers the UPDATE branch in
+        the same statement, returning the existing row id with attempt_count
+        incremented by 1.
+        """
+        from datetime import datetime
+        from services.reminder_delivery import create_or_update_delivery_for_call
+
+        scheduled = datetime(2035, 3, 11, 13, 30)
+
+        # Simulate Postgres' ON CONFLICT path: first call inserts a fresh row
+        # (attempt_count=1), second call hits the conflict and updates with
+        # attempt_count incremented to 2.
+        responses = [
+            {"id": "del-001", "reminder_id": "rem-001", "status": "delivered", "attempt_count": 1},
+            {"id": "del-001", "reminder_id": "rem-001", "status": "delivered", "attempt_count": 2},
+        ]
+
+        with patch(
+            "services.reminder_delivery.query_one",
+            new_callable=AsyncMock,
+            side_effect=responses,
+        ) as mock_query:
+            first = await create_or_update_delivery_for_call(
+                reminder_id="rem-001",
+                scheduled_for=scheduled,
+                call_sid="call-001",
+            )
+            second = await create_or_update_delivery_for_call(
+                reminder_id="rem-001",
+                scheduled_for=scheduled,
+                call_sid="call-002",
+            )
+
+        # Both calls hit the same INSERT...ON CONFLICT statement.
+        assert mock_query.await_count == 2
+        for call in mock_query.await_args_list:
+            sql_text = call.args[0]
+            assert "INSERT INTO reminder_deliveries" in sql_text
+            assert "ON CONFLICT (delivery_key)" in sql_text
+            # The UPDATE branch must increment attempt_count using COALESCE.
+            assert "attempt_count = COALESCE(reminder_deliveries.attempt_count, 0) + 1" in sql_text
+
+        # delivery_key in both calls must be identical (same reminder + minute).
+        first_key = mock_query.await_args_list[0].args[4]
+        second_key = mock_query.await_args_list[1].args[4]
+        assert first_key == second_key == "reminder_delivery:rem-001:2035-03-11T13:30"
+
+        # The simulated DB returns the SAME row id (not a new insert) and
+        # attempt_count climbs monotonically.
+        assert first["id"] == second["id"] == "del-001"
+        assert first["attempt_count"] == 1
+        assert second["attempt_count"] == 2
 
 
 class TestFormatReminderPrompt:

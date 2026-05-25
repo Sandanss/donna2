@@ -1,6 +1,13 @@
 # Donna Architecture Overview
 
-This document describes Donna's current system architecture with the **Pipecat voice pipeline**, **Conversation Director** (Groq fast path, Gemini fallback for non-speculative analysis), **Predictive Context Engine** (memory prefetch), **Pipecat Flows** call state machine, and **infrastructure reliability** features (circuit breakers, GrowthBook feature flags, graceful shutdown).
+This document describes Donna's current `zuludev` architecture with the **Pipecat voice pipeline**, **Conversation Director** (Groq fast path, Gemini fallback for non-speculative analysis), **Predictive Context Engine** (memory prefetch), **Pipecat Flows** call state machine, and the in-progress scale architecture.
+
+Donna has **two outbound-call architectures right now**:
+
+- **Legacy architecture:** `services/scheduler.js` remains deployed as the current/rollback dial authority. It plans due calls in a Node scheduler loop, relies on in-process dedupe for several scheduling decisions, dials through Pipecat `/telnyx/outbound`, and leaves post-call analysis inline in Pipecat.
+- **New scale architecture:** the queue/capacity path in `services/call-queue.js`, `services/call-schedules.js`, `services/pipecat-capacity.js`, `pipecat/services/capacity.py`, `services/post-call-jobs.js`, and `services/phase8-autoscaler.js` is the path to the **2,000-user burst target**. It uses durable queue rows, Postgres leases and dial guards, Redis capacity heartbeats/reservations, canary cohorts, and pre-window replica planning. It is still gated by rollout flags until the production cutover.
+
+The documented **10,000-user path** is forward work built on the new queue architecture, not a completed runtime. See [the scale plan §8](../plans/2026-05-18-scale-to-2000-users-technical-plan.md#8-forward-path-to-10000-users) and [Scalability](SCALABILITY.md).
 
 > For detailed Pipecat implementation specifics, see [pipecat/docs/ARCHITECTURE.md](../../pipecat/docs/ARCHITECTURE.md).
 
@@ -13,7 +20,7 @@ This document describes Donna's current system architecture with the **Pipecat v
 | [Architecture](ARCHITECTURE.md) | System architecture: pipeline, two-backend design, database schema, tech stack |
 | [Features](FEATURES.md) | Complete product feature inventory with special optimizations |
 | [Security](SECURITY.md) | Authentication, rate limiting, input validation, PII protection, security headers |
-| [Scalability](SCALABILITY.md) | Admission control, DB indexes, connection pooling, leader election, Redis, rollout |
+| [Scalability](SCALABILITY.md) | Legacy vs queue scale status, 2,000-user target, Redis/capacity, 10k path |
 | [Cost](COST.md) | Per-call cost breakdown, infrastructure costs, optimization strategies |
 | [Testing](TESTING.md) | 3-level test architecture, load testing, regression scenarios, mock infrastructure |
 | [Performance](PERFORMANCE.md) | Pipeline latency, predictive prefetch, circuit breakers, graceful shutdown |
@@ -40,6 +47,9 @@ This document describes Donna's current system architecture with the **Pipecat v
 │   │    services/scheduler.js — legacy plan + dual-write to queue │          │
 │   │    services/call-queue.js — durable dispatcher (Phase 2+)    │          │
 │   │    services/pipecat-capacity.js — cross-replica capacity read│          │
+│   │    services/post-call-jobs.js — Phase 6 job DAG + dead letter│          │
+│   │    services/phase8-autoscaler.js — Phase 8 Railway actuator  │          │
+│   │    services/canary-cohort.js — Phase 7 cohort membership     │          │
 │   └──────────────────────────────────────────────────────────────┘          │
 │                                                                              │
 │   ┌──────────────┐                                                          │
@@ -324,6 +334,13 @@ pipecat/
 | **waitlist** | Public waitlist signups | name, email, phone, whoFor |
 | **audit_logs** | HIPAA audit events | userId, userRole, action, resourceType |
 | **admin_users** | Admin dashboard accounts | email, passwordHash (bcrypt) |
+| **senior_call_schedules** | Normalized runtime call schedules for queue architecture | seniorId, nextRunAt, priorityLane |
+| **call_queue** | Durable outbound dispatch queue | status, priorityLane, targetAt, leaseOwner |
+| **call_attempts** | Per-dispatch attempt audit trail | queueId, callControlId, architecture, cohort |
+| **outbound_call_guards** | Shared legacy/queue dial-authority guard | guardKey, architecture, queueId, status |
+| **scheduler_shadow_comparisons** | Shadow rollout decision comparison | legacyDecision, queueDecision, capacityDecision |
+| **post_call_jobs** | Gated post-call job DAG and dead-letter queue | jobType, dependsOn, status, leaseOwner |
+| **canary_cohort_membership** | Phase 7 queue canary membership | seniorId, rampPhase, removedAt |
 
 ### Memory System
 
@@ -372,6 +389,12 @@ Dispatcher tick (every N seconds, in same Node process):
 ```
 
 Mode progression: `legacy_only` → `shadow_materialize` → `shadow_dispatch` → `canary_queue` → `queue_primary`. `legacy_rollback` is the emergency exit. See [`ARCHITECTURE.md`](ARCHITECTURE.md#outbound-call-dispatch--dual-path-rollout) for the full mode matrix and the consistency-model rule (Postgres decides *what*, Redis decides *what is running right now*).
+
+**Out-of-band post-call (Phase 6 infra).** `services/post-call-jobs.js` defines an 8-job DAG (`metrics_finalize`, `reminder_recovery`, `analysis`, `memory_extraction`, `daily_context`, `caregiver_notifications`, `interest_discovery`, `snapshot_rebuild`) backed by the `post_call_jobs` queue. Per-provider semaphores keep `geminiFlash`/`openAiEmbeddings`/`resend` at concurrency 1 across the fleet; `db` lane runs at 200. Terminal failures move to `dead_letter` and are admin-replayable. Pipecat enqueues only when `POST_CALL_QUEUE_ENABLED=true`; the worker has no continuous loop yet and runs via the shadow script — inline `pipecat/services/post_call.py` remains the active path until the canary flip.
+
+**Phase 7 canary + Phase 8 capacity actuator.** `services/canary-cohort.js` and `routes/canary.js` store the queue canary allowlist in `canary_cohort_membership`, with the env allowlist kept as an emergency fallback. `scripts/phase7-canary-report.js` produces the daily aggregate report for the 5→10→25 live canary. `scripts/phase8-capacity-plan.js` + `services/phase8-autoscaler.js` recommend and (optionally) apply Railway replica scaling for known call windows; dry-run by default. Admin override at `POST /api/scale-operations/phase8/override`. See [`ARCHITECTURE.md`](ARCHITECTURE.md#capacity-planning--autoscaling-phases-7-8) for the full surface.
+
+**Path to 10,000 users.** The queue architecture is deliberately shaped so the next scale step is incremental rather than a rewrite: move hot operational tables to `ops.*` or hash/time partitioning when DB pressure appears, move Redis/shared state to a HA or multi-region topology when reliability or latency demands it, add caller-ID pool/reputation management when answer rate declines, add provider sharding/failover when vendor 429s appear, and promote the post-call DAG to Temporal/Inngest or equivalent if Postgres-only workers become the bottleneck. These are documented triggers, not implemented guarantees.
 
 ---
 

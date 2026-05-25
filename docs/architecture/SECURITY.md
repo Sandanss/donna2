@@ -62,6 +62,18 @@ async def list_seniors(auth: AuthContext = Depends(require_auth)):
 - The incomplete-account cleanup route refuses to delete if any caregiver profile exists for the Clerk user, audit-logs the pending account deletion, deletes the Clerk user when possible, and returns a recoverable `202` if Clerk deletion fails after local cleanup can proceed.
 - Full account deletion remains separate at `DELETE /api/caregivers/me/account`, with idempotency, senior unlink/delete behavior, and audit logging.
 
+### Scale-rollout admin routes (`routes/scale-operations.js`, `routes/post-call-jobs.js`, `routes/canary.js`)
+- All Phase 6/7/8 operator endpoints are gated by `requireAdmin` (no Clerk caregiver path):
+  - `GET /api/scale-operations/phase8/plan` — capacity recommendation for a window.
+  - `POST /api/scale-operations/phase8/autoscale-once` — single-tick autoscaler; dry-run unless body opts in.
+  - `POST /api/scale-operations/phase8/override` — operator override with reason code, audited with `operation=phase8_operator_override`.
+  - `GET /api/post-call-jobs/dead-letter` — list dead-lettered post-call jobs (counts + reason code only).
+  - `POST /api/post-call-jobs/:id/replay` — replay a single dead-lettered job after review.
+  - `GET /api/canary/members` — list active queue canary members by senior ID/ramp phase only.
+  - `POST /api/canary/members` — add one or more senior IDs to a ramp phase.
+  - `DELETE /api/canary/members/:seniorId` — remove one canary member with a PHI-free reason.
+- All responses are PHI-free: capacity plans emit replica/slot counts, dead-letter listings carry sanitized reason codes, canary membership returns IDs/ramp metadata only, and the operator-override reason is normalized to `[a-z0-9_.:-]{1,120}` before logging.
+
 ---
 
 ## Telnyx Webhook Validation
@@ -102,7 +114,7 @@ Five rate limit tiers using `slowapi`, keyed by remote address:
 
 **Storage backend (multi-instance):** When `REDIS_RATE_LIMITS_ENABLED=true`, SlowAPI uses `REDIS_URL` so counters are global across replicas, with `swallow_errors=False` — a Redis outage in scaled mode fails closed (429) rather than silently degrading to per-replica in-memory limits. The Node side uses the equivalent `services/redis-rate-limit-store.js` SlowAPI-compatible store. Without `REDIS_RATE_LIMITS_ENABLED`, both fall back to in-memory storage (each replica counts independently — acceptable for single-instance dev/staging).
 
-**Service-to-service carve-out (Phase 4 work item):** Requests authenticated with the labeled `dispatcher` API key are rate-limited separately from public traffic, far more loosely. Without this carve-out, the dispatcher would throttle itself at the 5/minute call-initiation limit once it crosses 600 dials in 15 minutes from a single replica. This is configured in `pipecat/api/middleware/api_auth.py` and gated by Phase 4 of the scaling rollout (see [plan §3 Phase 4](../plans/2026-05-18-scale-to-2000-users-technical-plan.md)).
+**Service-to-service carve-out:** Requests authenticated with the labeled `dispatcher` API key are rate-limited separately from public traffic, far more loosely. Without this carve-out, the dispatcher would throttle itself at the 5/minute call-initiation limit once it crosses 600 dials in 15 minutes from a single replica. This is configured in `pipecat/api/middleware/api_auth.py` and covered by Phase 4 of the scaling rollout (see [plan §3 Phase 4](../plans/2026-05-18-scale-to-2000-users-technical-plan.md)).
 
 ---
 

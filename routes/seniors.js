@@ -1,7 +1,20 @@
 import { Router } from 'express';
 import { db } from '../db/client.js';
-import { seniors, conversations, memories, reminders, callAnalyses, dailyCallContext, caregivers } from '../db/schema.js';
-import { eq, desc } from 'drizzle-orm';
+import {
+  seniors,
+  conversations,
+  memories,
+  reminders,
+  callAnalyses,
+  dailyCallContext,
+  caregivers,
+  seniorCallSchedules,
+  callQueue,
+  callAttempts,
+  outboundCallGuards,
+  schedulerShadowComparisons,
+} from '../db/schema.js';
+import { eq, desc, sql } from 'drizzle-orm';
 import { seniorService } from '../services/seniors.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { writeLimiter } from '../middleware/rate-limit.js';
@@ -48,6 +61,29 @@ function decryptExportMemory(row) {
   return {
     ...rest,
     content: contentEncrypted ? decrypt(contentEncrypted) : row.content,
+  };
+}
+
+function decryptExportSeniorCallSchedule(row) {
+  const {
+    contextNotesEncrypted,
+    ...rest
+  } = row;
+  return {
+    ...rest,
+    ...(contextNotesEncrypted ? { contextNotes: decrypt(contextNotesEncrypted) } : {}),
+  };
+}
+
+function decryptExportPostCallJob(row) {
+  const {
+    payload_encrypted: payloadEncryptedSnake,
+    payloadEncrypted = payloadEncryptedSnake,
+    ...rest
+  } = row;
+  return {
+    ...rest,
+    ...(payloadEncrypted ? { payload: decryptJson(payloadEncrypted) } : {}),
   };
 }
 
@@ -279,6 +315,12 @@ router.get('/api/seniors/:id/export', requireAuth, validateParams(seniorIdParamS
       seniorAnalyses,
       seniorDailyContext,
       seniorCaregiverLinks,
+      seniorCallScheduleRows,
+      seniorCallQueueRows,
+      seniorCallAttemptRows,
+      seniorPostCallJobRows,
+      seniorOutboundCallGuardRows,
+      seniorSchedulerShadowRows,
     ] = await Promise.all([
       seniorService.getById(seniorId),
       db.select({
@@ -331,6 +373,28 @@ router.get('/api/seniors/:id/export', requireAuth, validateParams(seniorIdParamS
         createdAt: caregivers.createdAt,
       }).from(caregivers)
         .where(eq(caregivers.seniorId, seniorId)),
+      db.select().from(seniorCallSchedules)
+        .where(eq(seniorCallSchedules.seniorId, seniorId))
+        .orderBy(desc(seniorCallSchedules.createdAt)),
+      db.select().from(callQueue)
+        .where(eq(callQueue.seniorId, seniorId))
+        .orderBy(desc(callQueue.createdAt)),
+      db.select().from(callAttempts)
+        .where(eq(callAttempts.seniorId, seniorId))
+        .orderBy(desc(callAttempts.createdAt)),
+      db.execute(sql`
+        SELECT *
+        FROM post_call_jobs
+        WHERE senior_id = ${seniorId}
+           OR conversation_id IN (SELECT id FROM conversations WHERE senior_id = ${seniorId})
+        ORDER BY created_at DESC
+      `).then(result => result.rows || []),
+      db.select().from(outboundCallGuards)
+        .where(eq(outboundCallGuards.seniorId, seniorId))
+        .orderBy(desc(outboundCallGuards.createdAt)),
+      db.select().from(schedulerShadowComparisons)
+        .where(eq(schedulerShadowComparisons.seniorId, seniorId))
+        .orderBy(desc(schedulerShadowComparisons.createdAt)),
     ]);
 
     if (!senior) {
@@ -356,6 +420,12 @@ router.get('/api/seniors/:id/export', requireAuth, validateParams(seniorIdParamS
       callAnalyses: seniorAnalyses.map(normalizeCallAnalysis).filter(Boolean),
       dailyContext: seniorDailyContext.map(decryptDailyContextPhi),
       caregiverLinks: seniorCaregiverLinks,
+      callSchedules: seniorCallScheduleRows.map(decryptExportSeniorCallSchedule),
+      callQueue: seniorCallQueueRows,
+      callAttempts: seniorCallAttemptRows,
+      postCallJobs: seniorPostCallJobRows.map(decryptExportPostCallJob),
+      outboundCallGuards: seniorOutboundCallGuardRows,
+      schedulerShadowComparisons: seniorSchedulerShadowRows,
     });
   } catch (error) {
     routeError(res, error, 'GET /api/seniors/:id/export');

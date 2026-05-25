@@ -238,28 +238,61 @@ async def build_session_state(
 async def cleanup_test_senior(senior_id: str) -> None:
     """Delete all data for a test senior across all related tables.
 
-    Deletes in dependency order to avoid FK violations.  Tables that lack
-    a ``senior_id`` column are silently skipped.
+    Previously this ran ``DELETE FROM {table} WHERE senior_id = $1`` for
+    every table — which silently no-op'd on ``seniors`` (column is ``id``)
+    and on ``reminder_deliveries`` (no ``senior_id`` column at all; it
+    links via ``reminder_id``). Both left rows behind, and the
+    ``seniors_phone_unique`` constraint then blocked re-running the demo.
+
+    This walks each table with its actual column / join.
     """
     from db import execute
 
-    tables = [
+    sid = uuid.UUID(senior_id)
+
+    # Child tables that have a direct senior_id column. Phase 1 queue
+    # tables may not exist on every environment, so we tolerate missing
+    # tables at debug level.
+    senior_id_tables = [
         "call_metrics",
         "daily_call_context",
         "call_analyses",
-        "reminder_deliveries",
         "memories",
         "conversations",
         "caregivers",
-        "seniors",
+        "call_attempts",
+        "call_queue",
+        "outbound_call_guards",
+        "post_call_jobs",
+        "scheduler_shadow_comparisons",
+        "senior_call_schedules",
+        "canary_cohort_membership",
     ]
-
-    sid = uuid.UUID(senior_id)
-    for table in tables:
+    for table in senior_id_tables:
         try:
             await execute(f"DELETE FROM {table} WHERE senior_id = $1", sid)
         except Exception as exc:
-            # Some tables may not have a senior_id column -- that's fine
             logger.debug("[Fixtures] Cleanup {t} skipped: {e}", t=table, e=str(exc))
+
+    # reminder_deliveries links via reminder_id, not senior_id.
+    try:
+        await execute(
+            """DELETE FROM reminder_deliveries
+                WHERE reminder_id IN (SELECT id FROM reminders WHERE senior_id = $1)""",
+            sid,
+        )
+    except Exception as exc:
+        logger.debug("[Fixtures] Cleanup reminder_deliveries skipped: {e}", e=str(exc))
+
+    try:
+        await execute("DELETE FROM reminders WHERE senior_id = $1", sid)
+    except Exception as exc:
+        logger.debug("[Fixtures] Cleanup reminders skipped: {e}", e=str(exc))
+
+    # Finally the seniors row itself — column is `id`, not `senior_id`.
+    try:
+        await execute("DELETE FROM seniors WHERE id = $1", sid)
+    except Exception as exc:
+        logger.debug("[Fixtures] Cleanup seniors row skipped: {e}", e=str(exc))
 
     logger.info("[Fixtures] Cleaned up test senior: {id}", id=senior_id[:8])

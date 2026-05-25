@@ -116,6 +116,44 @@ async def test_websocket_auth_accepts_valid_token_once():
 
 
 @pytest.mark.asyncio
+async def test_websocket_auth_fails_closed_when_required_shared_claim_fails(monkeypatch):
+    class FailingSharedState:
+        is_shared = True
+
+        async def set_if_absent(self, key, value, ttl=None):
+            raise RuntimeError("redis unavailable")
+
+    monkeypatch.setenv("PIPECAT_REQUIRE_REDIS", "true")
+    call_metadata["CA123"] = {
+        "ws_token": "expected-token",
+        "ws_token_expires_at": time.time() + 300,
+        "ws_token_consumed": False,
+    }
+
+    with patch("lib.redis_client.get_shared_state", return_value=FailingSharedState()):
+        with pytest.raises(WebSocketAuthError, match="shared token consume unavailable"):
+            await authenticate_websocket_call(
+                {"call_id": "CA123", "body": {"ws_token": "expected-token"}},
+                {},
+            )
+
+
+@pytest.mark.asyncio
+async def test_websocket_auth_fails_closed_when_required_metadata_lookup_fails(monkeypatch):
+    monkeypatch.setenv("PIPECAT_REQUIRE_REDIS", "true")
+    monkeypatch.delenv("REDIS_URL", raising=False)
+    monkeypatch.delenv("UPSTASH_REDIS_REST_URL", raising=False)
+    monkeypatch.delenv("UPSTASH_REDIS_REST_TOKEN", raising=False)
+
+    with patch.object(bot_module, "WS_METADATA_LOOKUP_TIMEOUT_SECONDS", 0):
+        with pytest.raises(WebSocketAuthError, match="shared metadata unavailable"):
+            await authenticate_websocket_call(
+                {"call_id": "CAunknown", "body": {"ws_token": "token"}},
+                {},
+            )
+
+
+@pytest.mark.asyncio
 async def test_websocket_auth_consumes_valid_token_atomically():
     call_metadata["CA123"] = {
         "ws_token": "expected-token",

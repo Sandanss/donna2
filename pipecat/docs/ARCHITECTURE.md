@@ -469,6 +469,16 @@ The heartbeat publisher is started by `start_capacity_heartbeat()` in `main.py`.
 
 `TelnyxOutboundCallRequest` accepts optional `queue_id` and `reservation_id` from the dispatcher. Both flow into call metadata so post-call processing and audit trails can attribute the call to the queue path. When the legacy scheduler dials, those fields are absent and the metadata records `architecture=legacy`.
 
+### Capacity heartbeat hardening (Phase 8 follow-up)
+
+When shared state is required (`PIPECAT_REQUIRE_REDIS=true`), the heartbeat publisher fails closed instead of degrading silently: a failed publish raises and the replica stops advertising stale capacity rather than letting the Node dispatcher read a successful-looking ghost heartbeat. The fix is covered by `pipecat/tests/test_capacity_heartbeat_failure_propagation.py`.
+
+The Node-side Phase 8 actuator (`services/phase8-autoscaler.js`) reads the same `pipecat:instance:*` keys and refuses to count a replica as usable until its warm-up gate is green — this is the `wait_for_readiness` recommendation surfaced through `routes/scale-operations.js`. The actuator never bypasses the dispatcher's lane reserves; the capacity it plans against is the same lane-adjusted slot count that `services/pipecat-capacity.js` already exposes to `services/call-queue.js`.
+
+### Post-call queue seam (Phase 6 — gated)
+
+Phase 6 wires the seam to move post-call work onto the Node-managed `post_call_jobs` queue. When `POST_CALL_QUEUE_ENABLED=true`, `services/post_call.py` calls `services/post_call_jobs.maybe_enqueue_post_call_job_graph` after writing the conversation record, and the Node worker (`services/post-call-jobs.js`) leases and runs jobs under per-provider semaphores. The flag is **off by default**: the active runtime still executes the full inline analyzer chain in `services/post_call.py`. Pipecat's responsibility under the new path is limited to writing a clean, deduped seed row per call; the DAG (`metrics_finalize`, `reminder_recovery`, `analysis`, `memory_extraction`, `daily_context`, `caregiver_notifications`, `interest_discovery`, `snapshot_rebuild`) and dead-letter handling live on the Node side. See [`docs/architecture/ARCHITECTURE.md`](../../docs/architecture/ARCHITECTURE.md#post-call-job-workflow-phase-6) for the provider-semaphore and retry-policy contract.
+
 ## Directory Structure
 
 ```

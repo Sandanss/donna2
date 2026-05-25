@@ -15,6 +15,19 @@ Donna runs two backends sharing the same PostgreSQL database:
 
 This is an **explicit architectural decision** — each backend owns a clear domain. Dual service implementations (e.g., `services/memory.js` and `pipecat/services/memory.py`) exist because each backend needs database access for its own purpose.
 
+## Current Scale Status (`zuludev`)
+
+Donna currently carries two outbound-call architectures:
+
+| Path | Status | What it owns |
+|---|---|---|
+| **Legacy scheduler/dialer** | Still present and kept as current/rollback authority | `services/scheduler.js` builds due-call plans, filters paused/inactive seniors, uses legacy in-process dedupe maps, and dials through Pipecat `/telnyx/outbound`. |
+| **Queue + capacity dispatcher** | Implemented behind rollout flags | `senior_call_schedules`, `call_queue`, `outbound_call_guards`, `call_attempts`, Pipecat capacity heartbeats/reservations, canary cohort membership, Phase 6 post-call jobs, and Phase 8 capacity planning. |
+
+The queue path is the architecture intended to support the **2,000-user burst milestone**. It should not be called fully active until production is running `CALL_ARCHITECTURE_MODE=queue_primary`, `CALL_QUEUE_ALLOW_REAL_DIAL=true`, the capacity registry is required, and Phase 7/8 evidence has been saved. The legacy path remains intentionally deployable through the rollout and rollback window.
+
+The path to **10,000 users** is documented as forward work in [the scale plan §8](../plans/2026-05-18-scale-to-2000-users-technical-plan.md#8-forward-path-to-10000-users): operational-table partitioning or `ops.*`, HA/multi-region Redis, caller-ID pool/reputation strategy, provider sharding/failover, workflow-engine post-call execution, and larger archive/retention handling. Those are trigger-based next steps, not completed runtime behavior.
+
 ---
 
 ## Voice Pipeline (bot.py)
@@ -191,9 +204,64 @@ Donna is rolling the outbound dialer off the in-process Node scheduler onto a du
 
 **Materializer is canary-blind by design.** All due schedules materialize into `call_queue` regardless of cohort. Canary selection happens at dispatch time via `canaryPercent` + `canarySeniorIds`; the legacy scheduler removes canary seniors from its own plan in `canary_queue` mode so the guard mediates only between cohorts that should converge.
 
-**Capacity coordination.** `pipecat/services/capacity.py` publishes per-replica heartbeats every 5s to `pipecat:instance:{id}` with a 15s TTL. `services/pipecat-capacity.js` reads via Redis → Upstash REST → local fallback. The dispatcher computes available slots per instance and respects lane reserves (`reminders`, `manual`, `scheduled`, `inbound`) before issuing leases.
+**Capacity coordination.** `pipecat/services/capacity.py` publishes per-replica heartbeats every 5s to `pipecat:instance:{id}` with a 15s TTL. `services/pipecat-capacity.js` reads via Redis → Upstash REST → local fallback. The dispatcher computes available slots per instance before issuing leases. Current queue lane reserves are defined in `DEFAULT_LANE_RESERVE_POLICY` for `manual`, `hard_reminder`, `reminder_retry`, `scheduled_checkin`, `welfare`, and `low_priority_retry`; inbound calls are accounted for through the heartbeat's `inbound_active_calls` and total active-capacity subtraction, not as a leased `call_queue` lane.
 
-**Reconciler.** `reconcileQueueLeases` recovers expired `call_queue` leases and expires overdue queued rows past `latest_at`. `outbound_call_guards` rows store `expires_at` but the queue-side reconciler does not yet release stale guards on its own — that is a tracked Phase 4 follow-up (see [plan §3 Phase 4](../plans/2026-05-18-scale-to-2000-users-technical-plan.md) work item 6).
+**Reconciler.** `reconcileQueueLeases` recovers expired `call_queue` leases and expires overdue queued rows past `latest_at`. The Phase 4 guard reconciler (PR #261) releases stale `outbound_call_guards` past `expires_at` so the queue side does not stay blocked when a legacy dial process dies mid-flight.
+
+---
+
+## Post-Call Job Workflow (Phase 6)
+
+**Active files**: `services/post-call-jobs.js`, `pipecat/services/post_call_jobs.py`, `scripts/run-post-call-worker-once.js`, `routes/post-call-jobs.js`, `db/migrations/012_post_call_job_state_machine.sql`
+
+Phase 6 lands the infrastructure for moving post-call work (analysis, memory extraction, snapshot rebuild, caregiver notifications, etc.) onto the `post_call_jobs` queue instead of running inline in `pipecat/services/post_call.py`. **Activation is still gated**: Pipecat only enqueues when `POST_CALL_QUEUE_ENABLED=true`, and the Node worker has no continuous loop in `index.js` — it runs via `scripts/run-post-call-worker-once.js` in shadow mode while the active runtime stays on the inline path. The state machine is `queued → leased → running → completed | failed | dead_letter`. Jobs with unresolved `depends_on` IDs are not leasable.
+
+**Job graph (`POST_CALL_JOB_GRAPH`):**
+
+| Type | Depends on | Provider lane |
+|---|---|---|
+| `metrics_finalize` | — | `db` |
+| `reminder_recovery` | — | `db` |
+| `analysis` | — | `geminiFlash` |
+| `memory_extraction` | — | `openAiEmbeddings` |
+| `daily_context` | — | `db` |
+| `caregiver_notifications` | `analysis` | `resend` |
+| `interest_discovery` | `memory_extraction` | `openAiEmbeddings` |
+| `snapshot_rebuild` | `memory_extraction`, `daily_context` | `db` |
+
+**Provider semaphores (`DEFAULT_PROVIDER_LIMITS`):** `db=200`, `anthropicHaiku=1`, `geminiFlash=1`, `openAiEmbeddings=1`, `resend=1`. The worker holds at most N concurrent jobs per provider key, regardless of total worker concurrency. Limits can be overridden per process via `--{db,gemini-flash,openai-embeddings,resend}-concurrency` on `scripts/run-post-call-worker-once.js`.
+
+**Retry policy (`POST_CALL_RETRY_POLICIES`):** default is 5 attempts with backoff `[30, 120, 480, 1920]` seconds. `analysis` and `memory_extraction` use longer per-type backoff. After `max_attempts`, the job moves to `dead_letter` with a PHI-free `dead_letter_reason`.
+
+**Admin surface (`routes/post-call-jobs.js`, `requireAdmin`):**
+- `GET /api/post-call-jobs/dead-letter` — list dead-lettered jobs (aggregate only).
+- `POST /api/post-call-jobs/:id/replay` — requeue a single dead-lettered job after operator review.
+
+The shadow worker (`scripts/run-post-call-worker-once.js`) defaults to `handler-mode=artifact_verification` — it leases real jobs but only writes when `--confirm-db-writes` is passed. Use this mode for Phase 6 backlog-drain and provider-concurrency evidence before committing artifacts.
+
+---
+
+## Capacity Planning & Autoscaling (Phases 7-8)
+
+**Active files**: `scripts/phase8-capacity-plan.js`, `services/phase8-autoscaler.js`, `services/railway-scaling.js`, `routes/scale-operations.js`, `services/canary-cohort.js`, `routes/canary.js`, `scripts/phase7-canary-report.js`, `scripts/phase5-live-ab-report.js`
+
+Phase 7 wraps the live canary in a daily report; Phase 8 turns Pipecat replica capacity into an actuated, budget-bounded decision.
+
+**Phase 5/7 reports (PHI-free aggregates):** `scripts/phase5-live-ab-report.js` checks for duplicate outbound calls, duplicate conversations, reminder-delivery duplicates, cohort drift, caller-ID answer rate, media-start rate, and rollback timing. `scripts/phase7-canary-report.js` reuses those and adds allowlist size, 7-day continuous canary SLO, `phi_sentinel_clear`, and `no_p0_p1_incidents`. All outputs are counts/rates only — no senior IDs, phone numbers, transcripts, or reminder text.
+
+**Phase 8 capacity plan (`scripts/phase8-capacity-plan.js`).** Reads future `call_queue` rows for a window and live `pipecat:instance:*` heartbeats. Returns `recommendation.action ∈ {scale_up, hold, scale_down, wait_for_readiness}` plus `targetReplicas` and a list of named `checks`. The `hourly_cost_budget` check uses `cost-per-replica-hour × targetReplicas` against `hourly-budget`.
+
+**Phase 8 autoscaler (`services/phase8-autoscaler.js`).** Wraps the planner and only applies a `scale_up` recommendation when `hourly_cost_budget` is not `failed`. Actuation goes through `services/railway-scaling.js`, which shells `railway scale REGION=REPLICAS --service <s> --environment <e> --json`. Defaults are safety-first: `PHASE8_AUTOSCALER_DRY_RUN=true` and `PHASE8_AUTOSCALER_CONFIRM_SCALE=false` mean the long-running loop is off in production until explicitly enabled. Every actuation writes an audit row with reason code `operator_override:<sanitized>` or the recommendation's reason.
+
+**Admin surface (`routes/scale-operations.js`, `requireAdmin`):**
+- `GET /api/scale-operations/phase8/plan` — current capacity plan for a window.
+- `POST /api/scale-operations/phase8/autoscale-once` — one-shot autoscaler tick (dry-run unless body opts in).
+- `POST /api/scale-operations/phase8/override` — operator override with reason code; audited and PHI-free.
+
+**Canary surface (`routes/canary.js`, `requireAdmin`):**
+- `GET /api/canary/members` — list active canary members by senior ID and ramp phase only.
+- `POST /api/canary/members` — add one or more senior IDs to a ramp phase.
+- `DELETE /api/canary/members/:seniorId` — remove one senior from the active canary cohort with a PHI-free reason.
 
 ---
 
@@ -219,9 +287,22 @@ Donna is rolling the outbound dialer off the in-process Node scheduler onto a du
 | `senior_call_schedules` | Normalized recurring/one-time call schedules (Phase 1 of queue rollout) | senior_id, next_run_at |
 | `call_queue` | Durable outbound dispatch queue with `FOR UPDATE SKIP LOCKED` leasing | unique `dedupe_key`, `(status, priority DESC, run_after)` |
 | `call_attempts` | Per-dispatch attempt audit trail with architecture/cohort/test_run_id | `(queue_id, attempt_number)` unique, `call_control_id` unique where not null |
-| `post_call_jobs` | Queued post-call work with attempt counts and leases | `dedupe_key` unique, `(status, priority DESC, run_after)` |
+| `post_call_jobs` | Queued post-call work with attempt counts, leases, dependency DAG (`depends_on UUID[]`), and dead-letter terminal state (`dead_lettered_at`, `dead_letter_reason`) | `dedupe_key` unique, `(status, priority DESC, run_after)`, GIN on `depends_on`, partial index on `dead_lettered_at` where `status='dead_letter'` |
 | `outbound_call_guards` | **Dial-authority guard** shared by legacy + queue paths; only one path may dial per `guard_key` | unique `guard_key`, status `active → initiating → completed/cancelled` |
 | `scheduler_shadow_comparisons` | Side-by-side legacy/queue decision audit during shadow rollout | senior_id, decided_at |
+| `canary_cohort_membership` | Source of truth for active Phase 7 queue canary members; env allowlist is emergency fallback | partial unique active senior_id index, ramp_phase, removed_at |
+
+### Scale Roadmap Beyond 2,000 Users
+
+The 2,000-user architecture is intentionally 10k-shaped, but the next step is not "turn the dial higher." Use the triggers in the scale plan:
+
+| Transition | Trigger | Current status |
+|---|---|---|
+| Operational tables to `ops.*` or partitioning | Sustained DB pool/write pressure during burst, or roughly 3,000 daily users | Current code uses flat default-schema queue/job tables. |
+| Redis Cluster / HA shared state | Single-AZ Redis incident, multi-region Pipecat, or shared-state latency/reliability pressure | Current key shapes are single-region and PHI-free. |
+| Caller-ID pool and reputation management | Answer rate falls below the Phase 0 baseline target as outbound volume grows | Strategy is a Phase 0/5 gate; number-pool integration is not implemented. |
+| Provider sharding/failover | Sustained STT/LLM/TTS/embedding 429s at peak despite caps | Current system has per-provider caps and circuit breakers, not full provider routing. |
+| Workflow-engine post-call workers | Post-call backlog or retry/dead-letter operations exceed Postgres worker comfort | Current Phase 6 path is Postgres-backed and gated by `POST_CALL_QUEUE_ENABLED`. |
 
 ---
 
