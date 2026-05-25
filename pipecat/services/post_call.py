@@ -310,10 +310,24 @@ async def run_post_call(
         if conversation_id and senior_id:
             await save_call_analysis(conversation_id, senior_id, result)
         summary = result.get("summary") if result else None
-        if summary and summary != "Analysis unavailable":
+        sentiment = result.get("sentiment") if result else None
+        has_real_summary = summary and summary != "Analysis unavailable"
+        if has_real_summary:
             from services.conversations import update_summary
-            await update_summary(call_sid, summary, result.get("sentiment"))
+            await update_summary(call_sid, summary, sentiment)
             logger.info("[{cs}] Persisted call summary ({n} chars)", cs=call_sid, n=len(summary))
+        elif sentiment:
+            # Fallback path: analysis failed (Gemini JSON parse error, API
+            # outage, etc.) and _get_default_analysis returned sentiment=
+            # 'neutral'. Persist the sentiment anyway so the conversation
+            # row reflects that we tried. Empty summary stays empty.
+            from services.conversations import update_sentiment
+            await update_sentiment(call_sid, sentiment)
+            logger.info(
+                "[{cs}] Persisted fallback sentiment={s} (summary unavailable)",
+                cs=call_sid,
+                s=sentiment,
+            )
         return result
 
     async def _step3_memory():

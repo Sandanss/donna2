@@ -69,19 +69,62 @@ _SENTIMENT_VALUES = {"positive", "neutral", "concerned", "worried", "distressed"
 
 
 def _repair_json(json_text: str) -> str:
-    """Repair malformed JSON from LLM responses."""
+    """Repair malformed JSON from LLM responses.
+
+    Handles four common LLM-output defects:
+      1. Trailing commas before } or ]
+      2. Unclosed objects/arrays (model ran out of tokens)
+      3. Unterminated strings (output cut off mid-quote) — observed on a
+         real dev call 2026-05-25 where Gemini returned a 1419-char string
+         that lost its closing quote
+      4. Empty content after closing the open string
+    """
     repaired = json_text
-    # Remove trailing commas
+    # 1. Trailing commas
     repaired = re.sub(r",\s*([}\]])", r"\1", repaired)
 
+    # 3. Unterminated string detector. Walk the text counting unescaped
+    # quotes; if the count is odd, the trailing content is an open string.
+    # Two repair strategies depending on context:
+    #   a) Multi-line: strip the partial line (which carries the open
+    #      quote) — the broken field is gone but earlier complete fields
+    #      survive.
+    #   b) Single-line / no newline before the open quote: close the
+    #      string with a quote so at least the partial value is captured.
+    def _odd_unescaped_quotes(s: str) -> bool:
+        count = 0
+        i = 0
+        while i < len(s):
+            if s[i] == "\\" and i + 1 < len(s):
+                i += 2
+                continue
+            if s[i] == '"':
+                count += 1
+            i += 1
+        return count % 2 == 1
+
+    if _odd_unescaped_quotes(repaired):
+        last_newline = repaired.rfind("\n")
+        if last_newline > 0:
+            # Strategy (a): strip the partial line entirely. The open
+            # quote goes with it. Trailing comma from the previous line is
+            # cleaned by the next regex step.
+            repaired = repaired[:last_newline]
+        else:
+            # Strategy (b): single-line response — close the open string.
+            repaired += '"'
+
+    # 1 again, after string-close: a leftover comma may now be at the tail
+    repaired = re.sub(r",\s*$", "", repaired)
+    repaired = re.sub(r",\s*([}\]])", r"\1", repaired)
+
+    # 2. Close unclosed brackets/braces
     open_braces = repaired.count("{")
     close_braces = repaired.count("}")
     open_brackets = repaired.count("[")
     close_brackets = repaired.count("]")
-
-    # Close unclosed brackets
-    repaired += "]" * (open_brackets - close_brackets)
-    repaired += "}" * (open_braces - close_braces)
+    repaired += "]" * max(0, open_brackets - close_brackets)
+    repaired += "}" * max(0, open_braces - close_braces)
 
     # Final trailing comma cleanup
     repaired = re.sub(r",\s*([}\]])", r"\1", repaired)

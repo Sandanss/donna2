@@ -258,6 +258,29 @@ async def update_summary(
         return None
 
 
+async def update_sentiment(call_sid: str, sentiment: str) -> dict | None:
+    """Set conversations.sentiment without touching summary or other fields.
+
+    Used by the post-call analysis fallback path: when Gemini fails to
+    return parseable JSON we fall back to _get_default_analysis() which
+    yields sentiment='neutral'. We still want the conversation row to
+    reflect that we attempted analysis, so this writes ONLY sentiment.
+    """
+    try:
+        row = await query_one(
+            """UPDATE conversations
+               SET sentiment = COALESCE($1, sentiment)
+               WHERE call_sid = $2
+               RETURNING id""",
+            sentiment,
+            call_sid,
+        )
+        return row
+    except Exception as e:
+        logger.error("Error updating sentiment: {err}", err=str(e))
+        return None
+
+
 async def get_recent_summaries(
     senior_id: str,
     limit: int = 3,

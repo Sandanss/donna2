@@ -77,6 +77,41 @@ class TestRepairJson:
         repaired = _repair_json('{"a": [1, 2,], "b": 3,}')
         assert repaired == '{"a": [1, 2], "b": 3}'
 
+    def test_unterminated_string_in_object(self):
+        """Real failure from dev call 2026-05-25: Gemini ran out of tokens
+        mid-string and the response ended on an open quote. Should parse."""
+        broken = '{"summary": "long story about'
+        repaired = _repair_json(broken)
+        # Must be valid JSON now
+        parsed = json.loads(repaired)
+        assert isinstance(parsed, dict)
+        assert "summary" in parsed
+
+    def test_unterminated_string_at_end_of_line(self):
+        """Multi-line case: the open string is on the last partial line.
+        Repair should strip the broken line and close upstream objects."""
+        broken = (
+            '{\n'
+            '  "summary": "good call",\n'
+            '  "topics_discussed": ["gardening", "family"],\n'
+            '  "caregiver_sms": "Sounds like a nice'
+        )
+        repaired = _repair_json(broken)
+        parsed = json.loads(repaired)
+        assert parsed["summary"] == "good call"
+        assert parsed["topics_discussed"] == ["gardening", "family"]
+        # caregiver_sms field is dropped (line was truncated mid-value)
+        # — better to lose one field than reject the whole analysis
+
+    def test_unterminated_string_preserves_escaped_quotes(self):
+        """Escaped quotes inside a complete string must not be miscounted
+        as unterminated. \\\" → not a string boundary."""
+        valid = '{"a": "she said \\"hi\\"", "b": "end"}'
+        repaired = _repair_json(valid)
+        parsed = json.loads(repaired)
+        assert parsed["a"] == 'she said "hi"'
+        assert parsed["b"] == "end"
+
 
 class TestFormatTranscript:
     def test_formats_roles(self):
