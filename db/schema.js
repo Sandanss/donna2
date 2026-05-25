@@ -26,6 +26,26 @@ export const seniors = pgTable('seniors', {
   callContextSnapshotEncrypted: text('call_context_snapshot_encrypted'),
   cachedNews: text('cached_news'),
   cachedNewsUpdatedAt: timestamp('cached_news_updated_at'),
+  // Consent (migration 014). consentStatus is a roll-up of senior_consents
+  // rows. callable is the consent-driven block on outbound calling — separate
+  // from isActive (caregiver soft-pause). Scheduler/queue must read all three.
+  consentStatus: varchar('consent_status', { length: 20 }).default('pending').notNull(),
+  consentDate: timestamp('consent_date', { withTimezone: true }),
+  callable: boolean('callable').default(true).notNull(),
+});
+
+// Senior consent events (migration 014). One row per (senior, consent_type)
+// captured by the `consent` call type. Audit / HIPAA source of truth;
+// seniors.consentStatus is the denormalized roll-up.
+export const seniorConsents = pgTable('senior_consents', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  seniorId: uuid('senior_id').notNull().references(() => seniors.id, { onDelete: 'cascade' }),
+  conversationId: uuid('conversation_id').references(() => conversations.id),
+  consentType: varchar('consent_type', { length: 50 }).notNull(),
+  granted: boolean('granted').notNull(),
+  seniorQuoteEncrypted: text('senior_quote_encrypted'),
+  capturedBy: varchar('captured_by', { length: 50 }).default('donna_tool').notNull(),
+  capturedAt: timestamp('captured_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
 // Conversations (call history)

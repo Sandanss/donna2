@@ -799,7 +799,10 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
     # -------------------------------------------------------------------------
     # Flow Manager (call phase management)
     # -------------------------------------------------------------------------
-    if session_state.get("call_type") == "onboarding":
+    # Per-call-type tool factory. Register new flows (consent, discovery, …)
+    # here instead of growing the if-chain. Default is the subscriber stack.
+    call_type = session_state.get("call_type", "")
+    if call_type == "onboarding":
         from flows.tools import make_onboarding_flows_tools
         flows_tools = make_onboarding_flows_tools(session_state)
     else:

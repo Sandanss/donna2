@@ -886,21 +886,33 @@ def build_onboarding_closing_node(session_state: dict) -> NodeConfig:
 # Entry point
 # ---------------------------------------------------------------------------
 
+# Call types with a dedicated entry-node builder. Register new flows here
+# (consent, discovery, etc.) instead of growing the if-chain in
+# build_initial_node. Each entry is (phase_name, builder). Subscriber default
+# path — reminder vs main, gated by `schedule` — is NOT in this dict; it
+# stays inline because it routes on session state (pending reminders) in
+# addition to call_type.
+CALL_TYPE_INITIAL_NODES = {
+    "onboarding": ("onboarding", build_onboarding_node),
+}
+
+
 def build_initial_node(session_state: dict, flows_tools: dict) -> NodeConfig:
     """Build the initial node for a new call.
 
-    Routes to onboarding flow for unsubscribed callers, or the standard
-    subscriber flow (reminder or main) for known seniors.
+    Routes via CALL_TYPE_INITIAL_NODES for dedicated flows (onboarding,
+    consent, discovery, …) or the standard subscriber flow (reminder vs main).
     """
-    # Onboarding flow for unsubscribed callers
-    if session_state.get("call_type") == "onboarding":
-        logger.info("Initial node: onboarding (unsubscribed caller)")
-        _record_phase_transition(session_state, "onboarding")
-        return build_onboarding_node(session_state, flows_tools)
+    call_type = session_state.get("call_type", "")
+
+    if call_type in CALL_TYPE_INITIAL_NODES:
+        phase_name, builder = CALL_TYPE_INITIAL_NODES[call_type]
+        logger.info("Initial node: {phase} (call_type={ct})", phase=phase_name, ct=call_type)
+        _record_phase_transition(session_state, phase_name)
+        return builder(session_state, flows_tools)
 
     reminder_prompt = session_state.get("reminder_prompt")
     reminders_delivered = session_state.get("reminders_delivered") or set()
-    call_type = session_state.get("call_type", "")
 
     # Scheduled calls always go to main node — reminders are mentioned naturally
     # during conversation, not as a dedicated delivery phase.

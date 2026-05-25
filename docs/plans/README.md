@@ -6,6 +6,8 @@ Current planning docs stay in this directory. Superseded dated plans and the old
 
 - [`PROTOTYPE_PILOT_BACKLOG.md`](PROTOTYPE_PILOT_BACKLOG.md) - first-pilot backlog and validation checklist.
 - [`2026-05-05-engineering-remediation-plan.md`](2026-05-05-engineering-remediation-plan.md) - current engineering remediation plan from the May 5 audit. BAA/vendor agreement gates are intentionally out of scope for this plan.
+- [`2026-05-17-senior-consent-verification-flow.md`](2026-05-17-senior-consent-verification-flow.md) - product spec for senior consent (mobile screen + dashboard + Pipecat call). Owner: Facundo (mobile/dashboard).
+- [`2026-05-24-consent-and-discovery-call-flows.md`](2026-05-24-consent-and-discovery-call-flows.md) - Pipecat execution plan for the `consent` call (implements part 3 of the May 17 spec) and the new `discovery` call.
 
 ## Source Of Truth
 
