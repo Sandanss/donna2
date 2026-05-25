@@ -89,7 +89,7 @@ export async function mockAdminAPIs(page: Page): Promise<void> {
 }
 
 /**
- * Set up all API mocks for the consumer app.
+ * Set up all API mocks for the website/caregiver web app.
  */
 export async function mockConsumerAPIs(page: Page): Promise<void> {
   await page.route('**/api/onboarding', route =>

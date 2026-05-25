@@ -17,9 +17,9 @@
 
 Donna is an AI voice companion that calls elderly people daily. She:
 - Has warm, natural conversations (not robotic IVR)
-- Remembers past conversations — knows their grandkids' names, their hobbies, their medication schedule
-- Delivers medication reminders woven naturally into conversation
-- Sends caregivers mood summaries and alerts after each call
+- Remembers past conversations — knows their grandkids' names, their hobbies, and their routines
+- Delivers everyday and social reminders woven naturally into conversation
+- Sends caregivers call summaries and mood updates after each call
 - Learns and adapts to each senior's personality over time
 
 **What makes it work**: Seniors already know how to use a phone. No app to install, no device to set up. Donna calls them. They just talk.
@@ -51,7 +51,7 @@ Donna is an AI voice companion that calls elderly people daily. She:
 
 ### Subscription: $29/month
 - Daily check-in calls (configurable frequency)
-- Medication reminders
+- Everyday and social reminders
 - Caregiver dashboard with mood summaries
 - Memory that builds over time
 
@@ -60,7 +60,7 @@ No credit card required. Enough for ~12 calls.
 
 **Why 120 minutes / 30 days (not 3 free calls or a free tier)**:
 
-The senior needs time to build a relationship with Donna. On call 1-3, they're skeptical. By call 10-12, Donna knows their grandson's name, remembers their garden, asks about their doctor's appointment. That emotional bond is what converts.
+The senior needs time to build a relationship with Donna. On call 1-3, they're skeptical. By call 10-12, Donna knows their grandson's name, remembers their garden, asks about bridge club or lunch plans. That emotional bond is what converts.
 
 - **If they don't use it**: Costs us nothing. They self-selected out.
 - **If they use 30-60 min**: Light user. May convert, may not. Cost: ~$2-4 current stack.
@@ -73,7 +73,7 @@ The senior needs time to build a relationship with Donna. On call 1-3, they're s
 At 100 minutes, Donna naturally mentions: "I've really enjoyed getting to know you this month."
 
 The app sends the caregiver a notification:
-> "Mom used 100 of 120 free minutes this month. She talked about her garden, her medication schedule, and Jake's baseball game. Keep Donna calling?"
+> "Mom used 100 of 120 free minutes this month. She talked about her garden, bridge club, and Jake's baseball game. Keep Donna calling?"
 
 The **senior** sells the product to the **caregiver**. No ads, no hard sell. "Mom asked me when Donna is calling again" is the conversion event.
 
@@ -219,7 +219,7 @@ Pre-seed money is expensive (20-25% dilution for $750K-1.5M) and unnecessary if 
 |---|---|
 | Senior refuses to talk to AI | Donna is transparent about being AI but leads with personality. Trial is free. |
 | Caregiver doesn't see value | Post-call summaries with specific details ("Mom mentioned her knee is hurting") prove value instantly. |
-| AI says something harmful | Safety boundaries in prompt. Call analysis flags concerns. Caregiver gets alerts. |
+| AI says something harmful | Safety boundaries in prompt. Donna avoids medical advice and crisis-alert positioning; caregiver gets high-level summaries, not concern alerts. |
 | Competitor with more resources | First-mover advantage in voice + memory + caregiver integration. Switching cost = senior's relationship with Donna. |
 | Regulation (HIPAA, FCC) | Not a medical device (companionship, not diagnosis). Telnyx handles voice infrastructure; Donna still needs outbound consent/TCPA processes and signed BAAs for PHI-bearing vendors. |
 | Cost structure doesn't scale | Telnyx + TTS optimization path to 70% margins is clear and achievable in 1-2 months of engineering. |

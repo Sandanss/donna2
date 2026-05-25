@@ -115,7 +115,7 @@ def register_gemini_tools(llm, session_state: dict, task_ref: list) -> None:
 
     handlers = make_tool_handlers(session_state)
 
-    # Register only the two search tools (Gemini 3.1 sync-only — no save/reminder tools)
+    # Gemini Live registers search tools only; save/reminder tools stay on Claude flows.
     for name in ("web_search", "search_memories"):
         if name in handlers:
             llm.register_function(name, _pipecat_adapter(name, handlers[name]))

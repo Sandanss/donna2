@@ -1,7 +1,7 @@
-"""Pipecat Flows — call phase state machine.
+"""Pipecat Flows — call state machine.
 
-nodes.py: 4-phase NodeConfig builders (opening → main → winding_down → closing)
-tools.py: LLM tool schemas and async handlers
+nodes.py: subscriber phases plus onboarding/consent/discovery/schedule entry nodes
+tools.py: call-type-specific LLM tool schemas and async handlers
 """
 
 __all__ = [

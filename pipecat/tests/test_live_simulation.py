@@ -653,7 +653,7 @@ class TestDiscoveryCall:
             f"Expected at least one captured discovery fact, got {payload}"
         )
         # Categories should be valid enums.
-        valid_cats = {"friend", "hobby", "interest", "routine", "family"}
+        valid_cats = {"friend", "hobby", "interest", "routine", "family", "biography"}
         for f in facts:
             assert f.get("category") in valid_cats, (
                 f"Unexpected category {f.get('category')} in {f}"

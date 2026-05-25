@@ -1,9 +1,11 @@
 """Pipecat Flows call phase node definitions.
 
-Defines call phases: [reminder] → main → winding_down → closing.
-The opening phase is merged into main — the bot greets and continues
-in one phase, eliminating the transition_to_main double-LLM-call penalty.
-The reminder phase is conditional — only activates when pending reminders exist.
+Defines subscriber phases ([reminder] → main → winding_down → closing) plus
+dedicated entry nodes for onboarding, consent, discovery, and the schedule
+path. The opening phase is merged into the first active node — the bot greets
+and continues in one phase, eliminating the transition_to_main double-LLM-call
+penalty. The reminder phase is conditional and only activates when pending
+reminders exist.
 
 Prompt text lives in prompts.py — edit prompts there, edit flow logic here.
 """
@@ -605,7 +607,7 @@ def build_reminder_node(
     """Build the reminder node — deliver pending reminders.
 
     Only activated when session_state has pending reminders.
-    Tools: mark_reminder_acknowledged, save_important_detail, transition_to_main.
+    Tools: web_search, mark_reminder_acknowledged, create_reminder, transition_to_main.
     Context strategy: APPEND.
 
     When with_greeting=True (initial node), includes system prompt and greeting.
@@ -701,7 +703,7 @@ def build_main_node(
     if tracking_ctx:
         main_task += f"\n\n{tracking_ctx}"
 
-    # Active tools: web_search + mark_reminder (others moved to Director/post-call)
+    # Active subscriber tools: web_search, mark_reminder_acknowledged, create_reminder.
     functions: list = list(flows_tools.values())
 
     # Transition tool
@@ -744,7 +746,7 @@ def build_main_node(
 def build_winding_down_node(session_state: dict, flows_tools: dict) -> NodeConfig:
     """Build the winding down node — deliver remaining reminders, wrap up.
 
-    Tools: mark_reminder, save_detail, transition_to_closing.
+    Tools: web_search, mark_reminder_acknowledged, create_reminder, transition_to_closing.
     Context strategy: APPEND.
     """
     reminder_ctx = _build_reminder_context(session_state)
@@ -970,9 +972,9 @@ def _make_transition_to_consent_closing(session_state: dict):
     """Create transition function: consent → consent_closing.
 
     Belt-and-braces guard: refuse to transition if record_consent_response
-    hasn't been called yet. Without this, a prompt slip-up (warm ack before
-    tool call) can leak into the Quick Observer's goodbye detection and end
-    the call before the consent row lands — losing the senior's answer.
+    hasn't been called yet. Consent calls are exempt from Quick Observer's
+    programmatic goodbye path, but the flow still requires the tool call before
+    the closing node can end the call.
     """
 
     async def transition_to_consent_closing(args: dict, flow_manager) -> tuple[dict, NodeConfig]:
@@ -1104,8 +1106,9 @@ def _make_transition_to_discovery_closing(session_state: dict):
 def build_discovery_node(session_state: dict, flows_tools: dict) -> NodeConfig:
     """Build the discovery node — friends, hobbies, routines, family.
 
-    Full subscriber stack (Director on, memories on, web_search on). Tools:
-    record_discovery_fact, web_search, transition_to_discovery_closing.
+    Normal conversational discovery call with Director/memory context and
+    discovery-specific tools: record_discovery_fact, web_search,
+    transition_to_discovery_closing.
     """
     senior = session_state.get("senior") or {}
     first_name = (senior.get("name") or "").split(" ")[0] or "there"

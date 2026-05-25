@@ -6,7 +6,7 @@ Last updated: May 4, 2026.
 
 - iOS bundle ID is aligned to `com.donna.caregiver` in Expo config and native iOS.
 - Native Sign in with Apple is enabled through `ios.usesAppleSignIn`, the `expo-apple-authentication` plugin, and the checked-in iOS entitlement `com.apple.developer.applesignin`.
-- Apple auth in the app uses Clerk's native `useSignInWithApple()` flow; Google remains browser OAuth.
+- Apple auth in the app uses `expo-apple-authentication` through `startAppleAuthenticationWithoutProfileScopes()` and signs into Clerk with `oauth_token_apple`; Google remains browser OAuth.
 - `eas.json` no longer contains fake Apple submit placeholders.
 - App icons are present at `1024x1024`; the iOS app icon has no alpha channel.
 - The draft splash screen is inserted as `assets/images/splash.png`, wired into Expo config, and present in the checked-in native iOS launch storyboard/assets.
@@ -69,7 +69,7 @@ Last updated: May 4, 2026.
    - Export compliance encryption answers.
    - Accessibility Nutrition Labels after an accessibility pass.
    - Review notes and demo account. Use dummy data only; do not use real PHI.
-   - Screenshots captured from dummy accounts only; no real transcripts, reminders, medical notes, phone numbers, or caregiver data.
+   - Screenshots captured from dummy accounts only; no real transcripts, reminders, profile notes, phone numbers, or caregiver data.
 
 5. Complete privacy and compliance review:
 
@@ -103,7 +103,7 @@ Last updated: May 4, 2026.
    ```
 
    Push notification registration requires a physical device and a real EAS project ID.
-   Apple Sign-In requires a native build with the Apple entitlement; a stale simulator/dev-client binary can load fresh JavaScript but still fail the native Apple sheet.
+   Apple Sign-In must be validated on a physical device or TestFlight build with real Apple provisioning. Simulator builds, including EAS simulator dev builds, can cover email/Google/onboarding cleanup but strip or cannot use the restricted Apple Sign-In entitlement.
    `app.json` currently sets `ios.supportsTablet` to `false`, but run at least one iPad compatibility smoke test before App Review if App Store Connect still makes the build available on iPad.
 
 3. Build for production:
@@ -134,7 +134,7 @@ Use a fake demo caregiver account and fake senior data only.
 - Confirm the app icon on the device is recognizable and nonblank.
 - Confirm the Donna splash screen appears immediately on cold launch and remains visible until the first auth/profile route is ready.
 - Confirm the App Store Connect device-family/availability settings match the intended support matrix. If iPad remains available, repeat Apple sign-in and onboarding cleanup smoke tests on an iPad simulator or device.
-- Confirm review/demo data contains no real transcripts, reminder text, medical notes, phone numbers, or caregiver data.
+- Confirm review/demo data contains no real transcripts, reminder text, profile notes, phone numbers, or caregiver data.
 
 ## Timing Note
 

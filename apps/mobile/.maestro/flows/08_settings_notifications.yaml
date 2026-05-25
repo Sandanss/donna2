@@ -15,14 +15,12 @@ env:
 
 # All notification toggles visible
 - assertVisible: "Call Summaries"
-- assertVisible: "Concern Alerts"
-- assertVisible: "Missed Reminder Alerts"
+- assertVisible: "Missed Reminder Updates"
 - assertVisible: "Weekly Summary"
 
 # Toggle each preference on/off
 - tapOn: "Call Summaries"
-- tapOn: "Concern Alerts"
-- tapOn: "Missed Reminder Alerts"
+- tapOn: "Missed Reminder Updates"
 - tapOn: "Weekly Summary"
 
 # Toggle them back

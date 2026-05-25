@@ -7,8 +7,9 @@ captures output frames: streamed text chunks (TextFrame), Director fillers
 termination (EndFrame).
 
 CallerTransport is a Protocol that abstracts how caller utterances are
-injected into the pipeline and how responses are received.  Phase 1 uses
-a text-only transport; Phase 2 will swap in an audio-loop transport.
+injected into the pipeline and how responses are received. Text mode is the
+default path; AudioCallerTransport exists for frame-push mechanics, while
+end-to-end STT/TTS audio simulation still needs CLI wiring.
 """
 
 from __future__ import annotations
@@ -84,6 +85,8 @@ class CallResult:
             present when post-call metrics persisted.
         post_call_context_trace_encrypted: Whether the metrics write included
             encrypted context trace payload.
+        post_call_error_count: Number of post-call error events recorded in
+            PHI-safe metrics.
         conversation_id: DB conversation row created for the simulated call.
         initial_donna_text: Donna's opening response before the first caller turn.
     """

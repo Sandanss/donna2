@@ -1,7 +1,8 @@
 """HIPAA audit logging service.
 
 Logs all access to Protected Health Information (PHI) for compliance.
-All writes are fire-and-forget — they never block the request path.
+Use `fire_and_forget_audit()` for best-effort paths and `write_audit()` where
+audit durability is part of the request contract.
 """
 
 from __future__ import annotations

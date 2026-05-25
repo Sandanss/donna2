@@ -58,10 +58,10 @@ The schedule below is the policy target. Current code has materially more retent
 
 Current runtime summary:
 
-- The Node retention service covers conversation transcript/summary nulling, old conversation rows, memories, call analyses, daily context, reminder deliveries, inactive reminders, expired one-time reminders, caregiver notes, prospects, waitlist, notifications, idempotency keys, queue tables, audit logs, and legal-hold exclusions where supported.
-- The Pipecat retention service has similar core coverage but is disabled by default and does not currently cover every Node-only table such as idempotency keys or expired one-time reminders.
+- The Node retention service covers conversation transcript/summary nulling, old conversation rows, memories, call analyses, daily context, reminder deliveries, inactive reminders, expired one-time reminders, caregiver notes, prospects, waitlist, notifications, idempotency keys, queue/job tables, audit logs, and legal-hold exclusions where supported.
+- The Pipecat retention service has similar core coverage but is disabled by default and does not currently cover every Node-only table such as idempotency keys, queue rollout tables, or expired one-time reminders.
 - Senior profile purge remains a separate right-to-delete/hard-delete workflow rather than a routine automated retention purge.
-- Legal holds are documented as a requirement, but the required legal-hold table/checks are not complete.
+- Legal holds now have a `legal_holds` table plus Node/Pipecat retention and hard-delete checks. Remaining work is operational: UI/workflow, evidence exports, and periodic deletion-drill proof.
 - Hard delete/account deletion avoids caching deletion responses in the Node idempotency middleware and deletes recent related keys, but residual replay/cache rows must still be verified during deletion drills.
 - Local/shared PHI-bearing call metadata needs TTL cleanup guarantees if terminal Telnyx webhook or WebSocket cleanup is missed.
 - Retention worker audit evidence is currently application logs/counts, not necessarily durable `audit_logs` rows for every purge batch. Treat persistent audit-log evidence as an open requirement if policy requires it.
@@ -78,7 +78,8 @@ Current runtime summary:
 | **Reminder definitions** | `reminders.title_encrypted`, `description_encrypted`; legacy title/description fallback | Possible/Yes if user-entered text contains health details | Retained while active + 1 year after deactivation | `reminders.is_active` = false date | Automated purge job: DELETE row + associated deliveries |
 | **Reminder deliveries** | `reminder_deliveries.user_response_encrypted`; legacy `user_response` fallback | Yes (LOW) | 90 days from delivery date | `reminder_deliveries.created_at` | Automated purge job: DELETE row |
 | **Senior profiles** | `seniors` | Yes (HIGH) | Retained while active + 1 year after last call | `seniors.is_active` + last `conversations.started_at` | Manual review + DELETE row (cascades to all related data) |
-| **Deprecated senior medical notes** | `seniors.medical_notes_encrypted`; legacy `medical_notes` fallback | Yes (CRITICAL) if legacy data exists | Deprecated; migration 014/026 nulls existing values | Migration deployment | Set both columns to NULL; new writes are stripped |
+| **Senior profile notes** | `seniors.profile_notes_encrypted`; legacy `profile_notes` fallback | Possible/Yes if user-entered text contains health details | Same as senior profile | Same as senior profile | Cleared when senior is purged |
+| **Deprecated senior medical notes** | Historical `seniors.medical_notes_encrypted` / `medical_notes` migration columns if present in older environments | Yes (CRITICAL) if legacy data exists | Deprecated; migration 014/026 nulls existing values | Migration deployment | Set both columns to NULL; new writes are stripped |
 | **Senior family/additional profile context** | `seniors.family_info_encrypted`, `additional_info_encrypted`; legacy `family_info` / `additional_info` fallback | Yes (HIGH) | Same as senior profile | Same as senior profile | Cleared when senior is purged |
 | **Caregiver relationships** | `caregivers` | Low | Retained while linked + 90 days after unlinking | Manual unlinking date | Manual review + DELETE row |
 | **Caregiver notes** | `caregiver_notes.content_encrypted`; legacy/plaintext fallback if present | Yes (MEDIUM/HIGH) | Retained while active + 1 year after note deactivation/deletion or senior inactivity | Note status/date or senior inactivity | Node automated purge target; verify Pipecat parity before relying on Python retention |
@@ -87,6 +88,11 @@ Current runtime summary:
 | **Notification preferences** | `notification_preferences` | No | Retained while caregiver exists | Cascade from caregiver deletion | CASCADE DELETE |
 | **Call context snapshot** | `seniors.call_context_snapshot_encrypted`; legacy `call_context_snapshot` fallback | Yes (HIGH) | Overwritten on each call; set to NULL when senior is purged | N/A (ephemeral by design) | Set to NULL on senior purge |
 | **Cached news** | `seniors.cached_news` | No | Overwritten daily at 5 AM; set to NULL on senior purge | N/A (ephemeral) | Set to NULL on senior purge |
+| **Senior call schedules** | `senior_call_schedules.context_notes_encrypted` and schedule metadata | Possible/Yes if notes contain personal details | Retained while linked to senior unless hard-deleted | Senior deletion or schedule removal | Delete during senior hard-delete; routine retention does not purge active schedules |
+| **Call queue and attempts** | `call_queue`, `call_attempts` | Low/Possible via senior/call IDs and status metadata | Queue rows 90 days; attempts 180 days | `created_at` | Automated purge job; hard-delete removes all senior rows |
+| **Post-call jobs** | `post_call_jobs.payload_encrypted`, status, dependency metadata | Possible/Yes if payload contains call context | 180 days | `created_at` | Automated purge job; hard-delete removes senior/conversation rows |
+| **Outbound guards / shadow comparisons / canary membership** | `outbound_call_guards`, `scheduler_shadow_comparisons`, `canary_cohort_membership` | Low/Possible via senior IDs and rollout metadata | Guards 30 days; shadow comparisons 30 days; canary membership 365 days | `created_at` or removal timestamp | Automated purge where configured; hard-delete removes all senior rows |
+| **Deletion evidence logs** | `data_deletion_logs.record_counts` | Low if counts only | Compliance retention; not routine PHI purge target | Creation date/manual policy | Retain as deletion evidence; avoid PHI in `reason`/counts |
 | **Admin users** | `admin_users` | No (email/password hash) | Retained while active | Manual deactivation | DELETE row |
 | **Waitlist signups** | `waitlist.payload_encrypted`; legacy contact columns fallback | Possible (name, email, phone) | 1 year from signup | `waitlist.created_at` | Automated purge job: DELETE row |
 | **Audit logs** | `audit_logs` | Yes (references PHI) | **6 years** (HIPAA minimum) | `audit_logs.created_at` | Automated purge job: DELETE row after retention period |
@@ -246,11 +252,11 @@ WHERE created_at < NOW() - INTERVAL '6 years';
 
 ### Implementation Checklist
 
-- [ ] Create `legal_holds` table for litigation hold exemptions
-- [ ] Implement purge job as a scheduled task (cron or application scheduler)
-- [ ] Add dry-run mode (log what would be purged without executing)
-- [ ] Add batch processing (process 1000 records at a time to avoid long locks)
-- [ ] Log purge actions to audit log (counts per table, not content)
+- [x] Create `legal_holds` table for litigation hold exemptions
+- [x] Implement purge job as a scheduled task (cron or application scheduler)
+- [x] Add dry-run mode (log what would be purged without executing)
+- [x] Add batch processing to avoid long locks
+- [x] Log purge actions to durable audit/deletion evidence paths (counts per table, not content)
 - [ ] Alert if purge job fails or does not run within expected window
 - [ ] Test purge job on dev/staging environments with production data copies
 - [ ] Add purge job to monitoring dashboard
@@ -279,20 +285,20 @@ A **legal hold** (also called litigation hold) suspends normal data destruction 
 ```sql
 CREATE TABLE legal_holds (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  resource_type VARCHAR(50) NOT NULL,  -- 'conversation', 'memory', 'senior', etc.
-  resource_id UUID NOT NULL,           -- ID of the held record
+  resource_type VARCHAR(100) NOT NULL, -- 'conversation', 'memory', 'senior', etc.
+  resource_id TEXT NOT NULL,           -- ID of the held record
   hold_reason TEXT NOT NULL,           -- Why the hold was placed
   placed_by VARCHAR(255) NOT NULL,     -- Who placed the hold
   placed_at TIMESTAMP DEFAULT NOW(),
   released_at TIMESTAMP,              -- NULL = still active
-  released_by VARCHAR(255)
+  release_reason TEXT
 );
 ```
 
 3. All automated purge jobs check for active legal holds before deleting.
 4. Manual deletion requests are also blocked for held records.
 
-**Current gap:** This section is a policy requirement. The May 5 audit found legal-hold support is not complete in runtime retention/deletion services. Until implemented, deletion and purge procedures require manual legal review before execution.
+**Current gap:** Runtime table/check support exists. Remaining work is operational: create the admin workflow, release evidence process, monitoring, and deletion-drill proof that held records are excluded end to end.
 
 ### Releasing a Legal Hold
 
@@ -321,14 +327,14 @@ Under HIPAA (and potentially state privacy laws like CCPA), individuals have rig
 - Donna must act on the request within **60 days** (one 30-day extension permitted).
 - Amendments may be denied if the PHI is accurate, was not created by Donna, or is not available for access.
 
-**Implementation**: Admin dashboard should support editing senior profiles and memories with audit logging of all changes. Deprecated medical notes are not editable and are nulled by migration 014/026.
+**Implementation**: Admin dashboard should support editing senior profiles, profile notes, and memories with audit logging of all changes. Deprecated medical-note columns are migration history only and are nulled by migration 014/026.
 
 ### Right to an Accounting of Disclosures (45 CFR 164.528)
 
 - Individuals have the right to know who has accessed their PHI in the past **6 years**.
 - Exceptions: disclosures for treatment, payment, healthcare operations, and certain other purposes.
 
-**Implementation**: The audit log (once implemented) must track all disclosures of PHI, including to vendors (via API calls), to caregivers (via notifications), and to admin users (via dashboard access).
+**Implementation**: `audit_logs` exists, and Node/Pipecat expose both best-effort fire-and-forget audit helpers and durable write paths for export/disclosure events. Coverage must still be verified during production PHI drills, especially vendor API disclosures and caregiver notification paths.
 
 ### Right to Request Restrictions (45 CFR 164.522)
 
@@ -361,13 +367,21 @@ When a caregiver or senior requests deletion of their data:
 
 1. **Export data first** (for the requestor if requested, and for compliance records).
 2. Delete in this order (respecting foreign key constraints):
+   - `post_call_jobs` (by senior_id or conversation_id)
+   - `scheduler_shadow_comparisons`, `canary_cohort_membership`, `outbound_call_guards`, `call_attempts`, `call_queue`, `senior_call_schedules`
+   - `notification_preferences` (by linked caregiver_id)
+   - `notifications` (by senior_id and linked caregiver_id)
+   - `caregiver_notes`, then `caregivers`
+   - `reminder_deliveries` (by linked reminder_id), then `reminders`
    - `daily_call_context` (by senior_id)
-   - `reminder_deliveries` (by reminder_id, where reminder.senior_id matches)
-   - `reminders` (by senior_id)
    - `call_analyses` (by senior_id)
-   - `notifications` (by senior_id)
+   - `call_metrics` (by senior_id)
    - `memories` (by senior_id)
    - `conversations` (by senior_id)
+   - `prospects.converted_senior_id` unlink
+   - recent `idempotency_keys` for the deleting user
+   - `seniors` row
+   - `data_deletion_logs` evidence row with counts only
    - `notification_preferences` (by caregiver_id, for linked caregivers)
    - `caregivers` (by senior_id)
    - prospect/onboarding rows linked to the senior/caregiver where applicable
@@ -397,8 +411,8 @@ Donna sends PHI to multiple vendors. Each vendor's data retention policy must be
 
 | Vendor | Data Sent | Vendor Retention Policy | Action Needed |
 |--------|-----------|------------------------|---------------|
-| **Anthropic** | Conversation messages | 30-day default; opt out of training | Confirm via BAA; opt out of data retention for training |
-| **Google (Gemini)** | Transcripts for analysis | Varies by API (typically no retention for API calls with data processing agreement) | Confirm via GCP data processing terms |
+| **Anthropic** | Live conversation messages and completed-call analysis transcripts | 30-day default; opt out of training | Confirm via BAA; minimize API log retention and prompt-cache retention exposure |
+| **Google (Gemini)** | Director fallback turns and onboarding summary/evaluation payloads where enabled | Varies by API (typically no retention for API calls with data processing agreement) | Confirm via GCP data processing terms |
 | **Deepgram** | Audio stream | Streaming (not retained); confirm no log retention | Confirm via BAA |
 | **ElevenLabs** | TTS text input | Check vendor policy | Confirm via BAA or vendor inquiry |
 | **Cartesia** | TTS text input | Check vendor policy | Confirm via BAA or vendor inquiry |

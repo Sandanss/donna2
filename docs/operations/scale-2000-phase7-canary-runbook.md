@@ -29,12 +29,11 @@ curl -X POST https://donna-api-production-2450.up.railway.app/api/canary/members
   -H 'Content-Type: application/json' \
   -d '{
     "senior_ids": ["uuid-1", "uuid-2", "uuid-3", "uuid-4", "uuid-5"],
-    "ramp_phase": "5",
-    "notes": "ramp start"
+    "ramp_phase": "5"
   }'
 ```
 
-The response is `{ added: [...], errors: [...] }`. Validate every senior is in `added`; investigate any `errors` such as invalid UUID or already-in-canary.
+The response is `{ added: [...], errors: [...] }`. `added` entries include senior ID, ramp phase, added timestamp, and actor only; free-form notes are stripped to avoid PHI. Validate every senior is in `added`; investigate any `errors` such as invalid UUID or already-in-canary.
 
 ### List Current Canary Cohort
 
@@ -43,7 +42,7 @@ curl https://donna-api-production-2450.up.railway.app/api/canary/members \
   -H 'Authorization: Bearer <admin-jwt>'
 ```
 
-Response: `{ members: [{ senior_id, ramp_phase, added_at, added_by, notes }] }`. No PHI is returned.
+Response: `{ members: [{ senior_id, ramp_phase, added_at, added_by }] }`. No PHI or free-form notes are returned.
 
 ### Remove A Senior From Canary
 
@@ -192,7 +191,7 @@ Record exit-criteria evidence in `docs/operations/scale-2000-phase7-exit-evidenc
 ## PHI Safety Reminders
 
 - The daily report must stay aggregate. If a future field surfaces a transcript, name, or phone number, that's a P0: stop the report run and patch.
-- `/api/canary/members` returns `senior_id` (UUID), `ramp_phase`, `added_at`, `added_by`, `notes`. `notes` is intentionally short and operator-supplied. Do not paste call summaries or senior personal context into it.
+- `/api/canary/members` returns `senior_id` (UUID), `ramp_phase`, `added_at`, and `added_by`. Free-form notes are not accepted or emitted.
 - Audit rows (`canary_cohort_add` / `canary_cohort_remove`) carry only `ramp_phase` and `reason`, no call content.
 
 ---

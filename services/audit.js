@@ -10,7 +10,8 @@ import { db } from '../db/client.js';
 import { auditLogs } from '../db/schema.js';
 
 /**
- * Insert an audit log row. Fire-and-forget — never await this in route handlers.
+ * Insert an audit log row and raise if it cannot be persisted. Await this in
+ * routes where audit durability is part of the request contract.
  *
  * @param {Object} params
  * @param {string} params.userId - admin ID, clerk user ID, or 'cofounder'

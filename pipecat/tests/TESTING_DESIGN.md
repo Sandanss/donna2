@@ -2,6 +2,7 @@
 
 > Design document for Donna's voice pipeline integration and scenario testing infrastructure.
 > Historical note: active live calls now use Telnyx L16/16k. Twilio transport references below describe old mocks/design examples unless the current test code explicitly says otherwise.
+> Current harness note: the active behavior/stress mock-call suite lives in `pipecat/tests/simulation/` and uses LLM-vs-LLM text-mode calls by default. New reminder scenarios should use non-medical everyday/social reminders; medication examples below are legacy fixtures only.
 
 ---
 
@@ -66,8 +67,15 @@ pipecat/tests/
 │   ├── base.py                           ← CallScenario dataclass, ScenarioRunner
 │   ├── happy_path.py                     ← Normal check-in call
 │   ├── goodbye_detection.py              ← Goodbye variations, false goodbye
-│   ├── reminder_delivery.py              ← Medication reminder call
-│   └── emotional_support.py              ← Emotional/crisis detection
+│   ├── reminder_delivery.py              ← Legacy reminder call example
+│   └── emotional_support.py              ← Emotional support response
+│
+├── simulation/                           ← Current LLM-vs-LLM mock-call harness
+│   ├── pipeline.py                       ← Real Donna pipeline with direct TranscriptionFrame injection + mock TTS
+│   ├── transport.py                      ← Text/Audio caller transports + CallResult
+│   ├── scenarios.py                      ← Current scenario catalog
+│   ├── stress.py                         ← Stress/stampede scenario builders
+│   └── runner.py                         ← run_simulated_call()
 │
 ├── test_frame_quick_observer.py          ← Level 1: QuickObserverProcessor frames
 ├── test_frame_conversation_director.py   ← Level 1: ConversationDirectorProcessor frames

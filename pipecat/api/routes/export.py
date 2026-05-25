@@ -145,7 +145,10 @@ async def export_senior_data(
     """Export all data for a senior (HIPAA right-to-access).
 
     Returns a JSON bundle with: senior profile, conversations, memories,
-    reminders, call analyses, daily context, and caregiver links.
+    reminders, call analyses, daily context, caregiver links/notes, call
+    schedules, queue/attempt rows, post-call jobs, outbound guards, and
+    scheduler comparisons. Encrypted payloads are decrypted only at this
+    authorized export boundary.
     """
     if not await _can_access_senior(auth, senior_id):
         raise HTTPException(status_code=403, detail="Access denied to this senior")

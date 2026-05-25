@@ -223,7 +223,7 @@ The Director receives the senior's **location (city/state)** and **today's date*
 
 #### Director Output Schema
 
-The Director classifies calls into 5 analytical phases (including "rapport" between opening and main), while the Flows state machine uses 4 phases (opening, main, winding_down, closing). The Director's `call_phase` is informational guidance — it doesn't directly control Flows transitions.
+The Director classifies calls into 5 analytical phases (including "rapport" between opening and main), while subscriber Flows use conditional reminder/main/winding_down/closing nodes with the opening folded into the initial node. The Director's `call_phase` is informational guidance — it doesn't directly control Flows transitions.
 
 ```json
 {
@@ -403,10 +403,10 @@ The opening phase is merged into main — the bot starts directly in main (or re
 
 ## Post-Call Processing
 
-When the telephony client disconnects, `run_post_call()` in `services/post_call.py` executes. If `POST_CALL_QUEUE_ENABLED=true`, Pipecat seeds the `post_call_jobs` graph after conversation completion, but it still continues through the inline chain today. `run_bot()` awaits this post-call task before active-call capacity is released.
+When the telephony client disconnects, `run_post_call()` in `services/post_call.py` executes. If `POST_CALL_QUEUE_ENABLED=true`, Pipecat seeds the `post_call_jobs` graph early, then artifact-verification handlers wait for completed conversation/metrics/analysis records while the inline chain continues today. `run_bot()` awaits this post-call task before active-call capacity is released.
 
 1. **Complete conversation** — Updates DB with duration, status, transcript
-2. **Call analysis** — Gemini Flash generates a companion-call summary, engagement score (1-10), mood, and caregiver takeaways. Legacy concern/action/follow-up fields remain empty for compatibility. The encrypted JSON still includes a legacy `caregiver_sms` key, but SMS delivery is inactive.
+2. **Call analysis** — Anthropic Claude Haiku forced tool-use generates a companion-call summary, engagement score (1-10), mood, and caregiver takeaways. Legacy concern/action/follow-up fields remain empty for compatibility. The encrypted JSON still includes a legacy `caregiver_sms` key, but SMS delivery is inactive.
 2.5. **Caregiver notes + notifications** — Marks caregiver notes delivered only when assistant transcript evidence shows Donna delivered them. POSTs to Node.js API for call_completed notifications, raising on non-2xx responses and retrying transient failures once. Node sends email/in-app notification records; SMS is inactive.
 3. **Summary persistence** — Writes analysis summary through encrypted summary storage with legacy plaintext read fallback during migration (enables `get_recent_summaries()` and cross-call context)
 3.5. **Interest discovery** — Maps new topics to predefined interest categories and updates `seniors.interests` plus editable `familyInfo.interestDetails`
@@ -415,7 +415,7 @@ When the telephony client disconnects, `run_post_call()` in `services/post_call.
 5. **Daily context** — Saves topics, advice, reminders, and summary for same-day cross-call memory
 6. **Reminder cleanup** — Waits briefly for any in-flight reminder acknowledgment write, re-reads `reminder_deliveries.status`, and marks unacknowledged reminders for retry
 7. **Cache clearing** — Clears senior context cache and reminder context
-8. **Snapshot rebuild** — Rebuilds `seniors.call_context_snapshot` JSONB (analysis, summaries, turns, daily context) so next call reads a single column instead of 6 queries
+8. **Snapshot rebuild** — Rebuilds `seniors.call_context_snapshot_encrypted` (analysis, summaries, turns, daily context) so next call reads a single encrypted payload instead of 6 queries; plaintext `call_context_snapshot` is legacy fallback only
 
 ## Multi-Instance Runtime State (Phase 3 of scale-2000 rollout)
 
@@ -523,7 +523,7 @@ pipecat/
 │   ├── director_llm.py              ← Groq/Gemini Director analysis + prefetch hints
 │   ├── post_call.py                 ← Post-call orchestration (analysis, memory, cleanup, snapshot rebuild)
 │   ├── reminder_delivery.py         ← Reminder delivery CRUD + prompt formatting
-│   ├── call_analysis.py             ← Post-call analysis + call quality scoring
+│   ├── call_analysis.py             ← Claude Haiku post-call analysis + call quality scoring
 │   ├── memory.py                    ← Semantic memory (pgvector, HNSW, circuit breaker)
 │   ├── greetings.py                 ← Sentiment-aware greeting templates + rotation
 │   ├── conversations.py             ← Conversation CRUD + transcript history
@@ -628,7 +628,7 @@ Running separate backends is an explicit decision. Pipecat handles real-time voi
 | **Voice LLM** | Claude Haiku 4.5 (`claude-haiku-4-5-20251001`) | AnthropicLLMService (prompt caching enabled) |
 | **Director** | Groq (`gpt-oss-20b`) | Primary fast provider |
 | **Director Fallback** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Full guidance fallback when Groq unavailable |
-| **Post-Call** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Summary, engagement, caregiver takeaways |
+| **Post-Call** | Anthropic Claude Haiku 4.5 (`claude-haiku-4-5-20251001`) | Forced tool-use summary, engagement, caregiver takeaways |
 | **STT** | Deepgram Nova 3 | Telnyx 16kHz L16 is passed through as internal 16kHz PCM before STT; language follows `familyInfo.donnaLanguage` |
 | **TTS** | ElevenLabs by default; Cartesia behind provider flag | Telnyx calls request 16kHz PCM; optional Spanish voice IDs selected for Spanish calls |
 | **VAD** | Silero | confidence=0.68, start_secs=0.3, min_volume=0.5; stop_secs=1.2 (senior calls), 0.8 (onboarding) |
@@ -642,7 +642,7 @@ Core shared tables, same schema as Node.js:
 
 | Table | Purpose |
 |-------|---------|
-| `seniors` | Senior profiles (name, phone, timezone, interests, encrypted family/additional context, call_settings JSONB, call_context_snapshot JSONB, cached_news TEXT) |
+| `seniors` | Senior profiles (name, phone, timezone, interests, encrypted family/additional/profile context, call_settings JSONB, call_context_snapshot_encrypted with legacy plaintext fallback, cached_news TEXT) |
 | `conversations` | Call records (duration, metrics, transcript) |
 | `memories` | Semantic memories (pgvector embeddings, HNSW index, decay) |
 | `reminders` | Scheduled reminders |
@@ -690,7 +690,7 @@ DATABASE_URL=...
 # AI Services
 ANTHROPIC_API_KEY=...            # Claude Haiku (voice LLM)
 ANTHROPIC_MODEL=claude-haiku-4-5-20251001
-GOOGLE_API_KEY=...               # Gemini Flash (Director + Analysis)
+GOOGLE_API_KEY=...               # Gemini Flash (Director fallback + onboarding summary paths)
 DEEPGRAM_API_KEY=...             # STT
 ELEVENLABS_API_KEY=...           # TTS
 ELEVENLABS_VOICE_ID=...          # Voice ID (optional, has default)

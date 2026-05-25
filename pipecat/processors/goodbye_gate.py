@@ -1,4 +1,4 @@
-"""Goodbye gate processor — false-goodbye grace period.
+"""Legacy goodbye gate processor — false-goodbye grace period.
 
 Prevents premature call termination when the senior says goodbye but then
 continues talking. Implements a 4-second silence timer:
@@ -7,10 +7,12 @@ continues talking. Implements a 4-second silence timer:
 2. If senior speaks during the timer → cancel timer, continue call
 3. If 4 seconds of silence pass → trigger closing transition
 
-Port of initiateCallEnding() / cancelCallEnding() from v1-advanced.js.
+Port of initiateCallEnding() / cancelCallEnding() from v1-advanced.js. This
+processor is not assembled in the active `bot.py` pipeline; Quick Observer now
+owns programmatic goodbye transitions and TTS-aware EndFrame fallback.
 
 In the Pipecat Flows architecture, the closing transition happens via
-the Flow's `transition_to_closing` tool call, not via Twilio REST API.
+the Flow's transition tools, not via provider REST APIs.
 The closing node's `post_actions: [{type: "end_conversation"}]` triggers
 pipeline shutdown, and the active telephony serializer terminates the call.
 """

@@ -73,7 +73,8 @@ async function checkTokenRevocation(token, adminId) {
     }
     return { revoked: false };
   } catch (err) {
-    // If revoked_tokens table doesn't exist yet (pre-migration), allow through
+    // Non-production compatibility fallback for pre-migration/dev DBs.
+    // Production fails closed if revocation status cannot be checked.
     log.warn('Token revocation check skipped', {
       errorName: err?.name,
       errorCode: err?.code,

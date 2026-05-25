@@ -130,7 +130,7 @@ Senior (phone call)
 
 | Criterion | Assessment |
 |-----------|-----------|
-| **PHI Exposure** | CRITICAL -- receives full conversation context including system prompt (with senior name, language setting, age/birthday context, interests and interest details, additional family context, topics to avoid, memories, recent call history), all user utterances, and all assistant responses. Medical notes are deprecated and not injected, but users may still disclose health details during calls. Every word spoken in a call passes through Claude. |
+| **PHI Exposure** | CRITICAL -- receives full live conversation context including system prompt (with senior name, language setting, age/birthday context, interests and interest details, additional family context, topics to avoid, memories, recent call history), all user utterances, all assistant responses, and completed-call transcripts for subscriber post-call analysis. Medical notes are deprecated and not injected, but users may still disclose health details during calls. Every word spoken in a call passes through Claude, and completed calls are sent again for forced tool-use analysis. |
 | **BAA Available** | **Yes** -- Anthropic offers BAA on enterprise plans |
 | **Security Certifications** | SOC 2 Type II |
 | **Data Retention** | API inputs/outputs retained for 30 days by default for trust & safety. Enterprise plans can negotiate shorter retention or opt-out. |
@@ -144,15 +144,15 @@ Senior (phone call)
 2. Negotiate data retention terms (minimize or eliminate API log retention)
 3. Confirm Anthropic does not use API data for model training (currently true for API)
 4. Review Anthropic's subprocessor list
-5. Evaluate whether prompt caching has additional data retention implications
+5. Evaluate whether prompt caching and post-call analysis payloads have additional data retention implications
 
 ---
 
-### 3. Director LLM: Google (Gemini Flash)
+### 3. Director Fallback / Onboarding LLM: Google (Gemini Flash)
 
 | Criterion | Assessment |
 |-----------|-----------|
-| **PHI Exposure** | HIGH -- receives conversation transcripts for Director analysis and post-call analysis. Post-call analysis includes full conversation for summary, engagement scoring, and caregiver takeaway generation. |
+| **PHI Exposure** | HIGH -- receives recent conversation transcripts for Director fallback analysis and onboarding/evaluation payloads where enabled. Active subscriber post-call analysis now uses Anthropic Claude Haiku, not Gemini. |
 | **BAA Available** | **Yes** -- Google Cloud offers BAA as part of Google Cloud Healthcare |
 | **Security Certifications** | SOC 2 Type II, ISO 27001, HIPAA, FedRAMP, HITRUST |
 | **Data Retention** | Vertex AI API: no retention for model improvement. Logging configurable. |
@@ -166,7 +166,7 @@ Senior (phone call)
 2. Ensure Gemini API calls go through Vertex AI (covered by GCP BAA), not the free consumer API
 3. Disable data logging for Gemini API calls
 4. Consider CMEK for additional encryption control
-5. **Gemini is the safest choice for any LLM workload requiring HIPAA compliance**
+5. **Gemini remains the lowest-friction fallback option for BAA-covered LLM workloads if routed through eligible Google Cloud services**
 
 ---
 

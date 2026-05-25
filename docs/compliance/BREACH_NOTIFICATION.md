@@ -97,7 +97,7 @@ HIPAA requires a risk assessment to determine whether a breach must be reported.
 
 | Question | Considerations for Donna |
 |----------|-------------------------|
-| What types of PHI were involved? | Conversation transcripts, user-entered health details, legacy medical notes if any remain, senior names/phones, call analyses, caregiver notifications |
+| What types of PHI were involved? | Conversation transcripts, user-entered health details, profile notes, legacy medical-note residue if any remains, senior names/phones, call analyses, caregiver notifications |
 | Does the PHI include clinical data? | Possibly -- health discussions or user-entered reminder/profile text can include clinical details |
 | Does it include financial identifiers? | No (Donna does not process SSNs, financial data) |
 | Does it include direct identifiers? | Yes -- names, phone numbers, addresses |
@@ -346,7 +346,7 @@ PHI types affected (check all that apply):
   [ ] Phone numbers
   [ ] Addresses (city/state/zip)
   [ ] Conversation transcripts
-  [ ] Deprecated medical notes, if legacy values remain
+  [ ] Profile notes / deprecated medical-note residue, if legacy values remain
   [ ] Reminder information
   [ ] Call analyses / summaries
   [ ] Memory records (semantic memories)

@@ -249,9 +249,9 @@ The Clerk JS SDK might not be loading. Check that `VITE_CLERK_PUBLISHABLE_KEY` i
 
 Expected when the Node.js API isn't running locally. The authenticated tests accept this error state as valid (confirms auth worked, just no API data).
 
-### Proxy errors for `/api/caregivers/me`
+### Local `/api/caregivers/me` 404s
 
-Expected in authenticated tests when the Node API is not running locally. The website/caregiver web app tries to fetch from the API; these Vite proxy errors do not affect mocked test results.
+Expected in authenticated website tests when the Node API is not running locally and `VITE_API_URL` is unset. The caregiver web app calls same-origin `/api/*`, so local Vite returns 404/no local API rather than proxying to Node. Mocked test results are unaffected.
 
 ### `__dirname is not defined in ES module scope`
 

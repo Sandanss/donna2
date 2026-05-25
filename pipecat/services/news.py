@@ -1,6 +1,7 @@
-"""News service.
+"""News and web search service.
 
-Port of services/news.js — fetches senior-friendly news via OpenAI web search.
+Daily senior-friendly news uses OpenAI and cache storage. In-call web_search
+uses Tavily first with OpenAI fallback.
 """
 
 from __future__ import annotations

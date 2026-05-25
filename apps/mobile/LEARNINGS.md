@@ -167,6 +167,6 @@
 **Workarounds while developing in the simulator:**
 
 - Use email/password or Google sign-in flows for sim testing.
-- If you must exercise the post-Apple-Sign-In code path, stub `useSignInWithApple()` behind a dev flag, or seed a Clerk session directly.
+- Validate post-auth app states through visible email/password or Google flows. Do not add app-code auth bypasses, dev-only Clerk sessions, or Apple Sign-In stubs.
 
 **Rule:** Do not try to fix native Sign in with Apple inside an iOS simulator dev build — it cannot be made to work without a real Apple Developer provisioning profile, and Apple does not issue those for simulator-only distribution. Test Apple Sign In on a physical device.

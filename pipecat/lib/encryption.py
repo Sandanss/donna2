@@ -6,9 +6,9 @@ FIELD_ENCRYPTION_KEY env var (32 bytes, base64url-encoded).
 Both Python and Node.js backends use the same format:
     enc:<iv_b64>:<tag_b64>:<ciphertext_b64>
 
-When FIELD_ENCRYPTION_KEY is not set, encryption is skipped (graceful
-degradation). Legacy unencrypted data (no 'enc:' prefix) is returned
-as-is on decrypt.
+Local/test can skip encryption when FIELD_ENCRYPTION_KEY is absent. Public
+production-style environments fail closed. Legacy unencrypted data (no
+'enc:' prefix) is returned as-is on decrypt.
 """
 
 from __future__ import annotations

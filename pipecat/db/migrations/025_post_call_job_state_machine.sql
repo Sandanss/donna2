@@ -1,5 +1,5 @@
 -- Phase 6 post-call job queue state machine and dependency support.
--- Keep mirrored with db/migrations/011_post_call_job_state_machine.sql.
+-- Keep mirrored with db/migrations/012_post_call_job_state_machine.sql.
 
 ALTER TABLE post_call_jobs
   ADD COLUMN IF NOT EXISTS depends_on UUID[] NOT NULL DEFAULT '{}'::uuid[],

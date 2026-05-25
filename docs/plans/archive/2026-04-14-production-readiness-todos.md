@@ -1,6 +1,6 @@
 # Production Readiness TODOs
 
-> Current status note (April 22, 2026): This dated TODO is retained for launch context. Active voice now uses Telnyx Call Control/media streams with L16/16k audio, Claude Haiku 4.5, Groq Director with Gemini fallback, ElevenLabs Flash, Gemini post-call analysis, and email/in-app notifications only. Treat Twilio voice/SMS, Sonnet, Cerebras, and 8kHz details below as superseded unless explicitly marked archived/inactive.
+> Current status note (May 25, 2026): This dated TODO is retained for launch context. Active voice now uses Telnyx Call Control/media streams with L16/16k audio, Claude Haiku 4.5 for live calls and subscriber post-call analysis, Groq Director with Gemini fallback, ElevenLabs Flash, and email/in-app notifications only. Treat Twilio voice/SMS, Sonnet, Cerebras, Gemini subscriber post-call analysis, and 8kHz details below as superseded unless explicitly marked archived/inactive.
 
 > Status: Not ready for real PHI-bearing production users.
 > Baseline audited: `origin/main` at `dfa5956`; branch drift checked against `origin/zuludev` through `6073629`, with voice TODO fixes staged on `codex/voice-pipeline-todos`.

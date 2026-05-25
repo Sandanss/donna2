@@ -261,8 +261,9 @@ async def update_summary(
 async def update_sentiment(call_sid: str, sentiment: str) -> dict | None:
     """Set conversations.sentiment without touching summary or other fields.
 
-    Used by the post-call analysis fallback path: when Gemini fails to
-    return parseable JSON we fall back to _get_default_analysis() which
+    Used by the post-call analysis fallback path: when the analysis provider
+    fails or returns unparseable structured output, we fall back to
+    _get_default_analysis() which
     yields sentiment='neutral'. We still want the conversation row to
     reflect that we attempted analysis, so this writes ONLY sentiment.
     """

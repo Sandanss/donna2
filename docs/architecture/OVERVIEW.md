@@ -73,7 +73,7 @@ The documented **10,000-user path** is forward work built on the new queue archi
 │   │                     ▼                                                │   │
 │   │         ┌───────────────────────┐                                    │   │
 │   │         │  Layer 1: Quick       │  0ms — BLOCKING                    │   │
-│   │         │  Observer             │  250+ regex patterns               │   │
+│   │         │  Observer             │  companion-call regex signals      │   │
 │   │         │                       │  Stashes guidance for Director     │   │
 │   │         │                       │  Goodbye → EndFrame                │   │
 │   │         └───────────┬───────────┘                                    │   │
@@ -110,7 +110,7 @@ The documented **10,000-user path** is forward work built on the new queue archi
 │   ┌─────────────────────────────────────────────────────────────────────┐   │
 │   │              Post-Call Processing (services/post_call.py)             │   │
 │   │              1. Complete conversation record (DB)                     │   │
-│   │              2. Call analysis — Gemini Flash (summary, engagement)   │   │
+│   │              2. Call analysis — Claude Haiku forced tool-use         │   │
 │   │              3. Interest discovery + scores                           │   │
 │   │              4. Memory extraction — OpenAI (facts, preferences)      │   │
 │   │              5. Daily context — cross-call same-day memory            │   │
@@ -163,7 +163,7 @@ The documented **10,000-user path** is forward work built on the new queue archi
 
 | Process | File | Model | Trigger | Output |
 |---------|------|-------|---------|--------|
-| Call Analysis | `services/call_analysis.py` | Gemini 3 Flash Preview | Call ends | Summary, engagement score, mood, caregiver takeaways |
+| Call Analysis | `services/call_analysis.py` | Anthropic Claude Haiku 4.5 forced tool-use | Call ends | Summary, engagement score, mood, caregiver takeaways |
 | Interest Discovery | `services/interest_discovery.py` | Rule/category mapping over analysis output | After call analysis | New interest categories, editable interest details, engagement scores |
 | Memory Extraction | `services/memory.py` | OpenAI GPT-4o-mini | Call ends | Facts, preferences, events stored with embeddings |
 
@@ -251,7 +251,7 @@ Quick Observer pattern categories:
 | **Voice LLM** | Claude Haiku 4.5 (`claude-haiku-4-5-20251001`) | AnthropicLLMService (prompt caching enabled) |
 | **Director** | Groq (`gpt-oss-20b`) | Active fast provider for query/speculative guidance |
 | **Director Fallback Helper** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Regular non-speculative fallback in `director_llm.py` |
-| **Post-Call** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) | Summary, engagement, caregiver takeaways |
+| **Post-Call** | Anthropic Claude Haiku 4.5 (`claude-haiku-4-5-20251001`) | Forced tool-use summary, engagement, caregiver takeaways |
 | **STT** | Deepgram Nova 3 (`nova-3-general`) | Real-time, interim results, 16kHz linear PCM; English/Spanish based on senior call language |
 | **TTS** | ElevenLabs (`eleven_flash_v2_5`) by default; Cartesia behind provider flag | Telnyx calls use native 16kHz PCM from TTS; optional Spanish voice IDs for Spanish calls |
 | **VAD** | Silero | confidence=0.68, start_secs=0.3, stop_secs=1.2, min_volume=0.5 |
@@ -280,7 +280,7 @@ pipecat/
 │   ├── nodes.py                     ← 4 call phase NodeConfigs + system prompts
 │   └── tools.py                     ← 3 active subscriber-call Claude tools + retired handlers; onboarding exposes web_search only
 ├── processors/
-│   ├── patterns.py                  ← 250+ regex patterns, 19 categories
+│   ├── patterns.py                  ← companion-call regex patterns plus legacy inactive tables
 │   ├── quick_observer.py            ← Layer 1: analysis logic + goodbye EndFrame
 │   ├── conversation_director.py     ← Layer 2: Groq speculative guidance + memory/news injection
 │   ├── conversation_tracker.py      ← In-call topic/question/advice tracking
@@ -289,7 +289,7 @@ pipecat/
 │   └── guidance_stripper.py         ← Strip <guidance> tags before TTS
 ├── services/
 │   ├── director_llm.py              ← Groq Director analysis + Gemini fallback helper
-│   ├── call_analysis.py             ← Post-call analysis (Gemini Flash)
+│   ├── call_analysis.py             ← Post-call analysis (Claude Haiku forced tool-use)
 │   ├── memory.py                    ← Semantic memory (pgvector, decay, dedup)
 │   ├── scheduler.py                 ← Pipecat-side scheduling helpers; Node scheduler is active
 │   ├── call_snapshot.py             ← Pre-computed call context snapshot
@@ -318,7 +318,7 @@ pipecat/
 
 | Table | Purpose | Key Fields |
 |-------|---------|------------|
-| **seniors** | User profiles | name, phone, timezone, interests, encrypted familyInfo/additionalInfo, call_settings (JSONB), call_context_snapshot (JSONB), cached_news (TEXT). Legacy medical-note columns are deprecated and nulled by migration 014/026. |
+| **seniors** | User profiles | name, phone, timezone, interests, encrypted familyInfo/additionalInfo, call_settings (JSONB), call_context_snapshot_encrypted (legacy plaintext fallback), cached_news (TEXT), profile_notes/profile_notes_encrypted. Legacy medical-note columns are migration history only. |
 | **conversations** | Call records | callSid, encrypted transcript, duration, status, encrypted summary |
 | **memories** | Long-term memory | content, type, importance, embedding (1536d, HNSW index) |
 | **reminders** | Scheduled reminders | title, scheduledTime, isRecurring, type |
@@ -357,7 +357,7 @@ pipecat/
 
 | Feature | Implementation | Details |
 |---------|---------------|---------|
-| **Circuit Breakers** | `lib/circuit_breaker.py` | Groq, Gemini, OpenAI embedding/news, Tavily |
+| **Circuit Breakers** | `lib/circuit_breaker.py` | Groq, Gemini Director fallback, Anthropic analysis, OpenAI embedding/news, Tavily |
 | **Feature Flags** | `lib/growthbook.py` | GrowthBook SDK wrapper with defaults when unavailable |
 | **Graceful Shutdown (Pipecat)** | `main.py` | Tracks active calls, drain flag in capacity heartbeat, websocket rejects new connections when draining |
 | **Graceful Shutdown (Node)** | `index.js` | `setQueueDispatcherDraining(true)` + drain reservations up to `NODE_DISPATCHER_DRAIN_TIMEOUT_MS` |
@@ -387,11 +387,11 @@ Dispatcher tick (every N seconds, in same Node process):
 
 Mode progression: `legacy_only` → `shadow_materialize` → `shadow_dispatch` → `canary_queue` → `queue_primary`. `legacy_rollback` is the emergency exit. See [`ARCHITECTURE.md`](ARCHITECTURE.md#outbound-call-dispatch--dual-path-rollout) for the full mode matrix and the consistency-model rule (Postgres decides *what*, Redis decides *what is running right now*).
 
-Manual caregiver/admin calls through `routes/calls.js` still call Pipecat directly; the `manual` queue lane exists for the queue architecture but manual `/api/call` is not queue-backed yet.
+Manual caregiver/admin calls through `routes/calls.js` call Pipecat directly until `CALL_ARCHITECTURE_MODE=queue_primary`. In `queue_primary`, manual, consent, and discovery calls enqueue into the `manual` lane and are dispatched by the queue path.
 
-**Out-of-band post-call (Phase 6 infra).** `services/post-call-jobs.js` defines an 8-job DAG (`metrics_finalize`, `reminder_recovery`, `analysis`, `memory_extraction`, `daily_context`, `caregiver_notifications`, `interest_discovery`, `snapshot_rebuild`) backed by the `post_call_jobs` queue. Per-provider semaphores keep `geminiFlash`/`openAiEmbeddings`/`resend` at concurrency 1 per worker process; `db` lane runs at 200. Terminal failures move to `dead_letter` and are admin-replayable. Pipecat enqueues only when `POST_CALL_QUEUE_ENABLED=true`, but it still runs the inline chain today; the worker is an explicit script/runbook path until the canary flip disables inline work.
+**Out-of-band post-call (Phase 6 infra).** `services/post-call-jobs.js` defines an 8-job DAG (`metrics_finalize`, `reminder_recovery`, `analysis`, `memory_extraction`, `daily_context`, `caregiver_notifications`, `interest_discovery`, `snapshot_rebuild`) backed by the `post_call_jobs` queue. Current worker handlers are artifact-verification paths; Pipecat's inline subscriber analysis uses Claude Haiku, while the JS job lane still keeps provider semaphores for `anthropicHaiku`/`geminiFlash`/`openAiEmbeddings`/`resend` at concurrency 1 per worker process and `db` at 200. Terminal failures move to `dead_letter` and are admin-replayable. Pipecat enqueues only when `POST_CALL_QUEUE_ENABLED=true`, but it still runs the inline chain today; the worker is an explicit script/runbook path until the canary flip disables inline work.
 
-**Phase 7 canary + Phase 8 capacity actuator.** `services/canary-cohort.js` and `routes/canary.js` store the queue canary allowlist in `canary_cohort_membership`, with the env allowlist kept as an emergency fallback. Integrated scheduler runtime merges DB membership with the env allowlist; standalone `scripts/run-dispatcher-worker.js` still relies on env allowlist/percent validation. `scripts/phase7-canary-daily-report.js` produces the daily SLO report, while `scripts/phase7-canary-report.js` remains the aggregate exit report for the 5→10→25 live canary. `services/phase8-capacity-plan.js` + `services/phase8-autoscaler.js` recommend and (optionally) apply Railway replica scaling for known call windows; dry-run by default. Admin override at `POST /api/scale-operations/phase8/override`. See [`ARCHITECTURE.md`](ARCHITECTURE.md#capacity-planning--autoscaling-phases-7-8) for the full surface.
+**Phase 7 canary + Phase 8 capacity actuator.** `services/canary-cohort.js` and `routes/canary.js` store the queue canary allowlist in `canary_cohort_membership`, with the env allowlist kept as an emergency fallback. Both the integrated scheduler runtime and standalone `scripts/run-dispatcher-worker.js` merge DB membership with env membership; config validation still requires an env allowlist or nonzero percent before real canary queue dials. `scripts/phase7-canary-daily-report.js` produces the daily SLO report, while `scripts/phase7-canary-report.js` remains the aggregate exit report for the 5→10→25 live canary. `services/phase8-capacity-plan.js` + `services/phase8-autoscaler.js` recommend and (optionally) apply Railway replica scaling for future call demand, current backlog, critical post-call backlog, and live heartbeats; dry-run by default. Admin override at `POST /api/scale-operations/phase8/override`. See [`ARCHITECTURE.md`](ARCHITECTURE.md#capacity-planning--autoscaling-phases-7-8) for the full surface.
 
 **Path to 10,000 users.** The queue architecture is deliberately shaped so the next scale step is incremental rather than a rewrite: move hot operational tables to `ops.*` or hash/time partitioning when DB pressure appears, move Redis/shared state to a HA or multi-region topology when reliability or latency demands it, add caller-ID pool/reputation management when answer rate declines, add provider sharding/failover when vendor 429s appear, and promote the post-call DAG to Temporal/Inngest or equivalent if Postgres-only workers become the bottleneck. These are documented triggers, not implemented guarantees.
 

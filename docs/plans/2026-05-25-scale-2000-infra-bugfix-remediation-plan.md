@@ -59,9 +59,8 @@ Close the scale-2000 infrastructure defects found in the latest-main review befo
     - Fix direction: purge queue child tables before parent rows, or align parent retention longer than child retention.
     - Evidence: retention-order test covers `call_attempts` before `call_queue`.
 
-11. **Node/Pipecat migration drift**
-    - Fix direction: mirror `idx_call_metrics_call_sid_unique` on the Node migration path or add a follow-up migration.
-    - Evidence: migration parity test.
+11. **Node/Pipecat migration drift** — RESOLVED
+    - Evidence: `db/migrations/017_call_metrics_call_sid_unique.sql` now mirrors the `call_metrics.call_sid` unique index on the Node migration path.
 
 12. **Canary notes can store PHI**
     - Fix direction: remove free-form notes from new writes/responses or replace with PHI-free reason code.

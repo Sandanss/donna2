@@ -38,7 +38,8 @@ export async function loginAsObserver(page: Page): Promise<void> {
 }
 
 /**
- * Consumer app: mock Clerk's session endpoints to bypass OAuth.
+ * Caregiver web app legacy helper: route Clerk session endpoints for tests
+ * that do not use @clerk/testing.
  */
 export async function loginAsCaregiver(page: Page): Promise<void> {
   await page.route('**clerk**', route => {

@@ -1,11 +1,11 @@
 """Conversation tracking processor.
 
 Tracks topics discussed, questions asked, and advice given during a call
-to prevent repetition. Port of extractConversationElements(),
-trackTopicsFromSignals(), and getConversationTrackingSummary() from
-pipelines/v1-advanced.js.
+to prevent repetition. Active `bot.py` uses split instances: one user-side
+tracker before the Director and one assistant-side tracker after guidance
+stripping.
 
-Sits in the pipeline after guidance stripping and reads both:
+When used after guidance stripping, reads both:
 - TranscriptionFrame (user messages) → extract topic keywords
 - TextFrame (LLM output) → extract questions and advice phrases
 """
@@ -22,7 +22,7 @@ from pipecat.processors.frame_processor import FrameProcessor
 
 
 # ---------------------------------------------------------------------------
-# Topic extraction patterns (16 categories from user messages)
+# Topic extraction patterns (14 categories from user messages)
 # ---------------------------------------------------------------------------
 
 _TOPIC_PATTERNS: list[tuple[re.Pattern, str]] = [
