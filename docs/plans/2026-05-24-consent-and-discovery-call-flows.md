@@ -38,7 +38,7 @@ The first refactor in this plan turns the two `if` chains into a small dispatch 
 These came from a 2026-05-24 sync. Calling them out here so reviewers don't relitigate.
 
 1. **Consent storage = `senior_consents` audit table + denormalized `seniors.consentStatus` column.** The audit table is the source of truth; the column is what the call queue gates on (fast index lookup, avoids a join per dispatch).
-2. **Two separate consents** captured by the consent call: `call_permission` and `recording_permission`. The May 17 spec proposed a single `consentStatus` value — that doesn't represent "ok to call but not record". The audit table stores each consent as its own row; the denormalized `consentStatus` column rolls them up (`granted` only when both = true; `declined` when either = false; `pending` until both captured).
+2. **Single combined consent** (updated 2026-05-25). Initial design was two separate rows (`call_permission` + `recording_permission`) with the "okay to call but not record" branch preserved. Replaced by a single combined ask — "is it okay if I call you regularly AND record our calls?" — captured as one row with `consent_type = 'call_and_recording'`. Any "no" is a full no; the split branch goes away. Migration 019 / 030 widens the CHECK constraint to accept the new value alongside the legacy ones (additive; pre-existing dev rows preserved as audit history). Roll-up is direct: `granted=true` → `consent_status='granted'` + `callable=true`; `granted=false` → `declined` + `callable=false`.
 3. **On decline:** flip a new dedicated `seniors.callable = false` column and enqueue a caregiver notification. Rationale: `isActive` is caregiver-controlled soft-pause; `callable` is consent-driven. Keeping them separate preserves the ability to distinguish "caregiver paused" from "senior declined". Scheduler/queue queries that currently gate on `isActive` must be tightened to also check `callable = true AND consent_status = 'granted'` before consent calls go live. Migration ships the partial index `idx_seniors_dispatchable` covering that triple-predicate.
 4. **Discovery output:** every `record_discovery_fact` tool call writes to the `memories` table immediately (high importance). A post-call analyzer builds a structured `profile_suggestions` payload for caregiver review. We do **not** auto-mutate `seniors.interests` or `family_info` — caregivers own the profile; an AI call should propose, not overwrite.
 
@@ -60,7 +60,7 @@ Goal: get explicit, recorded "yes" or "no" from the senior on two questions, in 
 |---|---|
 | `pipecat/prompts.py` | `CONSENT_SYSTEM_PROMPT` (warm, short, no other agenda — identifies as AI up front, names the caregiver) + `CONSENT_TASK` (script: greet → identify as AI → name caregiver → explain what Donna does → ask call permission → ask recording permission → confirm + close) |
 | `pipecat/flows/nodes.py` | `build_consent_node()` + `build_consent_closing_node()`; add `consent` to the dispatch in `build_initial_node` |
-| `pipecat/flows/tools.py` | `RECORD_CONSENT_RESPONSE_SCHEMA` + handler; `make_consent_flows_tools()` exposing only this one tool. Args: `{ consent_type: "call_permission" | "recording_permission", granted: bool, senior_quote?: string }` |
+| `pipecat/flows/tools.py` | `RECORD_CONSENT_RESPONSE_SCHEMA` + handler; `make_consent_flows_tools()` exposing only this one tool. Args: `{ granted: bool, senior_quote?: string }` — single combined consent, no `consent_type` field. |
 | `pipecat/services/seniors.py` | `record_consent(senior_id, conversation_id, consent_type, granted, quote)` — inserts into `senior_consents`, then re-computes and writes `seniors.consentStatus` + `seniors.consentDate`; if rolled-up status is `declined`, also sets `isActive = false` |
 | `pipecat/processors/patterns.py` (optional) | Add a "clear decline" pattern (e.g. "no", "I don't want", "please don't call") so Quick Observer can fast-track winding down if Claude doesn't react |
 | `pipecat/bot.py` | Branch in pipeline construction: when `call_type == "consent"`, skip Director, prefetch, caregiver-notes prefetch (those processors get conditionally added) |
@@ -75,7 +75,7 @@ CREATE TABLE senior_consents (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   senior_id UUID NOT NULL REFERENCES seniors(id) ON DELETE CASCADE,
   conversation_id UUID REFERENCES conversations(id),
-  consent_type VARCHAR(50) NOT NULL,  -- 'call_permission' | 'recording_permission'
+  consent_type VARCHAR(50) NOT NULL,  -- 'call_and_recording' (legacy values still accepted per migration 019)
   granted BOOLEAN NOT NULL,
   senior_quote_encrypted TEXT,        -- verbatim, PHI-encrypted
   captured_by VARCHAR(50) NOT NULL,   -- 'donna_tool' | 'manual'
@@ -88,12 +88,13 @@ ALTER TABLE seniors ADD COLUMN consent_status VARCHAR(20) NOT NULL DEFAULT 'pend
 ALTER TABLE seniors ADD COLUMN consent_date TIMESTAMPTZ;
 ```
 
-Roll-up rule (computed in `record_consent` after each insert):
-- Both consents have a most-recent row with `granted = true` → `consent_status = 'granted'`, `consent_date = max(captured_at)`, `callable = true`.
-- Any most-recent row has `granted = false` → `consent_status = 'declined'`, `callable = false`.
-- Otherwise → `consent_status = 'pending'`, `callable` unchanged.
+Roll-up rule (computed in `record_consent` directly from the inserted row):
+- `granted = true`  → `consent_status = 'granted'`,  `callable = true`,  `consent_date = captured_at`
+- `granted = false` → `consent_status = 'declined'`, `callable = false`, `consent_date = captured_at`
 
-**Post-call hook:** A lightweight check that verifies both consent rows landed in `senior_consents` for this conversation. If only one was captured, dead-letter the call and surface to caregivers — re-consent attempt rather than silently moving on.
+There is no `pending` roll-up outcome from a tool call — `pending` is only the column DEFAULT, applied when a senior is created and no consent call has run yet.
+
+**Post-call hook:** Verify exactly one consent row landed for this conversation. If none was captured, dead-letter the call and surface to caregivers — re-consent attempt rather than silently moving on.
 
 ---
 
@@ -136,7 +137,7 @@ The post-call extractor for discovery should be **conservative**: only include s
    ```
    Same shape for `pipecat/bot.py` tool-factory selection.
 
-2. **Director awareness** — `pipecat/services/director_llm.py:138` already mentions `onboarding`. Add brief lines for `consent` ("script-driven, do not improvise; capture both consents before closing") and `discovery` ("explore friends/hobbies/family; one question per turn; reference what they say"). For consent we'll likely skip the Director entirely; for discovery it stays on.
+2. **Director awareness** — `pipecat/services/director_llm.py:138` already mentions `onboarding`. Add brief lines for `consent` (script-driven, capture the single combined consent before closing) and `discovery` (explore friends/hobbies/family; one question per turn; reference what they say). Consent skips the Director entirely (`ConversationDirectorProcessor.process_frame` short-circuits); discovery uses the full subscriber stack.
 
 3. **Manual trigger** — `routes/calls.js` already proxies to Pipecat's `/telnyx/outbound`. The new call types pass through with no API change. Admin-v2 button and mobile dashboard CTA are downstream work (see May 17 spec part 2).
 
@@ -191,4 +192,4 @@ Steps 3 and 4 are independent — could be parallelized across two PRs. I'll squ
 ## Open questions for follow-up
 
 - Should discovery be eligible for inbound calls (senior calls back after a consent call)? Currently designed outbound-only; inbound would route to the existing onboarding flow.
-- Recording-permission UX: if the senior says yes to calls but no to recording, do we keep calling without recording? That requires Telnyx-side changes and a meaningful product decision (the analyzer + memory features all depend on transcripts). Out of scope here — for v1, recording decline → full decline.
+- Split-consent UX: the original two-row design briefly considered "okay to call but not record" as a separate state. Collapsed to one combined consent on 2026-05-25 — any no is a full no. If we ever revisit, migration 019 left the legacy consent_type values reachable in the CHECK constraint so we could re-split without a new migration.

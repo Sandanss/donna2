@@ -201,11 +201,12 @@ class TestConsentGrantScenario:
         s = consent_grant_scenario()
         assert "record_consent_response" in s.expect_tool_calls
 
-    def test_has_call_and_recording_goals(self):
+    def test_has_combined_grant_goal(self):
+        """Single-decision: one combined consent answer covering call + recording."""
         s = consent_grant_scenario()
         text = " ".join(g.trigger_phrase or "" for g in s.goals).lower()
-        # The two consent answers should be reflected in the goals
-        assert "fine" in text or "alright" in text
+        # The combined "yes" should mention both calling AND recording in one breath
+        assert "record" in text, "Combined-grant goal should reference recording"
         # Goodbye is the last goal
         assert "bye" in (s.goals[-1].trigger_phrase or "").lower()
 
@@ -215,11 +216,14 @@ class TestConsentDeclineScenario:
         s = consent_decline_scenario()
         assert s.call_type == "consent"
 
-    def test_includes_decline_for_recording(self):
+    def test_includes_combined_decline_goal(self):
+        """Single-decision: one combined 'no' covering the whole ask."""
         s = consent_decline_scenario()
         text = " ".join(g.trigger_phrase or "" for g in s.goals).lower()
-        # At least one goal must be a clear "no" to recording
-        assert "didn't" in text or "rather you didn" in text or "private" in text
+        # The combined "no" must be a clear decline
+        assert "rather not" in text or "no" in text
+        # And it should mention recording as the reason it's a full no
+        assert "record" in text
 
     def test_skips_post_call_analysis(self):
         # Consent calls don't run analysis (no transcript-worth-summarizing).

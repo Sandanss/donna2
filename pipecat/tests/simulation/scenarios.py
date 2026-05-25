@@ -318,16 +318,16 @@ def reminder_scenario() -> LiveSimScenario:
 
 
 def consent_grant_scenario() -> LiveSimScenario:
-    """First-ever call: Donna asks permission and the senior agrees to both.
+    """First-ever call: Donna asks permission and the senior agrees.
 
-    Tests the happy path of the consent flow — call_permission=true AND
-    recording_permission=true must each fire record_consent_response once.
+    Single combined consent (call + recording). Expects record_consent_response
+    fired exactly once with granted=true.
     """
     return LiveSimScenario(
         name="consent_grant",
         description=(
-            "Consent call: senior grants both call and recording permission. "
-            "Expects record_consent_response invoked twice (one per consent_type)."
+            "Consent call: senior grants the combined call+recording consent. "
+            "Expects record_consent_response invoked exactly once with granted=true."
         ),
         senior=_margaret_senior(),
         persona=CallerPersona(
@@ -335,8 +335,8 @@ def consent_grant_scenario() -> LiveSimScenario:
             age=_MARGARET_BASE.age,
             personality=(
                 "Friendly but a little cautious about new technology. Trusts her "
-                "daughter who set up the account. Agrees to both consents once Donna "
-                "explains things clearly."
+                "daughter who set up the account. Agrees once Donna explains things "
+                "clearly."
             ),
             speech_style=_MARGARET_BASE.speech_style,
         ),
@@ -348,12 +348,13 @@ def consent_grant_scenario() -> LiveSimScenario:
                 trigger_phrase="Oh — okay. Who did you say set this up?",
             ),
             CallerGoal(
-                description="Agree to receive regular calls",
-                trigger_phrase="Yeah, that sounds fine. I'd like that.",
-            ),
-            CallerGoal(
-                description="Agree to recordings",
-                trigger_phrase="Sure, that's alright with me too.",
+                description=(
+                    "Agree to the combined consent (calls + recording) in one answer"
+                ),
+                trigger_phrase=(
+                    "Yeah, that sounds fine. Calls are okay and I don't mind "
+                    "you recording."
+                ),
             ),
             CallerGoal(
                 description="Warm goodbye",
@@ -369,25 +370,27 @@ def consent_grant_scenario() -> LiveSimScenario:
 
 
 def consent_decline_scenario() -> LiveSimScenario:
-    """Senior is okay with calls but does NOT want them recorded.
+    """Senior does not want this service at all.
 
-    Tests the mixed-decline path: one consent granted, one declined → roll-up
-    must mark the senior as declined (callable=false) and Donna must NOT
-    push back on the recording refusal.
+    Single combined consent — any decline is a full no. Expects
+    record_consent_response fired exactly once with granted=false; roll-up
+    marks consent_status='declined' and callable=false.
     """
     return LiveSimScenario(
         name="consent_decline",
         description=(
-            "Consent call: senior agrees to calls but declines recording. "
-            "Expects both consent_types captured; roll-up should be 'declined'."
+            "Consent call: senior declines the combined consent. Expects "
+            "record_consent_response invoked exactly once with granted=false; "
+            "seniors.consent_status='declined', callable=false."
         ),
         senior=_margaret_senior(),
         persona=CallerPersona(
             name=_MARGARET_BASE.name,
             age=_MARGARET_BASE.age,
             personality=(
-                "Friendly and chatty but private about her conversations. Happy "
-                "for calls but firm about not wanting recordings."
+                "Friendly and chatty but private about her conversations. Doesn't "
+                "want recorded calls — and since it's a combined consent, she says "
+                "no to the whole thing."
             ),
             speech_style=_MARGARET_BASE.speech_style,
         ),
@@ -397,14 +400,13 @@ def consent_decline_scenario() -> LiveSimScenario:
                 trigger_phrase="Oh, alright. That's nice of her to set up.",
             ),
             CallerGoal(
-                description="Agree to receive calls",
-                trigger_phrase="Yes, calls would be lovely.",
-            ),
-            CallerGoal(
-                description="Decline recording, firmly but politely",
+                description=(
+                    "Decline the combined consent firmly but politely — the "
+                    "recording part is what she dislikes"
+                ),
                 trigger_phrase=(
-                    "Hmm — no, I'd rather you didn't record them. I'm a "
-                    "private person."
+                    "Hmm — no, I'd rather not. I'm a private person and I don't "
+                    "want our calls recorded."
                 ),
             ),
             CallerGoal(

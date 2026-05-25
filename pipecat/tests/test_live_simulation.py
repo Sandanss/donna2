@@ -300,11 +300,12 @@ class TestConsentCall:
     """
 
     @pytest.mark.asyncio
-    async def test_consent_grant_persists_both_rows_and_rolls_up_granted(
+    async def test_consent_grant_persists_one_row_and_rolls_up_granted(
         self, test_senior: TestSenior
     ):
-        """consent_grant: both consents=true → senior_consents has 2 granted
-        rows, seniors.consent_status='granted', seniors.callable=true."""
+        """consent_grant: combined yes → senior_consents has 1 granted row
+        (consent_type='call_and_recording'), seniors.consent_status='granted',
+        seniors.callable=true."""
         from db import query_many, query_one
 
         # Sanity check the precondition: a fresh test senior starts pending.
@@ -333,27 +334,25 @@ class TestConsentCall:
         # happen synchronously inside the handler, so this is belt-and-braces).
         await asyncio.sleep(0.5)
 
-        # 1. senior_consents should have one row per consent_type, both granted.
+        # 1. Single-decision model: exactly one row, granted=true.
         consent_rows = await query_many(
             """SELECT consent_type, granted, captured_at
                FROM senior_consents
                WHERE senior_id = $1
-               ORDER BY consent_type""",
+               ORDER BY captured_at""",
             uuid.UUID(test_senior.id),
         )
-        consent_types = {r["consent_type"]: r for r in (consent_rows or [])}
-        assert "call_permission" in consent_types, (
-            f"Expected call_permission row. Got: {consent_rows}. "
+        assert consent_rows and len(consent_rows) == 1, (
+            f"Expected exactly one senior_consents row, got {len(consent_rows or [])}. "
             f"Tool calls: {result.tool_calls_made}"
         )
-        assert "recording_permission" in consent_types, (
-            f"Expected recording_permission row. Got: {consent_rows}. "
-            f"Tool calls: {result.tool_calls_made}"
+        row = consent_rows[0]
+        assert row["consent_type"] == "call_and_recording", (
+            f"Expected consent_type='call_and_recording', got {row['consent_type']}"
         )
-        assert consent_types["call_permission"]["granted"] is True
-        assert consent_types["recording_permission"]["granted"] is True
+        assert row["granted"] is True
 
-        # 2. Rolled-up seniors columns should reflect both-granted.
+        # 2. Rolled-up seniors columns should reflect granted.
         after = await query_one(
             """SELECT consent_status, callable, consent_date
                FROM seniors WHERE id = $1""",
@@ -375,8 +374,8 @@ class TestConsentCall:
     async def test_consent_decline_flips_callable_false(
         self, test_senior: TestSenior
     ):
-        """consent_decline scenario: senior agrees to calls but declines
-        recording. Roll-up should mark the senior 'declined' and callable=false."""
+        """consent_decline scenario: combined no → senior_consents has 1
+        granted=false row, seniors.consent_status='declined', callable=false."""
         from db import query_many, query_one
 
         scenario = consent_decline_scenario()
@@ -388,33 +387,26 @@ class TestConsentCall:
 
         await asyncio.sleep(0.5)
 
-        # senior_consents rows should reflect the mixed answer.
+        # Single-decision model: exactly one row, granted=false.
         consent_rows = await query_many(
             """SELECT consent_type, granted
                FROM senior_consents
                WHERE senior_id = $1
-               ORDER BY consent_type""",
+               ORDER BY captured_at""",
             uuid.UUID(test_senior.id),
         )
-        by_type = {r["consent_type"]: r["granted"] for r in (consent_rows or [])}
-
-        assert "call_permission" in by_type, (
-            f"Expected call_permission row. Got: {consent_rows}. "
+        assert consent_rows and len(consent_rows) == 1, (
+            f"Expected exactly one senior_consents row, got {len(consent_rows or [])}. "
             f"Tool calls: {result.tool_calls_made}"
         )
-        assert "recording_permission" in by_type, (
-            f"Expected recording_permission row. Got: {consent_rows}. "
-            f"Tool calls: {result.tool_calls_made}"
-        )
-        assert by_type["call_permission"] is True, (
-            "Persona agreed to calls — call_permission should be True"
-        )
-        assert by_type["recording_permission"] is False, (
-            "Persona declined recordings — recording_permission should be False"
+        row = consent_rows[0]
+        assert row["consent_type"] == "call_and_recording"
+        assert row["granted"] is False, (
+            "Persona declined — granted should be False"
         )
 
-        # Rolled-up state: any declined consent flips both consent_status
-        # and the callable gate the scheduler reads.
+        # Rolled-up state: declined consent flips both consent_status and the
+        # callable gate the scheduler reads.
         after = await query_one(
             "SELECT consent_status, callable FROM seniors WHERE id = $1",
             uuid.UUID(test_senior.id),
@@ -423,7 +415,7 @@ class TestConsentCall:
             f"Expected consent_status='declined', got {after['consent_status']}"
         )
         assert after["callable"] is False, (
-            "callable should flip to false on any consent decline — "
+            "callable should flip to false on consent decline — "
             "this is what gates the scheduler from dispatching"
         )
 

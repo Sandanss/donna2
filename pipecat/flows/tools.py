@@ -773,34 +773,31 @@ def make_onboarding_flows_tools(session_state: dict) -> dict[str, FlowsFunctionS
 RECORD_CONSENT_RESPONSE_SCHEMA = {
     "name": "record_consent_response",
     "description": (
-        "Capture the senior's yes/no answer to a consent question. Call ONCE per "
-        "consent_type, immediately after the senior gives a clear answer (confirm "
-        "fuzzy answers before calling). Pass the senior's actual words in "
-        "senior_quote — do not paraphrase. This writes to the senior_consents audit "
-        "table and rolls up seniors.consent_status / callable."
+        "Capture the senior's yes/no answer to the combined consent question "
+        "(\"is it okay to call you regularly AND record our calls?\"). Call "
+        "exactly ONCE per consent call, immediately after the senior gives a "
+        "clear answer — confirm fuzzy answers before calling. Pass the senior's "
+        "actual words in senior_quote — do not paraphrase. This writes to the "
+        "senior_consents audit table and rolls up seniors.consent_status / callable."
     ),
     "properties": {
-        "consent_type": {
-            "type": "string",
-            "enum": ["call_permission", "recording_permission"],
-            "description": (
-                "Which consent this answer is for. call_permission = okay to call "
-                "regularly. recording_permission = okay to record calls."
-            ),
-        },
         "granted": {
             "type": "boolean",
-            "description": "True if the senior said yes; False if they said no.",
+            "description": (
+                "True if the senior said yes to BOTH calling and recording. "
+                "False if they said no to either or to both — any 'no' is a "
+                "full decline."
+            ),
         },
         "senior_quote": {
             "type": "string",
             "description": (
                 "The senior's actual verbatim words confirming this consent "
-                "(e.g., 'Yeah that's fine' or 'No I don't think so'). Do NOT paraphrase."
+                "(e.g., 'Yeah that's fine' or 'No I'd rather not'). Do NOT paraphrase."
             ),
         },
     },
-    "required": ["consent_type", "granted"],
+    "required": ["granted"],
 }
 
 
@@ -808,9 +805,9 @@ def make_consent_flows_tools(session_state: dict) -> dict[str, FlowsFunctionSche
     """Create FlowsFunctionSchema for consent calls.
 
     Returns: record_consent_response only. Consent calls are intentionally
-    stripped — no web search, no memory, no caregiver notes.
+    stripped — no web search, no memory, no caregiver notes. Single-decision
+    model: one combined consent per call (see migration 019).
     """
-    captured = session_state.setdefault("_consent_captured", {})
 
     async def handle_record_consent(args: dict) -> dict:
         from services.seniors import record_consent
@@ -823,31 +820,22 @@ def make_consent_flows_tools(session_state: dict) -> dict[str, FlowsFunctionSche
                 "result": "I'm having trouble saving that. Let me try again.",
             }
 
-        consent_type = (args.get("consent_type") or "").strip()
-        if consent_type not in ("call_permission", "recording_permission"):
-            return {
-                "status": "error",
-                "result": f"Invalid consent_type: {consent_type}.",
-            }
-
         granted = bool(args.get("granted"))
         senior_quote = (args.get("senior_quote") or "").strip() or None
 
-        # Idempotency: refuse a second capture of the same consent type within
-        # the same call. Claude is instructed once-per-type; this is the hard
-        # stop. The first answer wins.
-        if consent_type in captured:
-            prior = captured[consent_type]
+        # Idempotency: refuse a second capture in the same call. The model is
+        # instructed once-per-call; this is the hard stop. The first answer wins.
+        if session_state.get("_consent_captured") is not None:
+            prior = session_state["_consent_captured"]
             logger.info(
-                "record_consent_response: duplicate {ct} suppressed (prior granted={g})",
-                ct=consent_type,
+                "record_consent_response: duplicate suppressed (prior granted={g})",
                 g=prior.get("granted"),
             )
             return {
                 "status": "success",
                 "result": (
-                    f"Already captured {consent_type}={prior.get('granted')}. "
-                    "Move on — do not re-ask this consent."
+                    f"Already captured granted={prior.get('granted')} this call. "
+                    "Move on — do not re-ask."
                 ),
             }
 
@@ -856,7 +844,6 @@ def make_consent_flows_tools(session_state: dict) -> dict[str, FlowsFunctionSche
             result = await record_consent(
                 senior_id=senior_id,
                 conversation_id=conversation_id,
-                consent_type=consent_type,
                 granted=granted,
                 senior_quote=senior_quote,
                 captured_by="donna_tool",
@@ -868,7 +855,7 @@ def make_consent_flows_tools(session_state: dict) -> dict[str, FlowsFunctionSche
                 "result": "I had trouble saving that. Let me try once more.",
             }
 
-        captured[consent_type] = {
+        session_state["_consent_captured"] = {
             "granted": granted,
             "rolled_up_status": result.get("rolled_up_status"),
             "captured_at": result.get("captured_at"),
@@ -876,7 +863,7 @@ def make_consent_flows_tools(session_state: dict) -> dict[str, FlowsFunctionSche
         session_state["_consent_rolled_up_status"] = result.get("rolled_up_status")
         return {
             "status": "success",
-            "result": f"Recorded {consent_type}={granted}.",
+            "result": f"Recorded consent granted={granted}.",
         }
 
     schemas: dict[str, FlowsFunctionSchema] = {}

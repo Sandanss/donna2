@@ -190,36 +190,31 @@ async def get_call_settings(senior_id: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Consent (migration 014)
+# Consent (migration 014 + 019: single-decision model)
 # ---------------------------------------------------------------------------
 
-CONSENT_TYPES = ("call_permission", "recording_permission")
+# Single combined consent — see migration 019 / docs/plans/2026-05-24-consent-and-discovery-call-flows.md.
+# Legacy values (call_permission / recording_permission) are still valid in
+# the DB CHECK for backwards compatibility, but application code only writes
+# this value going forward.
+CONSENT_TYPE = "call_and_recording"
 
 
 async def record_consent(
     *,
     senior_id: str,
-    consent_type: str,
     granted: bool,
     conversation_id: str | None = None,
     senior_quote: str | None = None,
     captured_by: str = "donna_tool",
 ) -> dict:
-    """Insert a senior_consents row and re-roll up seniors.consent_status / callable.
+    """Insert a senior_consents row and roll up seniors.consent_status / callable.
 
-    Atomic: insert + roll-up run in a single transaction so a concurrent
-    consent capture cannot leave the seniors row in a stale state.
-
-    Roll-up:
-      - both latest rows granted=true  → consent_status='granted', callable=true
-      - any  latest row  granted=false → consent_status='declined', callable=false
-      - otherwise                       → consent_status='pending' (callable unchanged)
+    One row per consent call (consent_type='call_and_recording'). Atomic:
+    insert + roll-up run in a single transaction. The roll-up is direct:
+    granted=true  → consent_status='granted',  callable=true
+    granted=false → consent_status='declined', callable=false
     """
-    if consent_type not in CONSENT_TYPES:
-        raise ValueError(
-            f"invalid consent_type {consent_type!r}; must be one of {CONSENT_TYPES}"
-        )
-
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
@@ -231,67 +226,31 @@ async def record_consent(
                    RETURNING id, captured_at""",
                 senior_id,
                 conversation_id,
-                consent_type,
+                CONSENT_TYPE,
                 granted,
                 encrypt(senior_quote) if senior_quote else None,
                 captured_by,
             )
 
-            # Pull the latest row per consent_type and compute the roll-up.
-            latest_rows = await conn.fetch(
-                """SELECT DISTINCT ON (consent_type)
-                     consent_type, granted, captured_at
-                   FROM senior_consents
-                   WHERE senior_id = $1
-                   ORDER BY consent_type, captured_at DESC""",
+            status = "granted" if granted else "declined"
+            callable_flag = granted
+
+            await conn.execute(
+                """UPDATE seniors
+                   SET consent_status = $1,
+                       callable = $2,
+                       consent_date = $3,
+                       updated_at = NOW()
+                   WHERE id = $4""",
+                status,
+                callable_flag,
+                inserted["captured_at"],
                 senior_id,
             )
-            latest = {r["consent_type"]: r for r in latest_rows}
-
-            if any(not (latest.get(t) or {}).get("granted", True) for t in CONSENT_TYPES if t in latest):
-                # At least one explicit decline among the latest rows.
-                status = "declined"
-                callable_flag = False
-            elif all(t in latest and latest[t]["granted"] for t in CONSENT_TYPES):
-                status = "granted"
-                callable_flag = True
-            else:
-                status = "pending"
-                callable_flag = None  # leave callable unchanged
-
-            if callable_flag is None:
-                await conn.execute(
-                    """UPDATE seniors
-                       SET consent_status = $1,
-                           consent_date = (
-                             SELECT MAX(captured_at) FROM senior_consents
-                             WHERE senior_id = $2
-                           ),
-                           updated_at = NOW()
-                       WHERE id = $2""",
-                    status,
-                    senior_id,
-                )
-            else:
-                await conn.execute(
-                    """UPDATE seniors
-                       SET consent_status = $1,
-                           callable = $2,
-                           consent_date = (
-                             SELECT MAX(captured_at) FROM senior_consents
-                             WHERE senior_id = $3
-                           ),
-                           updated_at = NOW()
-                       WHERE id = $3""",
-                    status,
-                    callable_flag,
-                    senior_id,
-                )
 
     logger.info(
-        "Recorded consent senior={sid} type={ct} granted={g} → status={st}",
+        "Recorded consent senior={sid} granted={g} → status={st}",
         sid=str(senior_id)[:8],
-        ct=consent_type,
         g=granted,
         st=status,
     )
@@ -301,7 +260,7 @@ async def record_consent(
     # transaction so the audit row is durable even if the notification fails.
     if status == "declined":
         import asyncio as _asyncio
-        _asyncio.create_task(_notify_consent_declined(senior_id, consent_type, granted))
+        _asyncio.create_task(_notify_consent_declined(senior_id, granted))
 
     return {
         "id": str(inserted["id"]),
@@ -313,7 +272,6 @@ async def record_consent(
 
 async def _notify_consent_declined(
     senior_id: str,
-    consent_type: str,
     granted: bool,
 ) -> None:
     """POST to Node /api/notifications/trigger to email caregivers.
@@ -341,7 +299,7 @@ async def _notify_consent_declined(
         "event_type": "consent_declined",
         "senior_id": str(senior_id),
         "data": {
-            "consent_type": consent_type,
+            "consent_type": CONSENT_TYPE,
             "granted": granted,
         },
     }
@@ -375,11 +333,12 @@ async def get_consent_status(senior_id: str) -> dict:
     )
     if not row:
         return {"consent_status": "pending", "callable": True, "is_active": False}
-    latest = await query_many(
-        """SELECT DISTINCT ON (consent_type) consent_type, granted, captured_at
+    latest = await query_one(
+        """SELECT consent_type, granted, captured_at
            FROM senior_consents
            WHERE senior_id = $1
-           ORDER BY consent_type, captured_at DESC""",
+           ORDER BY captured_at DESC
+           LIMIT 1""",
         senior_id,
     )
     return {
@@ -387,5 +346,5 @@ async def get_consent_status(senior_id: str) -> dict:
         "consent_date": row["consent_date"],
         "callable": row["callable"],
         "is_active": row["is_active"],
-        "latest_per_type": {r["consent_type"]: dict(r) for r in latest},
+        "latest_consent": dict(latest) if latest else None,
     }

@@ -133,7 +133,7 @@ pipecat/
 │   │                    shared dispatch used by bot.py + tests/simulation/pipeline.py.
 │   │                    Subscriber: web_search, mark_reminder_acknowledged, create_reminder.
 │   │                    Onboarding: web_search only.
-│   │                    Consent: record_consent_response only (idempotent per consent_type).
+│   │                    Consent: record_consent_response only (single combined ask, idempotent per call).
 │   │                    Discovery: record_discovery_fact + web_search.
 │   └── gemini_tools.py  Gemini Live tool adapter
 │
