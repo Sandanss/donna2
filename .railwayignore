@@ -19,6 +19,10 @@ vitest.setup.js
 
 # Dev tooling
 scripts/
+# Exception: phase8-capacity-plan.js is imported at runtime by
+# services/phase8-autoscaler.js and routes/scale-operations.js, so it must
+# ship with the build. Other scripts/ files remain operator-only and excluded.
+!scripts/phase8-capacity-plan.js
 Makefile
 .nvmrc
 .claude/
