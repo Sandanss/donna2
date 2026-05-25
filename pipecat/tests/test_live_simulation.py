@@ -104,6 +104,8 @@ def _fresh_test_senior(template: TestSenior | None = None) -> TestSenior:
 
 async def _run_with_scenario_senior(scenario, *, run_post_call_processing=False):
     """Run a scenario against its own senior profile and always clean up."""
+    from db import close_pool
+
     senior = await seed_test_senior(_fresh_test_senior(scenario.senior))
     try:
         return await run_simulated_call(
@@ -113,6 +115,7 @@ async def _run_with_scenario_senior(scenario, *, run_post_call_processing=False)
         )
     finally:
         await cleanup_test_senior(senior.id)
+        await close_pool()
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +126,7 @@ async def _run_with_scenario_senior(scenario, *, run_post_call_processing=False)
 class TestWebSearch:
     """Tests that web search is triggered via the active tool path."""
 
-    @pytest.mark.asyncio(loop_scope="module")
+    @pytest.mark.asyncio
     async def test_web_search_triggered(self, test_senior: TestSenior):
         """Run the web_search_scenario and verify search activity.
 
@@ -173,7 +176,7 @@ class TestWebSearch:
 class TestMemoryAcrossCalls:
     """Tests that memories seeded in one call can be recalled in the next."""
 
-    @pytest.mark.asyncio(loop_scope="module")
+    @pytest.mark.asyncio
     async def test_memory_seed_then_recall(self, test_senior: TestSenior):
         """Two-call sequence: seed new facts, then verify recall.
 
@@ -252,7 +255,7 @@ class TestMemoryAcrossCalls:
 class TestReminderAcknowledgment:
     """Tests that everyday reminders are delivered and acknowledged."""
 
-    @pytest.mark.asyncio(loop_scope="module")
+    @pytest.mark.asyncio
     async def test_reminder_delivered_and_acknowledged(
         self, test_senior: TestSenior
     ):
@@ -312,7 +315,7 @@ class TestReminderAcknowledgment:
             f"Donna said: {donna_text[:500]}"
         )
 
-    @pytest.mark.asyncio(loop_scope="module")
+    @pytest.mark.asyncio
     async def test_multiple_reminders_brought_up_in_opening(
         self, test_senior: TestSenior
     ):
@@ -411,7 +414,7 @@ def _ack_values_match_reminder(ack_values: set[str], reminder: dict) -> bool:
 class TestCallMetrics:
     """Tests that latency metrics are captured for each turn."""
 
-    @pytest.mark.asyncio(loop_scope="module")
+    @pytest.mark.asyncio
     async def test_latency_recorded(self, test_senior: TestSenior):
         """Run a scenario and verify per-turn latency is recorded.
 
@@ -678,7 +681,7 @@ class TestDiscoveryCall:
 class TestAdditionalSituations:
     """Live-sim coverage for the expanded mock-call situation catalog."""
 
-    @pytest.mark.asyncio(loop_scope="module")
+    @pytest.mark.asyncio
     async def test_embedding_outage_degrades_gracefully(self):
         scenario = embedding_outage_scenario()
         result = await _run_with_scenario_senior(scenario)
@@ -687,7 +690,7 @@ class TestAdditionalSituations:
         assert len(result.turns) >= 2
         assert result.injected_memories == []
 
-    @pytest.mark.asyncio(loop_scope="module")
+    @pytest.mark.asyncio
     async def test_false_goodbye_does_not_end_immediately(self):
         scenario = false_goodbye_scenario()
         result = await _run_with_scenario_senior(scenario)
@@ -705,7 +708,7 @@ class TestAdditionalSituations:
             cognitive_confusion_scenario,
         ],
     )
-    @pytest.mark.asyncio(loop_scope="module")
+    @pytest.mark.asyncio
     async def test_behavioral_scenarios_complete_without_hanging(self, scenario_factory):
         scenario = scenario_factory()
         result = await _run_with_scenario_senior(scenario)
@@ -713,7 +716,7 @@ class TestAdditionalSituations:
         assert result.end_reason not in {"no_greeting", "timeout"}
         assert len(result.turns) >= 2
 
-    @pytest.mark.asyncio(loop_scope="module")
+    @pytest.mark.asyncio
     async def test_reminder_creation_invokes_tool(self):
         scenario = reminder_creation_scenario()
         result = await _run_with_scenario_senior(scenario)
@@ -722,7 +725,7 @@ class TestAdditionalSituations:
             f"Expected create_reminder tool call, got {result.tool_calls_made}"
         )
 
-    @pytest.mark.asyncio(loop_scope="module")
+    @pytest.mark.asyncio
     async def test_async_search_overlap_invokes_search(self):
         scenario = async_search_overlap_scenario()
         result = await _run_with_scenario_senior(scenario)

@@ -144,7 +144,7 @@ async def store(
 
     row = await query_one(
         f"""INSERT INTO memories ({owner_col}, type, content, content_encrypted, source, importance, embedding, metadata)
-           VALUES ($1, $2, $3, $4, $5, $6, $7::vector, $8)
+           VALUES ($1, $2, $3, $4, $5, $6, $7::vector, ($8::text)::json)
            RETURNING *""",
         owner_id,
         type_,
@@ -317,6 +317,7 @@ def format_grouped_memories(groups: dict[str, list[str]]) -> str:
         "event": "Recent events",
         "interest": "Interests",
         "routine": "Routines",
+        "concern": "Concerns",
         "fact": "Facts",
     }
     lines = []
