@@ -20,7 +20,7 @@ test.describe('Admin Reminders', () => {
 
     await page.locator('select').first().selectOption({ label: 'Martha Johnson' });
 
-    await page.getByPlaceholder('e.g. Water porch plants').fill('Evening walk reminder');
+    await page.getByLabel(/title/i).fill('Evening walk reminder');
 
     await page.locator('input[type="time"]').fill('18:00');
 
