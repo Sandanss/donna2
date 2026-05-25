@@ -10,12 +10,12 @@ import {
   buildLaneCapacityPlan,
   estimateAvailablePipecatCapacity,
   normalizeLanePressure,
-} from '../services/call-queue.js';
-import { readPipecatCapacityRegistry } from '../services/pipecat-capacity.js';
+} from './call-queue.js';
+import { readPipecatCapacityRegistry } from './pipecat-capacity.js';
 import {
   POST_CALL_JOB_STATUSES,
   POST_CALL_JOB_TYPES,
-} from '../services/post-call-jobs.js';
+} from './post-call-jobs.js';
 
 const DEFAULT_WINDOW_MINUTES = 15;
 const DEFAULT_WARMUP_MINUTES = 20;

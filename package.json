@@ -34,7 +34,7 @@
     "phase7:canary-report": "node scripts/phase7-canary-report.js",
     "phase7:canary-daily-report": "node scripts/phase7-canary-daily-report.js",
     "phase7:canary-rollback-check": "node scripts/phase7-canary-rollback-check.js",
-    "phase8:capacity-plan": "node scripts/phase8-capacity-plan.js",
+    "phase8:capacity-plan": "node services/phase8-capacity-plan.js",
     "phase8:autoscaler-once": "node scripts/run-phase8-autoscaler-once.js",
     "phi:sentinel": "node scripts/phi-sentinel-scan.js"
   },

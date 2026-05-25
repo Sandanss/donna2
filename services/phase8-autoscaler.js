@@ -1,4 +1,4 @@
-import { buildPhase8CapacityPlan } from '../scripts/phase8-capacity-plan.js';
+import { buildPhase8CapacityPlan } from './phase8-capacity-plan.js';
 import { writeAudit } from './audit.js';
 import { applyRailwayScale } from './railway-scaling.js';
 import { createLogger } from '../lib/logger.js';

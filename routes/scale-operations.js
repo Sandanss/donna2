@@ -3,7 +3,7 @@ import { requireAdmin } from '../middleware/auth.js';
 import { sendError } from '../lib/http-response.js';
 import { routeError } from './helpers.js';
 import { authToRole } from '../services/audit.js';
-import { buildPhase8CapacityPlan } from '../scripts/phase8-capacity-plan.js';
+import { buildPhase8CapacityPlan } from '../services/phase8-capacity-plan.js';
 import {
   applyOperatorScaleOverride,
   phase8PlanOptionsFromEnv,
