@@ -8,7 +8,11 @@ describe('call route security structure', () => {
   const source = fs.readFileSync(routePath, 'utf8');
 
   it('requires seniorId call initiation instead of client supplied phoneNumber', () => {
-    expect(source).toContain('const { seniorId, contextNotes } = req.body');
+    // Matches both the original `const { seniorId, contextNotes } = req.body`
+    // and the consent/discovery-era extended form that adds `callType:`. The
+    // security invariant is that seniorId comes from req.body and we never
+    // accept a client-supplied phone — additional fields are fine.
+    expect(source).toMatch(/const \{ seniorId, contextNotes(,[^}]*)? \} = req\.body/);
     expect(source).toContain('seniorService.getById(seniorId)');
     expect(source).not.toContain('const { phoneNumber } = req.body');
     expect(source).not.toContain('seniorService.findByPhone(phoneNumber)');
