@@ -78,6 +78,8 @@ class CallResult:
         end_reason: Human-readable reason the call ended (e.g. ``"goodbye"``,
             ``"max_turns"``, ``"timeout"``).
         post_call_completed: Whether post-call processing ran to completion.
+        conversation_id: DB conversation row created for the simulated call.
+        initial_donna_text: Donna's opening response before the first caller turn.
     """
 
     turns: list[dict] = field(default_factory=list)
@@ -89,6 +91,8 @@ class CallResult:
     total_duration_ms: float = 0.0
     end_reason: str = "unknown"
     post_call_completed: bool = False
+    conversation_id: str | None = None
+    initial_donna_text: str | None = None
 
 
 # ---------------------------------------------------------------------------

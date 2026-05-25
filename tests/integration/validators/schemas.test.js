@@ -349,7 +349,7 @@ describe('createReminderSchema', () => {
   it('accepts simple reminder with isActive', () => {
     const result = createReminderSchema.safeParse({
       seniorId: validUuid,
-      title: 'Take medication',
+      title: 'Water porch plants',
       isActive: true,
     });
     expect(result.success).toBe(true);
@@ -359,7 +359,7 @@ describe('createReminderSchema', () => {
   it('defaults isActive to true when not provided', () => {
     const result = createReminderSchema.safeParse({
       seniorId: validUuid,
-      title: 'Take medication',
+      title: 'Water porch plants',
     });
     expect(result.success).toBe(true);
     expect(result.data.isActive).toBe(true);
@@ -388,8 +388,8 @@ describe('createReminderSchema', () => {
   it('accepts recurring reminder with cronExpression', () => {
     const result = createReminderSchema.safeParse({
       seniorId: validUuid,
-      type: 'medication',
-      title: 'Blood pressure pill',
+      type: 'custom',
+      title: 'Water porch plants',
       isRecurring: true,
       cronExpression: '0 9 * * *',
     });
@@ -399,7 +399,7 @@ describe('createReminderSchema', () => {
   it('accepts recurring reminder without cronExpression', () => {
     const result = createReminderSchema.safeParse({
       seniorId: validUuid,
-      title: 'Blood pressure pill',
+      title: 'Water porch plants',
       isRecurring: true,
     });
     expect(result.success).toBe(true);
@@ -472,11 +472,11 @@ describe('createReminderSchema', () => {
   it('accepts description', () => {
     const result = createReminderSchema.safeParse({
       seniorId: validUuid,
-      title: 'Medication',
-      description: 'Take with breakfast',
+      title: 'Water porch plants',
+      description: 'After breakfast',
     });
     expect(result.success).toBe(true);
-    expect(result.data.description).toBe('Take with breakfast');
+    expect(result.data.description).toBe('After breakfast');
   });
 
   it('accepts scheduledTime as ISO string', () => {
@@ -662,7 +662,7 @@ describe('onboardingSchema', () => {
   it('accepts reminders as string array', () => {
     const result = onboardingSchema.safeParse({
       ...validPayload,
-      reminders: ['Take medication', 'Doctor appointment'],
+      reminders: ['Water porch plants', 'Call Eleanor'],
     });
     expect(result.success).toBe(true);
   });
@@ -826,7 +826,7 @@ describe('createSeniorSchema', () => {
       state: 'TX',
       zipCode: '78701',
       interests: ['gardening', 'baking'],
-      medicalNotes: 'Takes blood pressure medication',
+      profileNotes: 'Prefers short morning check-ins',
       isActive: true,
     });
     expect(result.success).toBe(true);

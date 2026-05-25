@@ -32,7 +32,7 @@ def _build_gemini_tools(session_state: dict) -> list[dict]:
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "What to search for (e.g., 'gardening', 'grandson birthday', 'medication')",
+                        "description": "What to search for (e.g., 'gardening', 'grandson birthday', 'local events')",
                     }
                 },
                 "required": ["query"],

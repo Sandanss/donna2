@@ -63,7 +63,7 @@ function literalSqlOf(query) {
 // catches output-side leaks. The columns below would only appear if a
 // regression added explicit raw-PHI selects.
 const FORBIDDEN_SQL_COLUMN_REGEX =
-  /\bSELECT[\s\S]{0,800}?\b(senior_name|caller_name|first_name|last_name|phone|phone_number|transcript|transcript_text|reminder_title|reminder_description|caregiver_note|medical_notes|note_text)\b/i;
+  /\bSELECT[\s\S]{0,800}?\b(senior_name|caller_name|first_name|last_name|phone|phone_number|transcript|transcript_text|reminder_title|reminder_description|caregiver_note|profile_notes|note_text)\b/i;
 
 // PHI decoys planted in EXTRA columns the cohortBreakdown row carries.
 // These are not in the script's SELECT list — so the cohortBreakdown SQL
@@ -130,7 +130,7 @@ function phiDecoys() {
     reminder_title: PHI_SENTINELS.reminderTitle,
     reminder_description: PHI_SENTINELS.reminderDescription,
     caregiver_note: PHI_SENTINELS.caregiverNote,
-    medical_notes: PHI_SENTINELS.medicalNote,
+    profile_notes: PHI_SENTINELS.medicalNote,
   };
 }
 

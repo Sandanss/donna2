@@ -9,8 +9,8 @@ export const seniors = pgTable('seniors', {
   interests: text('interests').array(),
   familyInfo: json('family_info'),
   familyInfoEncrypted: text('family_info_encrypted'),
-  medicalNotes: text('medical_notes'),
-  medicalNotesEncrypted: text('medical_notes_encrypted'),
+  profileNotes: text('profile_notes'),
+  profileNotesEncrypted: text('profile_notes_encrypted'),
   preferredCallTimes: json('preferred_call_times'),
   preferredCallTimesEncrypted: text('preferred_call_times_encrypted'),
   isActive: boolean('is_active').default(true),
@@ -92,7 +92,7 @@ export const memories = pgTable('memories', {
 export const reminders = pgTable('reminders', {
   id: uuid('id').defaultRandom().primaryKey(),
   seniorId: uuid('senior_id').references(() => seniors.id),
-  type: varchar('type', { length: 50 }), // medication, appointment, custom
+  type: varchar('type', { length: 50 }), // appointment, custom, wellness, social
   title: varchar('title', { length: 255 }).notNull(),
   titleEncrypted: text('title_encrypted'),
   description: text('description'),

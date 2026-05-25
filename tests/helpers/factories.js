@@ -24,7 +24,7 @@ export const createSenior = (overrides = {}) => ({
   family: {
     daughter: 'Test Daughter',
   },
-  medicalNotes: null,
+  profileNotes: null,
   isActive: true,
   createdAt: new Date(),
   updatedAt: new Date(),

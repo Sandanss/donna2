@@ -26,7 +26,7 @@ def _make_session_state(**overrides):
         "memory_context": "Tier 1: Has arthritis in hands",
         "news_context": None,
         "greeting": "Good morning, Margaret!",
-        "reminder_prompt": "Remind Margaret to take her blood pressure medication at 2pm.",
+        "reminder_prompt": "Remind Margaret to water the porch plants at 2pm.",
         "reminder_delivery": None,
         "reminders_delivered": set(),
         "conversation_id": "conv-1",
@@ -155,13 +155,13 @@ class TestReminderContext:
     def test_includes_reminder_prompt(self):
         state = _make_session_state()
         ctx = _build_reminder_context(state)
-        assert "blood pressure" in ctx
+        assert "porch plants" in ctx
 
     def test_delivered_reminders_shown(self):
-        state = _make_session_state(reminders_delivered={"Take Lisinopril"})
+        state = _make_session_state(reminders_delivered={"Water the porch plants"})
         ctx = _build_reminder_context(state)
         assert "ALREADY DELIVERED" in ctx
-        assert "Lisinopril" in ctx
+        assert "porch plants" in ctx
 
     def test_empty_when_no_reminders(self):
         state = _make_session_state(reminder_prompt=None)
@@ -340,7 +340,7 @@ class TestReminderNode:
         tools = make_flows_tools(state)
         node = build_reminder_node(state, tools)
         task_content = node["task_messages"][0]["content"]
-        assert "blood pressure" in task_content
+        assert "porch plants" in task_content
 
     def test_uses_append_strategy(self):
         state = _make_session_state()
@@ -385,7 +385,7 @@ class TestReminderNode:
 class TestConditionalRouting:
     def test_routes_to_reminder_when_reminders_pending(self):
         state = _make_session_state(
-            reminder_prompt="Take blood pressure medication at 2pm.",
+            reminder_prompt="Water the porch plants at 2pm.",
             reminders_delivered=set(),
         )
         tools = make_flows_tools(state)
@@ -403,8 +403,8 @@ class TestConditionalRouting:
 
     def test_routes_to_main_when_reminders_already_delivered(self):
         state = _make_session_state(
-            reminder_prompt="Take blood pressure medication at 2pm.",
-            reminders_delivered={"Take blood pressure medication"},
+            reminder_prompt="Water the porch plants at 2pm.",
+            reminders_delivered={"Water the porch plants"},
         )
         tools = make_flows_tools(state)
         node = build_initial_node(state, tools)
@@ -429,7 +429,7 @@ class TestInitialNode:
 
     def test_returns_reminder_with_pending_reminders(self):
         state = _make_session_state(
-            reminder_prompt="Take medication",
+            reminder_prompt="Water the porch plants",
             reminders_delivered=set(),
         )
         tools = make_flows_tools(state)

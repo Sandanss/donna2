@@ -11,8 +11,8 @@ test.describe('Admin Reminders', () => {
   test('reminders list loads', async ({ page }) => {
     await page.goto('/reminders');
 
-    await expect(page.getByText('Take morning pills')).toBeVisible();
-    await expect(page.getByText('Doctor appointment')).toBeVisible();
+    await expect(page.getByText('Water porch plants')).toBeVisible();
+    await expect(page.getByText('Bridge club')).toBeVisible();
   });
 
   test('create a new reminder', async ({ page }) => {
@@ -20,7 +20,7 @@ test.describe('Admin Reminders', () => {
 
     await page.locator('select').first().selectOption({ label: 'Martha Johnson' });
 
-    await page.getByPlaceholder('e.g. Take morning pills').fill('Evening walk reminder');
+    await page.getByPlaceholder('e.g. Water porch plants').fill('Evening walk reminder');
 
     await page.locator('input[type="time"]').fill('18:00');
 
