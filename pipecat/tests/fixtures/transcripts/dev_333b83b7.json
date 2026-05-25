@@ -1,0 +1,238 @@
+{
+  "fixture_version": 1,
+  "source": "dev",
+  "source_conversation_id": "333b83b7-29f3-4efc-84f0-accf4f16a4dc",
+  "source_duration_seconds": 277,
+  "source_started_at": "2026-05-25T20:58:12.557576",
+  "senior_context": {
+    "name": "SENIOR_NAME",
+    "timezone": "America/Chicago",
+    "family": []
+  },
+  "transcript": [
+    {
+      "role": "user",
+      "content": "Hello?",
+      "sequence": 0,
+      "timestamp": "2026-05-25T20:58:22.609403+00:00",
+      "timestamp_offset_ms": 561
+    },
+    {
+      "role": "assistant",
+      "content": "Good afternoon, SENIOR_NAME! Donna here. Tell me, how's your day going?",
+      "sequence": 1,
+      "timestamp": "2026-05-25T20:58:24.634662+00:00",
+      "timestamp_offset_ms": 2586
+    },
+    {
+      "role": "user",
+      "content": "It's going well. I",
+      "sequence": 2,
+      "timestamp": "2026-05-25T20:58:33.676434+00:00",
+      "timestamp_offset_ms": 11628
+    },
+    {
+      "role": "user",
+      "content": "I've been doing a ton of chores, some outside work, and I'm finally just",
+      "sequence": 3,
+      "timestamp": "2026-05-25T20:58:38.667991+00:00",
+      "timestamp_offset_ms": 16620
+    },
+    {
+      "role": "user",
+      "content": "getting to focus on",
+      "sequence": 4,
+      "timestamp": "2026-05-25T20:58:39.409231+00:00",
+      "timestamp_offset_ms": 17361
+    },
+    {
+      "role": "user",
+      "content": "on some coding work. How are you?",
+      "sequence": 5,
+      "timestamp": "2026-05-25T20:58:42.665980+00:00",
+      "timestamp_offset_ms": 20618
+    },
+    {
+      "role": "assistant",
+      "content": "That sounds like a full day, SENIOR_NAME \u2014 you've been keeping busy! I'm doing well, thanks for asking. So you're getting into some coding work now \u2014 is that something you enjoy, or more of a task you've been putting off?",
+      "sequence": 6,
+      "timestamp": "2026-05-25T20:58:44.834599+00:00",
+      "timestamp_offset_ms": 22786
+    },
+    {
+      "role": "user",
+      "content": "Yeah. It's something I enjoy.",
+      "sequence": 7,
+      "timestamp": "2026-05-25T20:59:06.011872+00:00",
+      "timestamp_offset_ms": 43964
+    },
+    {
+      "role": "user",
+      "content": "And there's a lot of work to do. But, yeah, I'm excited to finally be able to focus on it. And",
+      "sequence": 8,
+      "timestamp": "2026-05-25T20:59:08.500271+00:00",
+      "timestamp_offset_ms": 46452
+    },
+    {
+      "role": "user",
+      "content": "was wondering, do you know who's playing in the",
+      "sequence": 9,
+      "timestamp": "2026-05-25T20:59:10.706356+00:00",
+      "timestamp_offset_ms": 48658
+    },
+    {
+      "role": "user",
+      "content": "who's what teams are still in the NBA playoffs? Like,",
+      "sequence": 10,
+      "timestamp": "2026-05-25T20:59:14.860196+00:00",
+      "timestamp_offset_ms": 52812
+    },
+    {
+      "role": "user",
+      "content": "in in still playing?",
+      "sequence": 11,
+      "timestamp": "2026-05-25T20:59:16.626775+00:00",
+      "timestamp_offset_ms": 54579
+    },
+    {
+      "role": "assistant",
+      "content": "PERSON_3 me find that out for you.",
+      "sequence": 12,
+      "timestamp": "2026-05-25T20:59:18.756056+00:00",
+      "timestamp_offset_ms": 56708
+    },
+    {
+      "role": "assistant",
+      "content": "PERSON_3 me dig a little deeper for you \u2014 I want to get you the most current teams still in the race.",
+      "sequence": 13,
+      "timestamp": "2026-05-25T20:59:22.319521+00:00",
+      "timestamp_offset_ms": 60271
+    },
+    {
+      "role": "assistant",
+      "content": "Great question! So right now we're in the Conference PERSON_2. In the East, the Knicks are absolutely dominating the Cavaliers \u2014 they're up three to nothing, pretty much one win away from the PERSON_2. Out West, it's much closer \u2014 the Thunder and PERSON_1 are tied two to two, so that one's going to come down to the wire. PERSON_4 you rooting for any of those teams?",
+      "sequence": 14,
+      "timestamp": "2026-05-25T20:59:43.222517+00:00",
+      "timestamp_offset_ms": 81174
+    },
+    {
+      "role": "user",
+      "content": "Yeah. I live in Austin, so I'm rooting for the PERSON_1. It would be really exciting to see them win.",
+      "sequence": 15,
+      "timestamp": "2026-05-25T21:00:12.517068+00:00",
+      "timestamp_offset_ms": 110469
+    },
+    {
+      "role": "assistant",
+      "content": "Oh that's perfect \u2014 being right there in Texas, you've got the PERSON_1 in your backyard! And with the series tied up two to two, it really could go either way. That would be something special to see them make a run to the PERSON_2. PERSON_4 you planning to catch any of the games coming up?",
+      "sequence": 16,
+      "timestamp": "2026-05-25T21:00:15.117625+00:00",
+      "timestamp_offset_ms": 113069
+    },
+    {
+      "role": "user",
+      "content": "You know, I might go to the Thursday again. The tickets are a little",
+      "sequence": 17,
+      "timestamp": "2026-05-25T21:00:39.633901+00:00",
+      "timestamp_offset_ms": 137586
+    },
+    {
+      "role": "user",
+      "content": "expensive, and I might be able to convince a friend or two to go.",
+      "sequence": 18,
+      "timestamp": "2026-05-25T21:00:40.607152+00:00",
+      "timestamp_offset_ms": 138559
+    },
+    {
+      "role": "assistant",
+      "content": "That sounds like a fun plan \u2014 heading out to see the PERSON_1 with friends would make it even better. Thursday night could be crucial too, depending on how tonight and tomorrow go. Do you have friends who are big basketball fans like you are?",
+      "sequence": 19,
+      "timestamp": "2026-05-25T21:00:43.083217+00:00",
+      "timestamp_offset_ms": 141035
+    },
+    {
+      "role": "user",
+      "content": "Not too much, but, you know, it's a big",
+      "sequence": 20,
+      "timestamp": "2026-05-25T21:01:05.065058+00:00",
+      "timestamp_offset_ms": 163017
+    },
+    {
+      "role": "user",
+      "content": "sporting event. It's like the PERSON_5 PERSON_6. Anyone would be willing to go to the PERSON_5 PERSON_6.",
+      "sequence": 21,
+      "timestamp": "2026-05-25T21:01:08.019394+00:00",
+      "timestamp_offset_ms": 165971
+    },
+    {
+      "role": "assistant",
+      "content": "Absolutely \u2014 that's the energy right there! The playoffs are that special moment where everyone wants to be part of it, you know? It sounds like you've got some good people around you who'd jump at the chance. How are things going with your girlfriend these days, by the way?",
+      "sequence": 22,
+      "timestamp": "2026-05-25T21:01:10.553431+00:00",
+      "timestamp_offset_ms": 168505
+    },
+    {
+      "role": "user",
+      "content": "They're doing really well. Thanks for remembering.",
+      "sequence": 23,
+      "timestamp": "2026-05-25T21:01:31.882063+00:00",
+      "timestamp_offset_ms": 189834
+    },
+    {
+      "role": "user",
+      "content": "She just had surgery, and she's staying at my house still. And",
+      "sequence": 24,
+      "timestamp": "2026-05-25T21:01:37.233426+00:00",
+      "timestamp_offset_ms": 195185
+    },
+    {
+      "role": "user",
+      "content": "we have gotten to spend a lot of really great quality time together.",
+      "sequence": 25,
+      "timestamp": "2026-05-25T21:01:39.393486+00:00",
+      "timestamp_offset_ms": 197345
+    },
+    {
+      "role": "assistant",
+      "content": "Oh, I'm so glad to hear she's doing well and that she's recovering at your place. It sounds like you two are making the most of this time together \u2014 that's really sweet, SENIOR_NAME. How is she feeling overall with the recovery going?",
+      "sequence": 26,
+      "timestamp": "2026-05-25T21:01:41.734447+00:00",
+      "timestamp_offset_ms": 199686
+    },
+    {
+      "role": "user",
+      "content": "Great. But, you know, Donna, I should really go now. It's been great talking to you.",
+      "sequence": 27,
+      "timestamp": "2026-05-25T21:02:12.619856+00:00",
+      "timestamp_offset_ms": 230572
+    },
+    {
+      "role": "user",
+      "content": "Talk to you later, Donna.",
+      "sequence": 28,
+      "timestamp": "2026-05-25T21:02:24.982541+00:00",
+      "timestamp_offset_ms": 242934
+    },
+    {
+      "role": "assistant",
+      "content": "Take care, SENIOR_NAME \u2014 enjoy that time with your girlfriend, and I hope the PERSON_1 pull off something special on Thursday. It's been wonderful talking with you today!",
+      "sequence": 29,
+      "timestamp": "2026-05-25T21:02:27.536812+00:00",
+      "timestamp_offset_ms": 245489
+    }
+  ],
+  "expected_traits": {
+    "sentiment_enum_member": "positive",
+    "engagement_min": 7,
+    "engagement_max": 10,
+    "summary_min_chars": 40,
+    "summary_max_chars": 600,
+    "topics_min_count": 0,
+    "topics_max_count": 8,
+    "caregiver_sms_max_chars": 280,
+    "concerns_must_be_empty": true,
+    "follow_up_suggestions_must_be_empty": true,
+    "recommended_caregiver_action_must_be_empty_string": true
+  },
+  "name_map_size": 9
+}

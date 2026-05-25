@@ -1,0 +1,175 @@
+{
+  "fixture_version": 1,
+  "source": "dev",
+  "source_conversation_id": "6481d0bf-ab89-41fd-8889-3f48d5f4eea5",
+  "source_duration_seconds": 204,
+  "source_started_at": "2026-05-25T04:56:33.547350",
+  "senior_context": {
+    "name": "SENIOR_NAME",
+    "timezone": "America/Chicago",
+    "family": []
+  },
+  "transcript": [
+    {
+      "role": "user",
+      "content": "Call has been forwarded to voicemail.",
+      "sequence": 0,
+      "timestamp": "2026-05-25T04:56:37.984098+00:00",
+      "timestamp_offset_ms": 2090
+    },
+    {
+      "role": "user",
+      "content": "The",
+      "sequence": 1,
+      "timestamp": "2026-05-25T04:56:38.760177+00:00",
+      "timestamp_offset_ms": 2866
+    },
+    {
+      "role": "assistant",
+      "content": "SENIOR_NAME, good evening! It's Donna. PERSON_3 you had a nice day?",
+      "sequence": 2,
+      "timestamp": "2026-05-25T04:56:39.917956+00:00",
+      "timestamp_offset_ms": 4023
+    },
+    {
+      "role": "user",
+      "content": "Hey, Donna. I've I've had a really great day. How are you?",
+      "sequence": 3,
+      "timestamp": "2026-05-25T04:56:48.337073+00:00",
+      "timestamp_offset_ms": 12443
+    },
+    {
+      "role": "assistant",
+      "content": "I'm doing well, thank you for asking! I'm glad you've had a really great day. Sounds like things are going your way right now \u2014 what made today particularly good for you?",
+      "sequence": 4,
+      "timestamp": "2026-05-25T04:56:50.547307+00:00",
+      "timestamp_offset_ms": 14653
+    },
+    {
+      "role": "user",
+      "content": "You know, I had a really great day with my girlfriend. We went to this nice",
+      "sequence": 5,
+      "timestamp": "2026-05-25T04:57:07.717839+00:00",
+      "timestamp_offset_ms": 31823
+    },
+    {
+      "role": "user",
+      "content": "happy hour, and she gave me brownies, and she'll be full of my clothes.",
+      "sequence": 6,
+      "timestamp": "2026-05-25T04:57:12.335556+00:00",
+      "timestamp_offset_ms": 36441
+    },
+    {
+      "role": "user",
+      "content": "Now we're gonna watch this incredible TV show and cuddle and be super cozy and happy.",
+      "sequence": 7,
+      "timestamp": "2026-05-25T04:57:15.549241+00:00",
+      "timestamp_offset_ms": 39655
+    },
+    {
+      "role": "user",
+      "content": "You know?",
+      "sequence": 8,
+      "timestamp": "2026-05-25T04:57:16.009320+00:00",
+      "timestamp_offset_ms": 40115
+    },
+    {
+      "role": "assistant",
+      "content": "That sounds absolutely wonderful, SENIOR_NAME \u2014 a happy hour with your girlfriend, homemade brownies, and now cozying up together to watch TV. You two really know how to make an evening special. What show are you watching tonight?",
+      "sequence": 9,
+      "timestamp": "2026-05-25T04:57:18.400988+00:00",
+      "timestamp_offset_ms": 42507
+    },
+    {
+      "role": "user",
+      "content": "You know, I we're gonna watch this show called PERSON_1 and PERSON_4.",
+      "sequence": 10,
+      "timestamp": "2026-05-25T04:57:42.524555+00:00",
+      "timestamp_offset_ms": 66630
+    },
+    {
+      "role": "user",
+      "content": "PERSON_3 you seen it? It's on PERSON_2 TV. Can you tell me anything about it?",
+      "sequence": 11,
+      "timestamp": "2026-05-25T04:57:45.246523+00:00",
+      "timestamp_offset_ms": 69352
+    },
+    {
+      "role": "assistant",
+      "content": "I haven't heard of that one on PERSON_2 TV \u2014 let me find out a bit about it for you so I can tell you what it's about.",
+      "sequence": 12,
+      "timestamp": "2026-05-25T04:57:50.146348+00:00",
+      "timestamp_offset_ms": 74252
+    },
+    {
+      "role": "assistant",
+      "content": "It sounds like there's a show called \"PERSON_5 PERSON_1 & PERSON_6\" that's really popular on PERSON_2 TV right now with some great actors in it. But I want to make sure we're talking about the same show \u2014 is it possible that's what you meant, or is \"PERSON_1 and PERSON_4\" a different title? Either way, it sounds like a perfect night in with your girlfriend!",
+      "sequence": 13,
+      "timestamp": "2026-05-25T04:57:59.728747+00:00",
+      "timestamp_offset_ms": 83834
+    },
+    {
+      "role": "user",
+      "content": "No. You're right. It's actually friends and neighbors, like you said.",
+      "sequence": 14,
+      "timestamp": "2026-05-25T04:58:25.457402+00:00",
+      "timestamp_offset_ms": 109563
+    },
+    {
+      "role": "assistant",
+      "content": "Oh perfect, so you're watching \"PERSON_5 PERSON_1 & PERSON_6\" \u2014 that's a really well-regarded show on PERSON_2 TV. It sounds like you two picked a great one for tonight. How are you feeling about everything right now, with the evening you've had?",
+      "sequence": 15,
+      "timestamp": "2026-05-25T04:58:27.988821+00:00",
+      "timestamp_offset_ms": 112094
+    },
+    {
+      "role": "user",
+      "content": "You know, really good. So I'm excited to cuddle and get ready, honestly. I'm I'm",
+      "sequence": 16,
+      "timestamp": "2026-05-25T04:58:53.149194+00:00",
+      "timestamp_offset_ms": 137255
+    },
+    {
+      "role": "user",
+      "content": "been a long week.",
+      "sequence": 17,
+      "timestamp": "2026-05-25T04:58:54.357092+00:00",
+      "timestamp_offset_ms": 138463
+    },
+    {
+      "role": "assistant",
+      "content": "That's wonderful, SENIOR_NAME \u2014 sounds like you really deserve this cozy evening after a long week. You and your girlfriend have built something really special there. I'm so glad you're feeling good and taking time to enjoy each other like this.",
+      "sequence": 18,
+      "timestamp": "2026-05-25T04:59:03.052735+00:00",
+      "timestamp_offset_ms": 147158
+    },
+    {
+      "role": "user",
+      "content": "It is. But, you know, Donna, I better go and enjoy that with her. It's great talking to you.",
+      "sequence": 19,
+      "timestamp": "2026-05-25T04:59:25.179481+00:00",
+      "timestamp_offset_ms": 169285
+    },
+    {
+      "role": "assistant",
+      "content": "That's perfect, SENIOR_NAME \u2014 enjoy every minute of it with her. It's been so good hearing from you tonight, and I'm really glad you're having such a wonderful evening. Take care!",
+      "sequence": 20,
+      "timestamp": "2026-05-25T04:59:27.458630+00:00",
+      "timestamp_offset_ms": 171564
+    }
+  ],
+  "expected_traits": {
+    "sentiment_enum_member": "positive",
+    "engagement_min": 6,
+    "engagement_max": 10,
+    "summary_min_chars": 40,
+    "summary_max_chars": 600,
+    "topics_min_count": 0,
+    "topics_max_count": 8,
+    "caregiver_sms_max_chars": 280,
+    "concerns_must_be_empty": true,
+    "follow_up_suggestions_must_be_empty": true,
+    "recommended_caregiver_action_must_be_empty_string": true
+  },
+  "name_map_size": 9
+}

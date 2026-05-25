@@ -27,12 +27,33 @@ _breaker = CircuitBreaker(
 )
 
 
-# Default to the same model used for live calls (config.anthropic_model). Can
-# be overridden via env var for analysis-only experiments.
-ANALYSIS_MODEL = os.environ.get(
-    "CALL_ANALYSIS_MODEL",
-    os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001"),
-)
+# Default to the same model used for live calls (config.anthropic_model).
+# Override via CALL_ANALYSIS_MODEL for Anthropic-model experiments.
+#
+# Defensive: ignore non-Claude values in CALL_ANALYSIS_MODEL. Railway
+# environments may still carry legacy "gemini-*" values from before this
+# code switched providers (2026-05-25). If we respected those, the
+# Anthropic SDK returns a 404 and every post-call analysis silently falls
+# back to the default no-op summary. Falling back to the safe default is
+# better than letting an entire environment regress.
+def _resolve_analysis_model() -> str:
+    override = (os.environ.get("CALL_ANALYSIS_MODEL") or "").strip()
+    if override:
+        if override.startswith("claude-") or override.startswith("anthropic/"):
+            return override
+        logger.warning(
+            "CALL_ANALYSIS_MODEL={v} is not a Claude model — ignoring and "
+            "falling back to ANTHROPIC_MODEL / default. Update or remove the "
+            "env var to suppress this warning.",
+            v=override,
+        )
+    anthropic_default = (os.environ.get("ANTHROPIC_MODEL") or "").strip()
+    if anthropic_default.startswith("claude-"):
+        return anthropic_default
+    return "claude-haiku-4-5-20251001"
+
+
+ANALYSIS_MODEL = _resolve_analysis_model()
 ANALYSIS_MAX_TOKENS = int(os.environ.get("CALL_ANALYSIS_MAX_TOKENS", "2048"))
 
 # Schema for Claude's forced tool-use. The "tool" is named save_call_analysis;
