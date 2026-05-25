@@ -990,9 +990,34 @@ def _build_consent_caregiver_intro(session_state: dict) -> str:
 
 
 def _make_transition_to_consent_closing(session_state: dict):
-    """Create transition function: consent → consent_closing."""
+    """Create transition function: consent → consent_closing.
+
+    Belt-and-braces guard: refuse to transition if record_consent_response
+    hasn't been called yet. Without this, a prompt slip-up (warm ack before
+    tool call) can leak into the Quick Observer's goodbye detection and end
+    the call before the consent row lands — losing the senior's answer.
+    """
 
     async def transition_to_consent_closing(args: dict, flow_manager) -> tuple[dict, NodeConfig]:
+        if not session_state.get("_consent_captured"):
+            logger.warning(
+                "transition_to_consent_closing called before record_consent_response — "
+                "rejecting; the consent answer must be captured first."
+            )
+            return (
+                {
+                    "status": "error",
+                    "result": (
+                        "You must call record_consent_response with the senior's "
+                        "yes/no answer BEFORE transitioning to the closing. The "
+                        "consent answer hasn't been captured yet — call "
+                        "record_consent_response now, then call this transition."
+                    ),
+                },
+                # Stay on the consent node so Donna can correct course.
+                build_consent_node(session_state, session_state.get("_flow_tools") or {}),
+            )
+
         logger.info("Transitioning: consent → consent_closing")
         _record_phase_transition(session_state, "consent_closing")
         return (
@@ -1004,11 +1029,15 @@ def _make_transition_to_consent_closing(session_state: dict):
 
 
 def build_consent_node(session_state: dict, flows_tools: dict) -> NodeConfig:
-    """Build the consent node — capture call + recording permission.
+    """Build the consent node — capture combined call+recording permission.
 
     Stripped flow: no web search, no memory, no caregiver notes.
     Tools: record_consent_response + transition_to_consent_closing.
     """
+    # Stash the tool set so the transition handler can rebuild this node if
+    # it has to reject a premature transition (consent not captured yet).
+    session_state["_flow_tools"] = flows_tools
+
     senior = session_state.get("senior") or {}
     first_name = (senior.get("name") or "").split(" ")[0] or "there"
     caregiver_intro = _build_consent_caregiver_intro(session_state)
@@ -1024,9 +1053,10 @@ def build_consent_node(session_state: dict, flows_tools: dict) -> NodeConfig:
     functions.append(FlowsFunctionSchema(
         name="transition_to_consent_closing",
         description=(
-            "Call this once both consents have been captured (or the senior "
-            "declined call_permission, which short-circuits the recording ask). "
-            "Moves into the warm goodbye phase."
+            "Call ONLY AFTER record_consent_response has been called with the "
+            "senior's yes/no answer. Moves into the warm goodbye phase. The "
+            "closing node speaks the goodbye, so do not say goodbye yourself "
+            "before calling this — just call it."
         ),
         properties={},
         required=[],
