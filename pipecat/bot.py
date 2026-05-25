@@ -38,7 +38,7 @@ from pipecat_flows import FlowManager
 
 from config import get_settings, is_production_environment, settings
 from flows.nodes import build_initial_node
-from flows.tools import make_flows_tools
+from flows.tools import select_flows_tools
 from lib.telnyx_audio import TelnyxAudioProfileError, resolve_telnyx_audio_profile
 from processors.conversation_director import ConversationDirectorProcessor
 from processors.conversation_tracker import ConversationState, ConversationTrackerProcessor
@@ -799,20 +799,10 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
     # -------------------------------------------------------------------------
     # Flow Manager (call phase management)
     # -------------------------------------------------------------------------
-    # Per-call-type tool factory. Register new flows (consent, discovery, …)
-    # here instead of growing the if-chain. Default is the subscriber stack.
-    call_type = session_state.get("call_type", "")
-    if call_type == "onboarding":
-        from flows.tools import make_onboarding_flows_tools
-        flows_tools = make_onboarding_flows_tools(session_state)
-    elif call_type == "consent":
-        from flows.tools import make_consent_flows_tools
-        flows_tools = make_consent_flows_tools(session_state)
-    elif call_type == "discovery":
-        from flows.tools import make_discovery_flows_tools
-        flows_tools = make_discovery_flows_tools(session_state)
-    else:
-        flows_tools = make_flows_tools(session_state)
+    # Per-call-type tool factory dispatch lives in flows.tools.select_flows_tools
+    # so bot.py and the live-sim pipeline (tests/simulation/pipeline.py) stay
+    # in lockstep. Register new call types in _CALL_TYPE_TOOL_FACTORIES there.
+    flows_tools = select_flows_tools(session_state)
     initial_node = build_initial_node(session_state, flows_tools)
 
     flow_manager = FlowManager(

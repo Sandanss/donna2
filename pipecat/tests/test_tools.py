@@ -366,3 +366,32 @@ class TestDiscoveryTool:
             "content": "Takes lisinopril",
         })
         assert res["status"] == "error"
+
+
+class TestSelectFlowsTools:
+    """Dispatch helper used by both bot.py and the live-sim pipeline."""
+
+    def test_defaults_to_subscriber_stack(self):
+        from flows.tools import select_flows_tools
+        tools = select_flows_tools({"senior_id": "sen-1"})
+        assert set(tools) == {"web_search", "mark_reminder_acknowledged", "create_reminder"}
+
+    def test_unknown_call_type_falls_back_to_subscriber(self):
+        from flows.tools import select_flows_tools
+        tools = select_flows_tools({"senior_id": "sen-1", "call_type": "future_unknown_type"})
+        assert "web_search" in tools and "create_reminder" in tools
+
+    def test_onboarding(self):
+        from flows.tools import select_flows_tools
+        tools = select_flows_tools({"call_type": "onboarding"})
+        assert list(tools) == ["web_search"]
+
+    def test_consent(self):
+        from flows.tools import select_flows_tools
+        tools = select_flows_tools({"call_type": "consent", "senior_id": "sen-1"})
+        assert list(tools) == ["record_consent_response"]
+
+    def test_discovery(self):
+        from flows.tools import select_flows_tools
+        tools = select_flows_tools({"call_type": "discovery", "senior_id": "sen-1"})
+        assert set(tools) == {"record_discovery_fact", "web_search"}

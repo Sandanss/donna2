@@ -1030,3 +1030,25 @@ def make_discovery_flows_tools(session_state: dict) -> dict[str, FlowsFunctionSc
     )
 
     return schemas
+
+
+# ---------------------------------------------------------------------------
+# Tool factory dispatch
+# ---------------------------------------------------------------------------
+
+# call_type → factory function. Used by bot.py (real calls) and by the
+# live-sim pipeline (tests/simulation/pipeline.py) so mock-call scenarios
+# expose the same tool set Donna would see on a real call. Register new
+# flows here when adding a call type with its own tool set.
+_CALL_TYPE_TOOL_FACTORIES = {
+    "onboarding": make_onboarding_flows_tools,
+    "consent": make_consent_flows_tools,
+    "discovery": make_discovery_flows_tools,
+}
+
+
+def select_flows_tools(session_state: dict) -> dict[str, FlowsFunctionSchema]:
+    """Pick the tool factory for this call_type. Defaults to the subscriber stack."""
+    call_type = (session_state or {}).get("call_type", "")
+    factory = _CALL_TYPE_TOOL_FACTORIES.get(call_type, make_flows_tools)
+    return factory(session_state)

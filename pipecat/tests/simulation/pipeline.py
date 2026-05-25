@@ -28,7 +28,7 @@ from pipecat.services.anthropic.llm import AnthropicLLMService
 from pipecat_flows import FlowManager
 
 from flows.nodes import build_initial_node
-from flows.tools import make_flows_tools
+from flows.tools import select_flows_tools
 from processors.conversation_director import ConversationDirectorProcessor
 from processors.conversation_tracker import ConversationState, ConversationTrackerProcessor
 from processors.guidance_stripper import GuidanceStripperProcessor
@@ -227,7 +227,10 @@ def build_live_sim_pipeline(session_state: dict) -> LiveSimComponents:
     # -----------------------------------------------------------------
     # Flow Manager (call phase management)
     # -----------------------------------------------------------------
-    flows_tools = make_flows_tools(session_state)
+    # Match bot.py's call_type → tool factory dispatch so mock-call scenarios
+    # for consent / discovery / onboarding expose the same tool set Donna
+    # would see on a real call.
+    flows_tools = select_flows_tools(session_state)
     initial_node = build_initial_node(session_state, flows_tools)
 
     flow_manager = FlowManager(
