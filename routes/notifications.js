@@ -196,6 +196,9 @@ router.post('/api/notifications/trigger', requireServiceApiKey, async (req, res)
       case 'reminder_missed':
         await notificationService.onReminderMissed(senior_id, data);
         break;
+      case 'consent_declined':
+        await notificationService.onConsentDeclined(senior_id, data);
+        break;
     }
 
     res.json({ success: true, event_type });

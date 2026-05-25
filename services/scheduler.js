@@ -919,6 +919,8 @@ export const schedulerService = {
              s.call_context_snapshot_encrypted AS "callContextSnapshotEncrypted"
       FROM seniors s
       WHERE s.is_active = true
+        AND s.callable = true
+        AND s.consent_status = 'granted'
     `);
     const allSeniors = (results.rows || []).map(decryptSeniorPhi);
 
@@ -1053,6 +1055,8 @@ export const schedulerService = {
              s.call_context_snapshot_encrypted AS "callContextSnapshotEncrypted"
       FROM seniors s
       WHERE s.is_active = true
+      AND s.callable = true
+      AND s.consent_status = 'granted'
       AND NOT EXISTS (
         SELECT 1 FROM conversations c
         WHERE c.senior_id = s.id

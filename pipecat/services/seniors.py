@@ -295,12 +295,75 @@ async def record_consent(
         g=granted,
         st=status,
     )
+
+    # Fire-and-forget caregiver notification on decline. Bypasses opt-out
+    # because a refused consent is a hard stop on service. Runs OUTSIDE the
+    # transaction so the audit row is durable even if the notification fails.
+    if status == "declined":
+        import asyncio as _asyncio
+        _asyncio.create_task(_notify_consent_declined(senior_id, consent_type, granted))
+
     return {
         "id": str(inserted["id"]),
         "captured_at": inserted["captured_at"],
         "rolled_up_status": status,
         "callable": callable_flag,
     }
+
+
+async def _notify_consent_declined(
+    senior_id: str,
+    consent_type: str,
+    granted: bool,
+) -> None:
+    """POST to Node /api/notifications/trigger to email caregivers.
+
+    Mirrors the auth/header pattern used by services.post_call._trigger_caregiver_notification.
+    Logged on failure but never raised — the consent audit row is the source
+    of truth and must not be coupled to notification delivery.
+    """
+    import os
+    import httpx
+
+    node_url = os.environ.get("NODE_API_URL")
+    if not node_url:
+        logger.warning("consent_declined: NODE_API_URL not set, skipping notification")
+        return
+
+    from config import get_service_api_key
+    api_key = get_service_api_key("pipecat") or get_service_api_key("notifications") or ""
+    if not api_key:
+        logger.warning("consent_declined: no service api key, skipping notification")
+        return
+
+    headers = {"X-API-Key": api_key, "Content-Type": "application/json"}
+    payload = {
+        "event_type": "consent_declined",
+        "senior_id": str(senior_id),
+        "data": {
+            "consent_type": consent_type,
+            "granted": granted,
+        },
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                f"{node_url}/api/notifications/trigger",
+                json=payload,
+                headers=headers,
+            )
+            response.raise_for_status()
+            logger.info(
+                "consent_declined notification dispatched senior={sid} status={st}",
+                sid=str(senior_id)[:8],
+                st=response.status_code,
+            )
+    except Exception as exc:
+        logger.error(
+            "consent_declined notification failed senior={sid}: {err}",
+            sid=str(senior_id)[:8],
+            err=str(exc),
+        )
 
 
 async def get_consent_status(senior_id: str) -> dict:

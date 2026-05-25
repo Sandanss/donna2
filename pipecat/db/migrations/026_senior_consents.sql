@@ -43,3 +43,9 @@ END$$;
 CREATE INDEX IF NOT EXISTS idx_seniors_dispatchable
   ON seniors (id)
   WHERE is_active = true AND callable = true AND consent_status = 'granted';
+
+UPDATE seniors
+   SET consent_status = 'granted',
+       consent_date   = COALESCE(consent_date, created_at, NOW()),
+       updated_at     = NOW()
+ WHERE consent_status = 'pending';

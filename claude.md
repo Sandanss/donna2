@@ -44,9 +44,10 @@ Telnyx → Deepgram STT → Quick Observer (regex, 0ms) → Conversation Directo
 
 - **Quick Observer** injects guidance for the current turn via `LLMMessagesAppendFrame(run_llm=False)` and triggers the programmatic call-end EndFrame on strong goodbyes (after a minimum call-age guard).
 - **Split Conversation Director** is two Groq calls — Query Director (memory queries on interims) and Guidance Director (silence-based speculative). Director-owned context injection means Claude has no live `search_memories` tool.
-- **Pipecat Flows** runs a 4-phase state machine: opening → main → winding_down → closing.
-- **Claude tools in main flow:** `web_search` (Tavily → OpenAI fallback) and `mark_reminder_acknowledged` (fire-and-forget). Everything else is Director/post-call.
-- **Post-call:** analysis (Gemini), memory extraction (OpenAI), interest discovery, daily-context save, JSONB snapshot rebuild.
+- **Pipecat Flows** runs a 4-phase state machine for subscriber calls: opening → main → winding_down → closing. Dedicated flows live alongside it: `onboarding` (prospect/inbound), `consent` (capture call + recording permission), `discovery` (friends/hobbies/routines).
+- **Claude tools in main flow:** `web_search` (Tavily → OpenAI fallback) and `mark_reminder_acknowledged` (fire-and-forget). Everything else is Director/post-call. Other call types expose call-type-specific tools via `flows.tools.select_flows_tools`.
+- **Consent calls bypass the Director.** `ConversationDirectorProcessor.process_frame` short-circuits when `call_type == "consent"` — script-driven flow, no improvisation. Scheduler gates dispatch on `seniors.callable = true AND seniors.consent_status = 'granted'`; existing seniors are grandfathered to `granted` by migration 014.
+- **Post-call:** analysis (Gemini), memory extraction (OpenAI), interest discovery, daily-context save, JSONB snapshot rebuild. Discovery calls additionally write a caregiver-reviewable `profile_suggestions` JSONB on `conversations`. Consent declines fire-and-forget POST to `/api/notifications/trigger` with `event_type=consent_declined`.
 
 ### Outbound Dispatch — Dual-Path Rollout (Phases 0–8 infra on `zuludev`; runtime defaults still legacy + inline post-call until canary flip)
 
@@ -76,7 +77,10 @@ Plan and runbooks: [`docs/plans/2026-05-18-scale-to-2000-users-technical-plan.md
 | Task | Where to look |
 |------|---------------|
 | Conversation behavior / prompts | `pipecat/prompts.py` + `pipecat/flows/nodes.py` |
-| LLM tools (schemas + handlers) | `pipecat/flows/tools.py` |
+| LLM tools (schemas + handlers) | `pipecat/flows/tools.py` — `select_flows_tools` is the per-call-type dispatch |
+| Add a new call type | `pipecat/prompts.py` + `pipecat/flows/nodes.py` (`CALL_TYPE_INITIAL_NODES`) + `pipecat/flows/tools.py` (`_CALL_TYPE_TOOL_FACTORIES`) + `services/call-queue.js` (`QUEUE_TO_PIPECAT_CALL_TYPE`). Wire old (`scheduler.js`) + new (`call-schedules.js`) dispatch paths together. |
+| Consent flow (call_type=consent) | `pipecat/prompts.py` (`CONSENT_*`) + `pipecat/flows/nodes.py` (`build_consent_node`) + `pipecat/flows/tools.py` (`record_consent_response`) + `pipecat/services/seniors.py` (`record_consent` + `_notify_consent_declined`) |
+| Discovery flow (call_type=discovery) | `pipecat/prompts.py` (`DISCOVERY_*`) + `pipecat/flows/nodes.py` (`build_discovery_node`) + `pipecat/flows/tools.py` (`record_discovery_fact`) + `pipecat/services/post_call.py` (`_save_discovery_profile_suggestions`) |
 | Quick Observer patterns / logic | `pipecat/processors/patterns.py` + `pipecat/processors/quick_observer.py` |
 | Conversation Director | `pipecat/processors/conversation_director.py` + `pipecat/services/director_llm.py` |
 | Call ending behavior | `pipecat/processors/quick_observer.py` (goodbye) + `pipecat/processors/conversation_director.py` (time-based) |

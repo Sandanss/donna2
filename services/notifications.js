@@ -274,6 +274,45 @@ export const notificationService = {
     }
   },
 
+  async onConsentDeclined(seniorId, data) {
+    // Fired when a consent call captured a 'no' for call_permission or
+    // recording_permission. Bypasses quiet hours and the user preference
+    // check — the senior has refused, the caregiver needs to know so they
+    // can follow up personally. (See docs/plans/2026-05-24-consent-and-discovery-call-flows.md.)
+    const caregiverList = await this._getCaregiversForSenior(seniorId);
+    const senior = await this._getSenior(seniorId);
+    const seniorName = senior?.name || 'your loved one';
+
+    const declinedType = (data?.consent_type || '').toString();
+    const declinedLabel = declinedType === 'recording_permission'
+      ? 'recording calls'
+      : declinedType === 'call_permission'
+        ? 'receiving calls'
+        : 'continuing with Donna';
+
+    const content = sanitizeNotificationContent(
+      `${seniorName} declined ${declinedLabel} when Donna asked for permission. ` +
+      `Donna will not call them again. You may want to follow up with them directly.`
+    );
+
+    for (const cg of caregiverList) {
+      // Bypass both quiet hours AND the user preference check by routing
+      // directly to _sendEmail. This is intentional: declining consent
+      // is a hard stop on service, not a notification a caregiver should
+      // be able to opt out of.
+      const contact = await getClerkContact(cg.clerkUserId);
+      if (!contact?.email) continue;
+      await this._sendEmail(
+        cg.id,
+        seniorId,
+        'consent_declined',
+        content,
+        data,
+        contact.email,
+      );
+    }
+  },
+
   // -------------------------------------------------------------------------
   // Internal helpers
   // -------------------------------------------------------------------------

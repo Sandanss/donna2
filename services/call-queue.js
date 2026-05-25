@@ -1811,11 +1811,17 @@ export function buildQueueOutboundCallParams(row, {
   const targetAt = queueRowValue(row, 'targetAt', 'target_at');
   const reminderId = queueRowValue(row, 'reminderId', 'reminder_id');
 
-  const pipecatCallType = callType === 'schedule'
-    ? 'schedule'
-    : callType === 'reminder'
-      ? 'reminder'
-      : 'check-in';
+  // Map queue callType → Pipecat callType. Pass through values that already
+  // exist as Pipecat flow types; everything else (including legacy 'manual')
+  // falls through to the default 'check-in' subscriber flow.
+  const QUEUE_TO_PIPECAT_CALL_TYPE = {
+    schedule: 'schedule',
+    reminder: 'reminder',
+    onboarding: 'onboarding',
+    consent: 'consent',
+    discovery: 'discovery',
+  };
+  const pipecatCallType = QUEUE_TO_PIPECAT_CALL_TYPE[callType] || 'check-in';
 
   const params = {
     seniorId,

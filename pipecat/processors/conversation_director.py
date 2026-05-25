@@ -245,6 +245,14 @@ class ConversationDirectorProcessor(FrameProcessor):
             await self.push_frame(frame, direction)
             return
 
+        # Consent calls intentionally skip the Director — the conversation is
+        # short, script-driven, and must not be coloured by check-in framing.
+        # We still let EndFrame above run cleanup; everything else is a no-op
+        # passthrough. See docs/plans/2026-05-24-consent-and-discovery-call-flows.md.
+        if self._session_state.get("call_type") == "consent":
+            await self.push_frame(frame, direction)
+            return
+
         # --- Final TranscriptionFrame (after VAD 1.2s silence) ---
         if isinstance(frame, TranscriptionFrame):
             self._turn_count += 1
