@@ -93,6 +93,11 @@ class Settings:
     groq_director_model: str = "openai/gpt-oss-20b"
     call_analysis_model: str = "gemini-3-flash-preview"
     anthropic_model: str = "claude-haiku-4-5-20251001"
+    # Hard ceiling on tokens per Donna response. ~220 ≈ 165 words ≈
+    # 3 long sentences. Surfaced as a real bug by the mock-call harness:
+    # the system prompt says "1-2 sentences max" but Claude regularly ran
+    # 300+ tokens without a max_tokens cap. Override with ANTHROPIC_MAX_TOKENS.
+    anthropic_max_tokens: int = 220
 
     # ---- Auth ----
     jwt_secret: str = "donna-admin-secret-change-me"
@@ -398,6 +403,7 @@ def _load_settings() -> Settings:
         groq_director_model=_env("GROQ_DIRECTOR_MODEL", "openai/gpt-oss-20b"),
         call_analysis_model=_env("CALL_ANALYSIS_MODEL", "gemini-3-flash-preview"),
         anthropic_model=_env("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001"),
+        anthropic_max_tokens=int(_env("ANTHROPIC_MAX_TOKENS", "220")),
         # Auth
         jwt_secret=_env("JWT_SECRET", "donna-admin-secret-change-me"),
         jwt_secret_previous=_env("JWT_SECRET_PREVIOUS"),

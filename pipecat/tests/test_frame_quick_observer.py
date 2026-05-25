@@ -47,33 +47,57 @@ class TestQuickObserverFramePassthrough:
 
 
 class TestQuickObserverGuidanceInjection:
-    """Verify that guidance is injected as LLMMessagesAppendFrame."""
+    """Verify that guidance is stashed in session_state for the Director.
+
+    Quick Observer used to ALSO push an ``LLMMessagesAppendFrame`` itself,
+    but that produced duplicate guidance messages — surfaced by the
+    mock-call harness on 2026-05-24: the Director's ephemeral-strip ran
+    before the in-flight LLMMessagesAppendFrame had been applied to the
+    LLM context, so the strip missed it, the Director's re-inject added a
+    fresh copy, and then the original push landed too. The contract is
+    now single-writer: Quick Observer stashes via
+    ``session_state["_pending_observer_guidance"]``; the Director is the
+    sole place that pushes ``LLMMessagesAppendFrame`` for Observer
+    guidance.
+    """
 
     @pytest.mark.asyncio
-    async def test_health_signal_injects_guidance(self, session_state):
-        """Health-related input should produce an LLMMessagesAppendFrame."""
+    async def test_health_signal_stashes_guidance_in_session_state(self, session_state):
+        """Health-related input should stash guidance in session_state for the Director."""
         processor = QuickObserverProcessor(session_state=session_state)
         capture = await run_processor_test(
             processors=[processor],
             frames_to_inject=[make_transcription("I fell in the bathroom")],
         )
+
+        # The processor must NOT push the guidance frame itself — that's
+        # the Director's job. If this regresses we go back to the duplicate
+        # injection that broke the mock-call demo.
         guidance_frames = capture.get_frames_of_type(LLMMessagesAppendFrame)
-        assert len(guidance_frames) >= 1
-        content = guidance_frames[0].messages[0]["content"]
-        assert "guidance" in content.lower()
+        assert len(guidance_frames) == 0, (
+            "Quick Observer must not push LLMMessagesAppendFrame directly; "
+            "stash via session_state and let the Director inject."
+        )
+
+        # And the stash must be populated for the Director to pick up.
+        stashed = session_state.get("_pending_observer_guidance")
+        assert stashed, "Expected health signal to populate _pending_observer_guidance"
+        # Stashed value is the raw guidance text (no [EPHEMERAL: ...] header —
+        # the Director adds that when it injects).
+        assert isinstance(stashed, str)
 
     @pytest.mark.asyncio
     async def test_neutral_input_no_guidance(self, session_state):
-        """Neutral input should NOT produce guidance frames."""
+        """Neutral input should produce neither a guidance frame nor a stash entry."""
         processor = QuickObserverProcessor(session_state=session_state)
-        # Use a message long enough to not trigger engagement patterns
-        # but neutral enough to not trigger any category
+        # Long enough to skip engagement triggers, neutral enough to skip everything else.
         capture = await run_processor_test(
             processors=[processor],
             frames_to_inject=[make_transcription("I thought about that for a while and it was interesting to consider")],
         )
         guidance_frames = capture.get_frames_of_type(LLMMessagesAppendFrame)
         assert len(guidance_frames) == 0
+        assert "_pending_observer_guidance" not in session_state
 
     @pytest.mark.asyncio
     async def test_token_recommendation_clears_on_neutral_turn(self, session_state):

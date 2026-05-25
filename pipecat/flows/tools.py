@@ -68,7 +68,11 @@ def _web_search_schema(today_date: date | None = None) -> dict:
             "IMPORTANT: Before calling this tool, always say a brief natural filler "
             "like 'Let me look that up for you', 'One moment while I check on that', "
             "or 'Hmm, let me find out'. This gives the senior something to hear while "
-            "the search runs. Vary the phrasing each time."
+            "the search runs. Vary the phrasing each time. "
+            "CRITICAL: Use the FIRST result. Do NOT call this tool a second time "
+            "for the same question — if the result is empty or unhelpful, tell the "
+            "senior so verbally and move on. Repeated calls with the same query waste "
+            "their time on the line."
         ),
         "properties": {
             "query": {
@@ -370,6 +374,34 @@ def make_tool_handlers(session_state: dict) -> dict:
                 san=len(sanitized_query),
             )
 
+        # Duplicate-query guard. Surfaced by the mock-call harness on
+        # 2026-05-24: Claude generated filler + tool_use, received the result,
+        # then on the next inference round generated *another* filler + the
+        # SAME tool_use — wasting 2-3 seconds of caller time per repeat.
+        # Cache the last query + result per call (30s TTL) and short-circuit
+        # repeats so Claude is forced to use the existing result. The schema
+        # description also tells Claude not to repeat, but a model can ignore
+        # that; the handler is the hard stop. 30s = long enough to cover one
+        # Claude reasoning loop, short enough that a legitimate re-ask much
+        # later in the same call still goes through.
+        normalized_query = sanitized_query.strip().lower()
+        last_search = session_state.get("_last_web_search") or {}
+        if (
+            last_search.get("query") == normalized_query
+            and (_time.time() - float(last_search.get("at") or 0)) < 30
+        ):
+            logger.info(
+                "Tool: web_search SUPPRESSED duplicate query within 30s — reusing cached result"
+            )
+            cached_result = last_search.get("result") or "I already shared what I found."
+            return {
+                "status": "success",
+                "result": (
+                    f"{cached_result}\n[NOTE: This is the same search you already ran in this call. "
+                    f"Share the result you already have with the senior instead of calling again.]"
+                ),
+            }
+
         start = _time.time()
         try:
             from services.news import web_search_query
@@ -377,8 +409,19 @@ def make_tool_handlers(session_state: dict) -> dict:
             elapsed_ms = round((_time.time() - start) * 1000)
             if not result:
                 logger.info("Tool: web_search empty result ({ms}ms)", ms=elapsed_ms)
-                return {"status": "success", "result": "I couldn't find reliable information about that."}
+                empty_response = "I couldn't find reliable information about that."
+                session_state["_last_web_search"] = {
+                    "query": normalized_query,
+                    "at": _time.time(),
+                    "result": empty_response,
+                }
+                return {"status": "success", "result": empty_response}
             logger.info("Tool: web_search SUCCESS ({ms}ms, {n} chars)", ms=elapsed_ms, n=len(result))
+            session_state["_last_web_search"] = {
+                "query": normalized_query,
+                "at": _time.time(),
+                "result": f"[NEWS] {result}",
+            }
             return {"status": "success", "result": f"[NEWS] {result}"}
         except asyncio.TimeoutError:
             elapsed_ms = round((_time.time() - start) * 1000)

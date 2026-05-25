@@ -131,7 +131,23 @@ SAFETY_PATTERNS = [
     _p(r"\b(scam|fraud|suspicious|fake|phishing)\b", "scam_mention", severity="high"),
     _p(r"\b(someone (called|emailed|texted) (me|saying)|strange (call|email|message))\b", "suspicious_contact", severity="high"),
     _p(r"\b(asked for (money|bank|social security|credit card|password))\b", "info_request", severity="high"),
-    _p(r"\b(won|winner|lottery|prize|inheritance|nigerian)\b", "scam_indicators", severity="high"),
+    # Scam-indicator vocabulary. The previous pattern matched "won" anywhere,
+    # which fired SAFETY guidance "This sounds like a scam" on "Did the
+    # Cowboys win their game?" — surfaced by the mock-call harness on
+    # 2026-05-24. Split into two patterns:
+    # 1) words that are essentially always scam-coded (lottery, sweepstakes,
+    #    inheritance check, nigerian prince).
+    _p(r"\b(lottery|sweepstakes|inheritance check|nigerian prince|nigerian scam|wire transfer to claim)\b", "scam_indicators", severity="high"),
+    # 2) "won/winner" or "prize" only when paired with a money-shaped term
+    #    within the same sentence. Sports "won" doesn't match; "I won a
+    #    thousand dollars" does. [^.\n]{0,60}? keeps the proximity check
+    #    inside a single sentence so cross-sentence false positives
+    #    ("Cowboys won. The lottery is...") can't fire it.
+    _p(
+        r"\b(won|winner|prize)\b[^.\n]{0,60}?\b(lottery|sweepstakes|jackpot|millions?|thousand dollars?|hundred dollars?|cash prize|grand prize|inheritance|\$\d|usd|\d+\s?dollars?)\b",
+        "scam_indicators",
+        severity="high",
+    ),
     _p(r"\b(irs|tax|government|medicare) (called|saying|claims)\b", "government_scam", severity="high"),
     _p(r"\b(stranger|someone (came|knocked|at the door)|don't know (who|them))\b", "stranger", severity="medium"),
     _p(r"\b(locked out|can't (get in|find my keys)|lost (my )?keys?)\b", "locked_out", severity="medium"),
@@ -378,13 +394,31 @@ REMINDER_ACK_PATTERNS = [
 # Guidance text — signal-to-guidance mappings for _build_guidance()
 # =============================================================================
 
+# SAFETY guidance — two design tiers (revised 2026-05-24):
+#
+# 1. Scam-shaped signals (scam_mention / suspicious_contact / info_request /
+#    scam_indicators / government_scam / stranger): Donna is NOT a
+#    fraud-prevention service. Telling a senior mid-call "this sounds like
+#    a scam" is preachy, risks false-positive interrogation of benign
+#    events, and isn't something they can usefully act on while on the
+#    phone with us. The goal is narrower: do not VALIDATE or CONGRATULATE
+#    the scam framing. Caregivers see the signal in post-call analysis +
+#    transcript review; that's the right channel for "should we worry
+#    about this".
+#
+# 2. Real-time emergencies (fire / gas_leak / break_in / locked_out /
+#    lost / wandering / accident): these ARE situations Donna can help
+#    with in the call — by asking if they're safe, suggesting 911, helping
+#    them think through who to call. Guidance stays prescriptive.
 SAFETY_GUIDANCE = {
-    "scam_mention": "They mentioned scams. Ask what happened and remind them NEVER to share personal info.",
-    "suspicious_contact": "Someone suspicious contacted them. Ask what they wanted. Advise caution.",
-    "info_request": "ALERT: Someone asked for personal/financial info. Ask if they shared anything.",
-    "scam_indicators": "This sounds like a scam. Gently explain this and ask if they responded.",
-    "government_scam": "Government agencies don't call asking for money or info. This may be a scam.",
-    "stranger": "A stranger approached. Ask if they felt safe. Remind them not to let strangers in.",
+    # --- Scam-shaped: stay curious-neutral. No advice, no lectures.
+    "scam_mention": "SCAM-SHAPED — stay curious-neutral. Do not lecture, interrogate, or warn. Listen, acknowledge, move on naturally.",
+    "suspicious_contact": "SCAM-SHAPED — stay neutral. Light curiosity is fine; do not advise or instruct.",
+    "info_request": "SCAM-SHAPED — stay neutral. Do not congratulate, coach, or lecture.",
+    "scam_indicators": "SCAM-SHAPED — do NOT validate or congratulate. Treat as a normal topic, stay neutral, move on.",
+    "government_scam": "SCAM-SHAPED — stay neutral. Do not advise or instruct.",
+    "stranger": "STRANGER-AT-DOOR — stay neutral. Do not lecture or interrogate; it's likely benign (mail, neighbor).",
+    # --- Real-time emergencies: keep prescriptive guidance.
     "locked_out": "They're locked out. Ask if they need help calling someone.",
     "break_in": "URGENT: Possible break-in. Ask if they are safe. Consider if they need help.",
     "fire": "URGENT: Fire/smoke mentioned. Ask if they are safe and if they need to call 911.",

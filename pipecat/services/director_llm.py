@@ -137,7 +137,9 @@ Low engagement: suggest personal questions, memories, or one uplifting news item
 News: if Has news=true and tone is neutral/positive, suggest it during lulls, low/medium engagement, or topic wind-down. Avoid news during sadness, health/safety concerns, or active reminders.
 Onboarding calls (call_type="onboarding"): no reminders, no re-engage signals, focus on discovery.
 
-JSON:{"analysis":{"call_phase":"str","engagement_level":"high|medium|low","current_topic":"str","emotional_tone":"positive|neutral|concerned|sad","turns_on_current_topic":0},"direction":{"stay_or_shift":"stay|transition|wrap_up","next_topic":null,"should_mention_news":false,"news_topic":null,"pacing_note":"good|too_fast|dragging|time_to_close"},"reminder":{"should_deliver":false,"which_reminder":null,"delivery_approach":null},"guidance":{"tone":"str","priority_action":"str","specific_instruction":"str"}}"""
+CRITICAL: Donna must answer the senior's most recent question before pivoting. If the senior's last turn contains a question (ends with "?", or asks "did/do/can/will/is/are/what/when/where/why/how"), set stay_or_shift="stay" and put the answer guidance in specific_instruction. Only set "transition" once the question has been acknowledged in a prior assistant turn. This rule overrides news/reminder suggestions for one turn.
+
+JSON:{"analysis":{"call_phase":"str","engagement_level":"high|medium|low","current_topic":"str","emotional_tone":"positive|neutral|concerned|sad","turns_on_current_topic":0,"unanswered_question":false},"direction":{"stay_or_shift":"stay|transition|wrap_up","next_topic":null,"should_mention_news":false,"news_topic":null,"pacing_note":"good|too_fast|dragging|time_to_close"},"reminder":{"should_deliver":false,"which_reminder":null,"delivery_approach":null},"guidance":{"tone":"str","priority_action":"str","specific_instruction":"str"}}"""
 
 # Query Director — fast, focused extraction of memory search queries
 QUERY_SYSTEM_INSTRUCTION = """\
@@ -306,11 +308,25 @@ def format_director_guidance(direction: dict) -> str | None:
     tone = guidance.get("tone", "warm")
     parts.append(f"{phase}/{engagement}/{tone}")
 
+    # Hard safety net for "Donna pivoted while the senior's question went
+    # unanswered" — surfaced by the mock-call harness on 2026-05-24.
+    # When the analysis reports an unanswered question, we suppress
+    # transition/wrap_up/reengage signals and instead prepend an explicit
+    # ANSWER directive. The Director's system instruction also tells it to
+    # set stay_or_shift="stay" in this case, but the LLM doesn't always
+    # comply; this layer enforces it regardless.
+    unanswered_question = bool(analysis.get("unanswered_question"))
+
     if phase == "closing":
         parts.append("CLOSING: Say a warm goodbye. Keep it brief.")
     elif phase == "winding_down":
         parts.append(
             "WINDING DOWN: Summarize key points, begin warm sign-off."
+        )
+    elif unanswered_question:
+        parts.append(
+            "ANSWER FIRST: The senior asked a question on their last turn. "
+            "Answer it directly before introducing any new topic, news, or reminder."
         )
     elif direction.get("reminder", {}).get("should_deliver"):
         reminder = direction["reminder"]

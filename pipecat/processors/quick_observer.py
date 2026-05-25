@@ -398,18 +398,25 @@ class QuickObserverProcessor(FrameProcessor):
             if len(self._recent_history) > 10:
                 self._recent_history = self._recent_history[-10:]
 
-            # Inject guidance into LLM context if there is any.
-            # Use "user" role — Anthropic rejects "system" in the messages array.
-            if analysis.guidance:
-                if self._session_state is not None:
-                    self._session_state["_pending_observer_guidance"] = analysis.guidance
-                guidance_msg = {
-                    "role": "user",
-                    "content": f"[EPHEMERAL: Observer guidance — do not read aloud]\n{analysis.guidance}",
-                }
-                await self.push_frame(
-                    LLMMessagesAppendFrame(messages=[guidance_msg], run_llm=False)
-                )
+            # Stash guidance for the Director to inject in a single,
+            # canonical place. Previously Quick Observer ALSO pushed a
+            # ``LLMMessagesAppendFrame`` here, which caused a duplicate
+            # injection — surfaced by the mock-call harness on 2026-05-24:
+            # the Director's ``_strip_ephemeral_messages()`` runs *before*
+            # the Quick Observer push has been applied to the LLM context
+            # (the frames travel down the pipeline; the strip operates on
+            # the materialized context). So strip missed the in-flight
+            # Quick Observer message, the Director's reinject added a
+            # fresh copy, and then the original push finally landed —
+            # giving two identical ephemerals per turn.
+            #
+            # The fix is single-writer: Quick Observer ONLY stashes, the
+            # Director ONLY injects. If the Director is disabled (feature
+            # flag) the Director's ``_inject_observer_guidance()`` still
+            # fires before the early return, so guidance still reaches
+            # Claude. See conversation_director.py:_inject_observer_guidance.
+            if analysis.guidance and self._session_state is not None:
+                self._session_state["_pending_observer_guidance"] = analysis.guidance
 
             # PROGRAMMATIC GOODBYE: When strong goodbye detected, schedule forced
             # call end. The LLM will still generate its goodbye response normally,

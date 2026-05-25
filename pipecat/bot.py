@@ -703,6 +703,15 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
             model=cfg.anthropic_model,
             params=AnthropicLLMService.InputParams(
                 enable_prompt_caching=True,
+                # Hard cap on response length. The system prompt says "Keep
+                # responses 1-2 sentences max" but the mock-call harness
+                # showed Claude regularly running 300+ tokens (~50+ words).
+                # 220 tokens ≈ 165 words ≈ 3 long sentences — enough headroom
+                # for compound responses (filler + answer + follow-up
+                # question) while making "the senior monologue" physically
+                # impossible. Override per-environment with the existing
+                # ANTHROPIC_MAX_TOKENS env var if needed.
+                max_tokens=cfg.anthropic_max_tokens,
             ),
         )
 
