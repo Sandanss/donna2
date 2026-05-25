@@ -28,6 +28,9 @@ from tests.simulation.fixtures import (
 )
 from tests.simulation.runner import run_simulated_call
 from tests.simulation.scenarios import (
+    consent_decline_scenario,
+    consent_grant_scenario,
+    discovery_scenario,
     memory_recall_scenario,
     memory_seed_scenario,
     reminder_scenario,
@@ -272,3 +275,236 @@ class TestCallMetrics:
             assert lat < 60_000, (
                 f"Latency {lat:.0f}ms exceeds 60s — likely a hang"
             )
+
+
+# ---------------------------------------------------------------------------
+# TestConsentCall
+# ---------------------------------------------------------------------------
+
+
+class TestConsentCall:
+    """End-to-end consent flow: run a simulated call, verify DB writes.
+
+    These tests are the answer to "did the consent flow actually update the
+    database correctly?". They:
+      1. Seed a TestSenior — defaults to consent_status='pending' via the
+         column DEFAULT from migration 014.
+      2. Run consent_grant_scenario / consent_decline_scenario through the
+         real pipeline (real Claude Haiku, real Director-bypass path, real
+         Pipecat Flows, real DB tool handler).
+      3. Assert senior_consents has the expected rows and seniors has the
+         expected rolled-up state.
+
+    These calls exercise the record_consent_response tool, which is the
+    only way two rows land in senior_consents during a consent call.
+    """
+
+    @pytest.mark.asyncio
+    async def test_consent_grant_persists_both_rows_and_rolls_up_granted(
+        self, test_senior: TestSenior
+    ):
+        """consent_grant: both consents=true → senior_consents has 2 granted
+        rows, seniors.consent_status='granted', seniors.callable=true."""
+        from db import query_many, query_one
+
+        # Sanity check the precondition: a fresh test senior starts pending.
+        # The migration backfilled existing seniors to 'granted', but newly
+        # inserted seniors get the DEFAULT 'pending' value.
+        before = await query_one(
+            "SELECT consent_status, callable FROM seniors WHERE id = $1",
+            uuid.UUID(test_senior.id),
+        )
+        assert before["consent_status"] == "pending", (
+            f"Test fixture should start at 'pending', got {before['consent_status']}"
+        )
+        assert before["callable"] is True
+
+        # Run the simulated call. Post-call processing OFF — consent calls
+        # already skip the heavy post-call analysis path, and we don't need
+        # any of it for this assertion.
+        scenario = consent_grant_scenario()
+        result = await run_simulated_call(
+            scenario,
+            senior=test_senior,
+            run_post_call_processing=False,
+        )
+
+        # Give the in-transaction tool handler a tick to settle (DB writes
+        # happen synchronously inside the handler, so this is belt-and-braces).
+        await asyncio.sleep(0.5)
+
+        # 1. senior_consents should have one row per consent_type, both granted.
+        consent_rows = await query_many(
+            """SELECT consent_type, granted, captured_at
+               FROM senior_consents
+               WHERE senior_id = $1
+               ORDER BY consent_type""",
+            uuid.UUID(test_senior.id),
+        )
+        consent_types = {r["consent_type"]: r for r in (consent_rows or [])}
+        assert "call_permission" in consent_types, (
+            f"Expected call_permission row. Got: {consent_rows}. "
+            f"Tool calls: {result.tool_calls_made}"
+        )
+        assert "recording_permission" in consent_types, (
+            f"Expected recording_permission row. Got: {consent_rows}. "
+            f"Tool calls: {result.tool_calls_made}"
+        )
+        assert consent_types["call_permission"]["granted"] is True
+        assert consent_types["recording_permission"]["granted"] is True
+
+        # 2. Rolled-up seniors columns should reflect both-granted.
+        after = await query_one(
+            """SELECT consent_status, callable, consent_date
+               FROM seniors WHERE id = $1""",
+            uuid.UUID(test_senior.id),
+        )
+        assert after["consent_status"] == "granted", (
+            f"Expected consent_status='granted', got {after['consent_status']}"
+        )
+        assert after["callable"] is True
+        assert after["consent_date"] is not None
+
+        # 3. The tool actually fired (this is what the integration is proving).
+        assert "record_consent_response" in result.tool_calls_made, (
+            f"Expected record_consent_response to be called. "
+            f"Got tool_calls={result.tool_calls_made}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_consent_decline_flips_callable_false(
+        self, test_senior: TestSenior
+    ):
+        """consent_decline scenario: senior agrees to calls but declines
+        recording. Roll-up should mark the senior 'declined' and callable=false."""
+        from db import query_many, query_one
+
+        scenario = consent_decline_scenario()
+        result = await run_simulated_call(
+            scenario,
+            senior=test_senior,
+            run_post_call_processing=False,
+        )
+
+        await asyncio.sleep(0.5)
+
+        # senior_consents rows should reflect the mixed answer.
+        consent_rows = await query_many(
+            """SELECT consent_type, granted
+               FROM senior_consents
+               WHERE senior_id = $1
+               ORDER BY consent_type""",
+            uuid.UUID(test_senior.id),
+        )
+        by_type = {r["consent_type"]: r["granted"] for r in (consent_rows or [])}
+
+        assert "call_permission" in by_type, (
+            f"Expected call_permission row. Got: {consent_rows}. "
+            f"Tool calls: {result.tool_calls_made}"
+        )
+        assert "recording_permission" in by_type, (
+            f"Expected recording_permission row. Got: {consent_rows}. "
+            f"Tool calls: {result.tool_calls_made}"
+        )
+        assert by_type["call_permission"] is True, (
+            "Persona agreed to calls — call_permission should be True"
+        )
+        assert by_type["recording_permission"] is False, (
+            "Persona declined recordings — recording_permission should be False"
+        )
+
+        # Rolled-up state: any declined consent flips both consent_status
+        # and the callable gate the scheduler reads.
+        after = await query_one(
+            "SELECT consent_status, callable FROM seniors WHERE id = $1",
+            uuid.UUID(test_senior.id),
+        )
+        assert after["consent_status"] == "declined", (
+            f"Expected consent_status='declined', got {after['consent_status']}"
+        )
+        assert after["callable"] is False, (
+            "callable should flip to false on any consent decline — "
+            "this is what gates the scheduler from dispatching"
+        )
+
+
+# ---------------------------------------------------------------------------
+# TestDiscoveryCall
+# ---------------------------------------------------------------------------
+
+
+class TestDiscoveryCall:
+    """End-to-end discovery flow: verify facts land in memories AND the
+    caregiver-reviewable profile_suggestions JSONB on conversations."""
+
+    @pytest.mark.asyncio
+    async def test_discovery_writes_profile_suggestions_and_memories(
+        self, test_senior: TestSenior
+    ):
+        """discovery_scenario: senior shares friends, routines, family.
+        Expect record_discovery_fact invoked multiple times; post-call
+        snapshots the buffer to conversations.profile_suggestions."""
+        from db import query_many, query_one
+
+        scenario = discovery_scenario()
+        # Post-call processing ON — that's what writes profile_suggestions.
+        result = await run_simulated_call(
+            scenario,
+            senior=test_senior,
+            run_post_call_processing=True,
+        )
+
+        # The async memory.store + post-call writer both run in the
+        # background; give them time to settle.
+        await asyncio.sleep(3)
+
+        # 1. The discovery tool actually fired.
+        assert "record_discovery_fact" in result.tool_calls_made, (
+            f"Expected record_discovery_fact tool call. "
+            f"Got tool_calls={result.tool_calls_made}"
+        )
+
+        # 2. The most recent conversation for this senior should have a
+        #    populated profile_suggestions payload.
+        conv = await query_one(
+            """SELECT id, profile_suggestions
+               FROM conversations
+               WHERE senior_id = $1
+               ORDER BY started_at DESC
+               LIMIT 1""",
+            uuid.UUID(test_senior.id),
+        )
+        assert conv is not None, "Expected at least one conversation row"
+        assert conv["profile_suggestions"] is not None, (
+            "Expected profile_suggestions to be written by the discovery "
+            "post-call writer"
+        )
+
+        # Payload is asyncpg-decoded JSONB → dict in Python.
+        payload = conv["profile_suggestions"]
+        if isinstance(payload, str):
+            import json
+            payload = json.loads(payload)
+        facts = payload.get("facts") or []
+        assert len(facts) > 0, (
+            f"Expected at least one captured discovery fact, got {payload}"
+        )
+        # Categories should be valid enums.
+        valid_cats = {"friend", "hobby", "interest", "routine", "family"}
+        for f in facts:
+            assert f.get("category") in valid_cats, (
+                f"Unexpected category {f.get('category')} in {f}"
+            )
+
+        # 3. record_discovery_fact also writes into memories (fire-and-forget).
+        memory_rows = await query_many(
+            """SELECT id FROM memories
+               WHERE senior_id = $1
+                 AND metadata->>'discovery_category' IS NOT NULL""",
+            uuid.UUID(test_senior.id),
+        )
+        assert memory_rows is not None and len(memory_rows) > 0, (
+            "Expected at least one memory row tagged with discovery_category. "
+            "The background memory.store may have raced past the test window — "
+            "if this flakes, bump the sleep above."
+        )
