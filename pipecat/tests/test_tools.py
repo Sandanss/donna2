@@ -197,10 +197,10 @@ class TestToolHandlerFactory:
 
         with patch("lib.growthbook.is_on", return_value=True), \
              patch("services.news.web_search_query", new_callable=AsyncMock, return_value="result") as mock_search:
-            result = await handlers["web_search"]({"query": "Margaret Smith metformin side effects"})
+            result = await handlers["web_search"]({"query": "Margaret Smith garden club events"})
 
         assert result["status"] == "success"
-        mock_search.assert_awaited_once_with("metformin side effects")
+        mock_search.assert_awaited_once_with("garden club events")
 
 
 class TestFlowsTools:
@@ -269,6 +269,7 @@ class TestConsentTool:
         assert kwargs["granted"] is True
         assert kwargs["senior_quote"] == "Yeah that's fine"
         assert session_state["_consent_captured"]["granted"] is True
+        assert session_state["_tools_used"] == ["record_consent_response"]
 
     @pytest.mark.asyncio
     async def test_record_consent_handler_is_idempotent_per_call(self):
@@ -289,6 +290,7 @@ class TestConsentTool:
         assert "Already captured" in second["result"]
         mock_rc.assert_awaited_once()
         assert session_state["_consent_captured"]["granted"] is True
+        assert session_state["_tools_used"] == ["record_consent_response"]
 
     @pytest.mark.asyncio
     async def test_record_consent_handler_no_senior_id_returns_error(self):
@@ -334,6 +336,7 @@ class TestDiscoveryTool:
         assert len(facts) == 1
         assert facts[0]["category"] == "friend"
         assert facts[0]["confidence"] == "stated"
+        assert session_state["_tools_used"] == ["record_discovery_fact"]
         mock_store.assert_awaited_once()
         kwargs = mock_store.await_args.kwargs
         # friend → relationship
@@ -365,8 +368,8 @@ class TestDiscoveryTool:
         from flows.tools import make_discovery_flows_tools
         tools = make_discovery_flows_tools({"senior_id": "sen-1"})
         res = await tools["record_discovery_fact"].handler({
-            "category": "medication",
-            "content": "Takes lisinopril",
+            "category": "clinical",
+            "content": "Keeps that private",
         })
         assert res["status"] == "error"
 

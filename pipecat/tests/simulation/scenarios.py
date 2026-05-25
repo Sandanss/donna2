@@ -24,8 +24,10 @@ Scenarios shipped:
 * ``low_engagement_reminder_scenario`` — terse caller receives a reminder
 * ``consent_grant_scenario`` — senior grants both call + recording consent
 * ``consent_decline_scenario`` — senior accepts calls but declines recording
+* ``consent_mock_call_scenarios`` — five-branch consent coverage set
 * ``consent_boundary_reminder_attempt_scenario`` — consent call resists reminder drift
 * ``discovery_scenario`` — senior shares friends/hobbies/routines
+* ``discovery_mock_call_scenarios`` — six-branch discovery coverage set
 * ``discovery_boundary_reminder_attempt_scenario`` — discovery call resists reminder creation drift
 * ``embedding_outage_scenario`` — memory search disabled by embedding failure
 * ``false_goodbye_scenario`` — goodbye-like phrase to someone else mid-call
@@ -1040,6 +1042,161 @@ def consent_decline_scenario() -> LiveSimScenario:
     )
 
 
+def consent_ambiguous_then_grant_scenario() -> LiveSimScenario:
+    """Senior gives a fuzzy answer first, then confirms yes clearly."""
+    return LiveSimScenario(
+        name="consent_ambiguous_then_grant",
+        description=(
+            "Consent call: senior starts with a fuzzy maybe, then confirms yes. "
+            "Expects Donna to clarify before record_consent_response granted=true."
+        ),
+        senior=_margaret_senior(),
+        persona=CallerPersona(
+            name=_MARGARET_BASE.name,
+            age=_MARGARET_BASE.age,
+            personality=(
+                "Polite and agreeable, but not precise at first. Needs Donna to "
+                "slow down and confirm the combined call and recording permission."
+            ),
+            speech_style=_MARGARET_BASE.speech_style,
+        ),
+        goals=[
+            CallerGoal(
+                description="Respond with an uncertain maybe to the combined consent ask",
+                trigger_phrase=(
+                    "Well, I suppose that might be alright. I'm not completely "
+                    "sure what I'm saying yes to, though."
+                ),
+            ),
+            CallerGoal(
+                description="Confirm a clear yes after Donna clarifies",
+                trigger_phrase=(
+                    "Yes, that's okay. You can call me, and recording is alright "
+                    "if it helps my family."
+                ),
+            ),
+            CallerGoal(
+                description="Warm goodbye",
+                trigger_phrase="Okay, thank you for explaining. Goodbye now.",
+            ),
+        ],
+        call_type="consent",
+        max_turns=9,
+        expect_tool_calls=["record_consent_response"],
+        expect_memories_injected=False,
+        expect_post_call_analysis=False,
+    )
+
+
+def consent_ai_question_then_grant_scenario() -> LiveSimScenario:
+    """Senior asks whether Donna is AI and who set this up before agreeing."""
+    return LiveSimScenario(
+        name="consent_ai_question_then_grant",
+        description=(
+            "Consent call: senior asks if Donna is AI and who set up the service, "
+            "then grants the combined consent after disclosure."
+        ),
+        senior=_margaret_senior(),
+        persona=CallerPersona(
+            name=_MARGARET_BASE.name,
+            age=_MARGARET_BASE.age,
+            personality=(
+                "Cautious about unfamiliar callers. Wants a direct answer about "
+                "whether Donna is a person before granting permission."
+            ),
+            speech_style=_MARGARET_BASE.speech_style,
+        ),
+        goals=[
+            CallerGoal(
+                description="Ask whether Donna is a real person or AI",
+                trigger_phrase=(
+                    "Wait now, are you a real person calling me, or one of those "
+                    "computer voices?"
+                ),
+            ),
+            CallerGoal(
+                description="Ask who will hear or see the recordings",
+                trigger_phrase=(
+                    "And who gets to hear these recordings or read about what I say?"
+                ),
+            ),
+            CallerGoal(
+                description="Grant the combined consent after the explanation",
+                trigger_phrase=(
+                    "Alright, if it's just to help my family stay updated, that's "
+                    "fine. You can call and record."
+                ),
+            ),
+            CallerGoal(
+                description="Warm goodbye",
+                trigger_phrase="That answers my question. Bye now.",
+            ),
+        ],
+        call_type="consent",
+        max_turns=10,
+        expect_tool_calls=["record_consent_response"],
+        expect_memories_injected=False,
+        expect_post_call_analysis=False,
+    )
+
+
+def consent_off_topic_redirect_decline_scenario() -> LiveSimScenario:
+    """Senior tries to turn the permission call into a chat, then declines."""
+    return LiveSimScenario(
+        name="consent_off_topic_redirect_decline",
+        description=(
+            "Consent call: senior asks for weather and tries to chat before "
+            "answering. Donna should stay on the consent task and capture one no."
+        ),
+        senior=_margaret_senior(),
+        persona=CallerPersona(
+            name=_MARGARET_BASE.name,
+            age=_MARGARET_BASE.age,
+            personality=(
+                "Friendly and distractible. Wants to chat about the day but is "
+                "not comfortable approving recorded calls yet."
+            ),
+            speech_style=_MARGARET_BASE.speech_style,
+        ),
+        goals=[
+            CallerGoal(
+                description="Ask an off-topic weather question during the consent call",
+                trigger_phrase=(
+                    "Before all that, can you tell me if it's going to rain today? "
+                    "I was hoping to sit outside."
+                ),
+            ),
+            CallerGoal(
+                description="Decline after Donna redirects back to permission",
+                trigger_phrase=(
+                    "No, I don't think I want to do recorded calls. Let's not set "
+                    "that up."
+                ),
+            ),
+            CallerGoal(
+                description="Warm goodbye",
+                trigger_phrase="Thank you for understanding. Goodbye.",
+            ),
+        ],
+        call_type="consent",
+        max_turns=9,
+        expect_tool_calls=["record_consent_response"],
+        expect_memories_injected=False,
+        expect_post_call_analysis=False,
+    )
+
+
+def consent_mock_call_scenarios() -> list[LiveSimScenario]:
+    """Five-branch consent coverage set for the mock-call harness."""
+    return [
+        consent_grant_scenario(),
+        consent_decline_scenario(),
+        consent_ambiguous_then_grant_scenario(),
+        consent_ai_question_then_grant_scenario(),
+        consent_off_topic_redirect_decline_scenario(),
+    ]
+
+
 def consent_boundary_reminder_attempt_scenario() -> LiveSimScenario:
     """Consent call where the senior tries to start a reminder workflow."""
     return LiveSimScenario(
@@ -1150,6 +1307,258 @@ def discovery_scenario() -> LiveSimScenario:
         expect_memories_injected=False,
         expect_post_call_analysis=True,
     )
+
+
+def discovery_quiet_routine_scenario() -> LiveSimScenario:
+    """Quiet senior gives short answers; Donna should still elicit specifics."""
+    return LiveSimScenario(
+        name="discovery_quiet_routine",
+        description=(
+            "Discovery call: quiet senior gives short answers, then shares a "
+            "specific morning routine and neighbor relationship."
+        ),
+        senior=_margaret_senior(),
+        persona=CallerPersona(
+            name=_MARGARET_BASE.name,
+            age=_MARGARET_BASE.age,
+            personality=(
+                "Reserved and soft-spoken. Gives short answers until Donna asks "
+                "gentle follow-ups about everyday routines."
+            ),
+            speech_style="Quiet elderly speech. Short answers, then a little more detail when prompted.",
+        ),
+        goals=[
+            CallerGoal(
+                description="Give a short opening answer",
+                trigger_phrase="Oh, I'm alright. Not much going on.",
+            ),
+            CallerGoal(
+                description="Share a specific morning routine",
+                trigger_phrase=(
+                    "I do sit by the kitchen window with tea every morning and "
+                    "watch the cardinals at the feeder."
+                ),
+            ),
+            CallerGoal(
+                description="Share a neighbor relationship",
+                trigger_phrase=(
+                    "My neighbor Ruth checks in most afternoons when she walks "
+                    "her little dog."
+                ),
+            ),
+            CallerGoal(
+                description="Warm goodbye",
+                trigger_phrase="That's enough about me for today. Bye now.",
+            ),
+        ],
+        call_type="discovery",
+        max_turns=12,
+        expect_tool_calls=["record_discovery_fact"],
+        expect_memories_injected=False,
+        expect_post_call_analysis=True,
+    )
+
+
+def discovery_off_topic_weather_scenario() -> LiveSimScenario:
+    """Senior asks for current weather while also sharing a hobby."""
+    return LiveSimScenario(
+        name="discovery_off_topic_weather",
+        description=(
+            "Discovery call: senior shares gardening details and asks for current "
+            "weather, exercising record_discovery_fact plus web_search."
+        ),
+        senior=_margaret_senior(),
+        persona=CallerPersona(
+            name=_MARGARET_BASE.name,
+            age=_MARGARET_BASE.age,
+            personality=(
+                "Talkative gardener. Gives useful discovery details but also asks "
+                "Donna to check current weather."
+            ),
+            speech_style=_MARGARET_BASE.speech_style,
+        ),
+        goals=[
+            CallerGoal(
+                description="Share a gardening hobby",
+                trigger_phrase=(
+                    "I've been fussing over my tomatoes and basil every morning. "
+                    "The basil is doing beautifully."
+                ),
+            ),
+            CallerGoal(
+                description="Ask for current weather as an off-topic request",
+                trigger_phrase=(
+                    "Could you check whether rain is coming later today? I don't "
+                    "want those tomato plants soaked again."
+                ),
+            ),
+            CallerGoal(
+                description="Share a regular family call",
+                trigger_phrase="My daughter Carla calls me every Wednesday evening.",
+            ),
+            CallerGoal(
+                description="Warm goodbye",
+                trigger_phrase="Thanks for checking on that. I'll let you go now.",
+            ),
+        ],
+        call_type="discovery",
+        max_turns=14,
+        expect_tool_calls=["record_discovery_fact", "web_search"],
+        expect_memories_injected=False,
+        expect_post_call_analysis=True,
+    )
+
+
+def discovery_boundary_redirect_scenario() -> LiveSimScenario:
+    """Senior declines private topics and pivots to safe interests."""
+    return LiveSimScenario(
+        name="discovery_boundary_redirect",
+        description=(
+            "Discovery call: senior refuses private topics and then shares a safe "
+            "interest and family routine. Tests respectful redirect behavior."
+        ),
+        senior=_margaret_senior(),
+        persona=CallerPersona(
+            name=_MARGARET_BASE.name,
+            age=_MARGARET_BASE.age,
+            personality=(
+                "Warm but private. Does not want to discuss personal details, "
+                "but enjoys talking about music and family routines."
+            ),
+            speech_style=_MARGARET_BASE.speech_style,
+        ),
+        goals=[
+            CallerGoal(
+                description="Set a boundary around private topics",
+                trigger_phrase=(
+                    "I don't really want to talk about private things like that."
+                ),
+            ),
+            CallerGoal(
+                description="Share a safe interest after Donna redirects",
+                trigger_phrase=(
+                    "But I do love the old hymns. I listen to the choir program "
+                    "on Sunday mornings."
+                ),
+            ),
+            CallerGoal(
+                description="Share a family routine",
+                trigger_phrase=(
+                    "My sister Anita calls after the Sunday program so we can "
+                    "talk about the songs."
+                ),
+            ),
+            CallerGoal(
+                description="Warm goodbye",
+                trigger_phrase="I'm glad we talked about that instead. Goodbye.",
+            ),
+        ],
+        call_type="discovery",
+        max_turns=12,
+        expect_tool_calls=["record_discovery_fact"],
+        expect_memories_injected=False,
+        expect_post_call_analysis=True,
+    )
+
+
+def discovery_early_goodbye_scenario() -> LiveSimScenario:
+    """Senior shares one useful fact, then ends the call early."""
+    return LiveSimScenario(
+        name="discovery_early_goodbye",
+        description=(
+            "Discovery call: senior shares one specific relationship, then says "
+            "goodbye early. Tests partial discovery without forcing more questions."
+        ),
+        senior=_margaret_senior(),
+        persona=CallerPersona(
+            name=_MARGARET_BASE.name,
+            age=_MARGARET_BASE.age,
+            personality=(
+                "Pleasant but busy. Will answer one question, then needs to leave."
+            ),
+            speech_style=_MARGARET_BASE.speech_style,
+        ),
+        goals=[
+            CallerGoal(
+                description="Share one neighbor relationship",
+                trigger_phrase=(
+                    "My neighbor June brings my mail up to the porch when it's cold."
+                ),
+            ),
+            CallerGoal(
+                description="End the call early",
+                trigger_phrase=(
+                    "I need to go start supper now. It was nice talking. Bye."
+                ),
+            ),
+        ],
+        call_type="discovery",
+        max_turns=7,
+        expect_tool_calls=["record_discovery_fact"],
+        expect_memories_injected=False,
+        expect_post_call_analysis=True,
+    )
+
+
+def discovery_correction_scenario() -> LiveSimScenario:
+    """Senior corrects a previously stated fact during the same call."""
+    return LiveSimScenario(
+        name="discovery_correction",
+        description=(
+            "Discovery call: senior shares a friend/routine fact, then corrects "
+            "the friend's name. Tests correction handling in scenario coverage."
+        ),
+        senior=_margaret_senior(),
+        persona=CallerPersona(
+            name=_MARGARET_BASE.name,
+            age=_MARGARET_BASE.age,
+            personality=(
+                "Chatty and self-correcting. Notices when she misspeaks and gives "
+                "Donna the corrected detail."
+            ),
+            speech_style=_MARGARET_BASE.speech_style,
+        ),
+        goals=[
+            CallerGoal(
+                description="Share an initial bridge routine with a friend's name",
+                trigger_phrase=(
+                    "I play bridge on Tuesday with Eleanor from church."
+                ),
+            ),
+            CallerGoal(
+                description="Correct the friend's name",
+                trigger_phrase=(
+                    "Oh listen to me, I meant Nora, not Eleanor. Nora is the one "
+                    "from church."
+                ),
+            ),
+            CallerGoal(
+                description="Share a hobby detail",
+                trigger_phrase="We usually have tea afterward and talk about quilting.",
+            ),
+            CallerGoal(
+                description="Warm goodbye",
+                trigger_phrase="I'm glad I corrected that. Talk to you later.",
+            ),
+        ],
+        call_type="discovery",
+        max_turns=12,
+        expect_tool_calls=["record_discovery_fact"],
+        expect_memories_injected=False,
+        expect_post_call_analysis=True,
+    )
+
+
+def discovery_mock_call_scenarios() -> list[LiveSimScenario]:
+    """Six-branch discovery coverage set for the mock-call harness."""
+    return [
+        discovery_scenario(),
+        discovery_quiet_routine_scenario(),
+        discovery_off_topic_weather_scenario(),
+        discovery_boundary_redirect_scenario(),
+        discovery_early_goodbye_scenario(),
+        discovery_correction_scenario(),
+    ]
 
 
 def discovery_boundary_reminder_attempt_scenario() -> LiveSimScenario:

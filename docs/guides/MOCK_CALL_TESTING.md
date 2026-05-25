@@ -169,7 +169,18 @@ metrics logger emits during real calls.
 | `slow_search_overlap` | Same as overlap, but web search is deliberately delayed |
 | `empty_search_result` | Web search returns no useful result; Donna should not retry-loop |
 | `search_phi_guard` | Caller includes fake private details in a search request; query should be sanitized |
+| `consent_grant` | Clear combined call+recording consent grant |
+| `consent_decline` | Clear combined consent decline; scheduler gate should roll up false |
+| `consent_ambiguous_then_grant` | Fuzzy consent answer, clarification, then grant |
+| `consent_ai_question_then_grant` | AI disclosure and recording-access questions before grant |
+| `consent_off_topic_redirect_decline` | Off-topic redirect during consent; no web search; decline captured |
 | `consent_boundary_reminder_attempt` | Consent call resists drifting into reminder creation |
+| `discovery` | Multi-category discovery: friends, hobby/routine, family |
+| `discovery_quiet_routine` | Quiet caller; gentle prompting yields routine and relationship facts |
+| `discovery_off_topic_weather` | Discovery plus current-weather lookup (`record_discovery_fact` + `web_search`) |
+| `discovery_boundary_redirect` | Senior refuses private topics, then shares safe interests |
+| `discovery_early_goodbye` | Partial discovery before an early goodbye |
+| `discovery_correction` | Senior corrects a stated discovery fact in-call |
 | `discovery_boundary_reminder_attempt` | Discovery call resists drifting into reminder scheduling |
 
 Choose with `--scenario <name>`. To add new scenarios see ["Adding a scenario"](#adding-a-scenario) below.
@@ -435,6 +446,9 @@ from tests.simulation import (
     build_stress_pack_specs, build_reminder_stampede_specs,
     build_post_call_stampede_specs, build_parallel_flake_specs,
     scale_2000_load_test_plan,
+
+    # Consent/discovery suites
+    consent_mock_call_scenarios, discovery_mock_call_scenarios,
 
     # Aggregate + compare cohorts
     CohortSloReport, CohortSloThresholds, CohortComparison, SloBreach,
