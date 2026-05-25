@@ -908,6 +908,7 @@ describe('call queue persistence helpers', () => {
 
     await expect(markQueuedCallInitiating({
       queueId: 'queue-1',
+      leaseOwner: 'test-worker',
       attemptId: 'attempt-1',
     }, { database })).resolves.toEqual({
       id: 'queue-1',
@@ -917,6 +918,7 @@ describe('call queue persistence helpers', () => {
 
     await expect(markQueuedCallStarted({
       queueId: 'queue-1',
+      leaseOwner: 'test-worker',
       attemptId: 'attempt-1',
       callControlId: 'v3:test-call',
     }, { database })).resolves.toEqual({
@@ -1388,5 +1390,81 @@ describe('call queue persistence helpers', () => {
       },
     });
     expect(JSON.stringify(auditWriter.mock.calls[0][0].metadata)).not.toContain('dedupe');
+  });
+});
+
+describe('queue state-machine lease-owner guards (C3 review fix)', () => {
+  it('markQueuedCallInitiating returns null when lease is owned by another worker', async () => {
+    // Empty rows simulates the WHERE clause not matching (lease_owner mismatch
+    // or status no longer LEASED). The function must return null without
+    // mutating state.
+    const database = mockDatabase([[]]);
+
+    const result = await markQueuedCallInitiating({
+      queueId: 'queue-1',
+      leaseOwner: 'worker-stale',
+      attemptId: 'attempt-1',
+    }, { database });
+
+    expect(result).toBeNull();
+    const sqlText = database.execute.mock.calls[0][0]?.toQuery
+      ? database.execute.mock.calls[0][0]
+      : database.execute.mock.calls[0][0];
+    // Both clauses must appear in the SQL.
+    const inspected = JSON.stringify(sqlText);
+    expect(inspected).toContain('lease_owner');
+    expect(inspected).toContain('status');
+  });
+
+  it('markQueuedCallStarted returns null queue when status is not INITIATING', async () => {
+    // First call (queue UPDATE) returns empty rows — no row matched the
+    // status=INITIATING + lease_owner filter. Second call should NOT happen
+    // because there's no attemptId, so we expect a single execute() invocation.
+    const database = mockDatabase([[]]);
+
+    const result = await markQueuedCallStarted({
+      queueId: 'queue-1',
+      leaseOwner: 'worker-stale',
+      attemptId: null,
+      callControlId: 'v3:test-call',
+    }, { database });
+
+    expect(result.queue).toBeNull();
+    expect(result.attempt).toBeNull();
+  });
+
+  it('markQueuedCallInitiating and markQueuedCallStarted reject missing leaseOwner', async () => {
+    const database = mockDatabase([]);
+
+    await expect(markQueuedCallInitiating({
+      queueId: 'queue-1',
+      attemptId: 'attempt-1',
+    }, { database })).rejects.toThrow(/leaseOwner/);
+
+    await expect(markQueuedCallStarted({
+      queueId: 'queue-1',
+      attemptId: 'attempt-1',
+      callControlId: 'v3:x',
+    }, { database })).rejects.toThrow(/leaseOwner/);
+  });
+});
+
+describe('queue dispatcher guard expiry (C2 review fix)', () => {
+  it('defaultGuardExpiry uses targetAt + max(60s, 2*lease+30s) cushion, never +24h', () => {
+    const targetAt = new Date('2026-01-01T12:00:00Z');
+    const lease60 = defaultGuardExpiry({ targetAt, leaseSeconds: 60 });
+    // 2 * 60 + 30 = 150s
+    expect(lease60.getTime() - targetAt.getTime()).toBe(150 * 1000);
+
+    const lease120 = defaultGuardExpiry({ targetAt, leaseSeconds: 120 });
+    // 2 * 120 + 30 = 270s
+    expect(lease120.getTime() - targetAt.getTime()).toBe(270 * 1000);
+
+    // Floor at 60s when lease is tiny
+    const lease5 = defaultGuardExpiry({ targetAt, leaseSeconds: 5 });
+    expect(lease5.getTime() - targetAt.getTime()).toBe(60 * 1000);
+
+    // Crucially: never 24 hours
+    expect(lease60.getTime() - targetAt.getTime()).toBeLessThan(60 * 60 * 1000);
   });
 });

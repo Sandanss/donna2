@@ -31,6 +31,8 @@ const {
   executePostCallJob,
   enqueuePostCallJobGraph,
   leaseReadyPostCallJobs,
+  recoverExpiredPostCallJobLeases,
+  reconcilePostCallJobLeases,
   requeueDeadLetterPostCallJob,
   resolvePostCallFailureTransition,
   resolvePostCallProviderCaps,
@@ -278,7 +280,8 @@ describe('post-call jobs Phase 6 queue foundation', () => {
     const handler = vi.fn(async () => undefined);
     const database = {
       execute: vi.fn()
-        .mockResolvedValueOnce(result([]))
+        .mockResolvedValueOnce(result([])) // recoverExpiredPostCallJobLeases — nothing to recover
+        .mockResolvedValueOnce(result([])) // deadLetterBlockedPostCallDependents — nothing blocked
         .mockResolvedValueOnce(result([jobRow({
           id: '66666666-6666-4666-8666-666666666666',
           status: POST_CALL_JOB_STATUSES.LEASED,
@@ -462,5 +465,53 @@ describe('post-call jobs Phase 6 queue foundation', () => {
     expect(report.providerMaxObserved[POST_CALL_PROVIDER_KEYS.GEMINI_FLASH]).toBeLessThanOrEqual(3);
     expect(report.providerMaxObserved[POST_CALL_PROVIDER_KEYS.OPENAI_EMBEDDINGS]).toBeLessThanOrEqual(2);
     expect(report.checks.map(check => check.status)).toEqual(['passed', 'passed', 'passed', 'passed']);
+  });
+});
+
+describe('post-call jobs lease recovery (C1 review fix)', () => {
+  it('recoverExpiredPostCallJobLeases flips expired LEASED rows back to QUEUED', async () => {
+    const database = {
+      execute: vi.fn().mockResolvedValueOnce(result([
+        { id: 'job-1', job_type: POST_CALL_JOB_TYPES.ANALYSIS, attempt_count: 2, max_attempts: 5 },
+        { id: 'job-2', job_type: POST_CALL_JOB_TYPES.MEMORY_EXTRACTION, attempt_count: 1, max_attempts: 5 },
+      ])),
+    };
+
+    const recovered = await recoverExpiredPostCallJobLeases(
+      { now: new Date('2026-05-25T01:00:00Z'), limit: 50 },
+      { database },
+    );
+
+    expect(recovered).toHaveLength(2);
+    expect(recovered[0].id).toBe('job-1');
+    expect(database.execute).toHaveBeenCalledTimes(1);
+
+    const sqlObj = JSON.stringify(database.execute.mock.calls[0][0]);
+    // Reverts to QUEUED, clears lease_owner + lease_expires_at, preserves attempt_count.
+    expect(sqlObj).toContain('queued');
+    expect(sqlObj).toContain('lease_owner = NULL');
+    expect(sqlObj).toContain('lease_expires_at = NULL');
+    expect(sqlObj).not.toContain('attempt_count = 0');
+    // CRITICAL: only LEASED rows are touched. A worker that crashed during
+    // RUNNING is NOT auto-recovered (could re-fire external side effects).
+    expect(sqlObj).toContain('leased');
+    expect(sqlObj).not.toMatch(/status\s*IN\s*\([^)]*running/i);
+  });
+
+  it('reconcilePostCallJobLeases returns recovered count', async () => {
+    const database = {
+      execute: vi.fn().mockResolvedValueOnce(result([
+        { id: 'job-1', job_type: POST_CALL_JOB_TYPES.ANALYSIS, attempt_count: 1, max_attempts: 5 },
+      ])),
+    };
+
+    const summary = await reconcilePostCallJobLeases({}, { database });
+    expect(summary).toEqual({ recovered: 1 });
+  });
+
+  it('recoverExpiredPostCallJobLeases returns empty list when nothing expired', async () => {
+    const database = { execute: vi.fn().mockResolvedValueOnce(result([])) };
+    const recovered = await recoverExpiredPostCallJobLeases({}, { database });
+    expect(recovered).toEqual([]);
   });
 });

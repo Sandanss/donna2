@@ -753,6 +753,58 @@ export async function leaseReadyPostCallJobs({
   return rowsFrom(result).map(normalizeJobRow);
 }
 
+/**
+ * Recover leased post-call jobs whose lease has expired (worker crashed,
+ * batch ran long, network partition). Mirrors `recoverExpiredQueueLeases`
+ * in services/call-queue.js so a stranded job can be re-leased on the next
+ * cycle.
+ *
+ * IMPORTANT: only recovers status=LEASED. Jobs that already transitioned to
+ * RUNNING (via markPostCallJobRunning) are the worker's responsibility —
+ * their external side effects may have partially fired, so auto-retrying
+ * could cause duplicates. Stuck RUNNING jobs are surfaced by the dead-letter
+ * admin UI for operator triage.
+ *
+ * Preserves attempt_count (already incremented at lease time) so the retry
+ * policy still bounds total attempts.
+ */
+export async function recoverExpiredPostCallJobLeases({
+  limit = 100,
+  now = new Date(),
+} = {}, { database = db } = {}) {
+  const safeLimit = safePositiveInteger(limit, 100, 5000);
+  const currentTime = boundedIsoDate(now, 'now');
+
+  const result = await database.execute(sql`
+    WITH candidates AS (
+      SELECT id
+      FROM post_call_jobs
+      WHERE status = ${POST_CALL_JOB_STATUSES.LEASED}
+        AND lease_expires_at <= ${currentTime}
+      ORDER BY lease_expires_at ASC
+      FOR UPDATE SKIP LOCKED
+      LIMIT ${safeLimit}
+    )
+    UPDATE post_call_jobs job
+    SET status = ${POST_CALL_JOB_STATUSES.QUEUED},
+        lease_owner = NULL,
+        lease_expires_at = NULL,
+        updated_at = ${currentTime}
+    FROM candidates
+    WHERE job.id = candidates.id
+    RETURNING job.id, job.job_type, job.attempt_count, job.max_attempts
+  `);
+
+  // Return list to caller for observability (count surfaces in
+  // runPostCallWorkerOnce return value and the reconciler wrapper).
+  return rowsFrom(result);
+}
+
+export async function reconcilePostCallJobLeases(options = {}, { database = db } = {}) {
+  const recovered = await recoverExpiredPostCallJobLeases(options, { database });
+  return { recovered: recovered.length };
+}
+
 export async function executePostCallJob({
   database = db,
   job,
@@ -842,6 +894,7 @@ export async function runPostCallWorkerOnce({
   now = new Date(),
 } = {}) {
   const owner = requireString(workerId, 'workerId');
+  const recoveredLeases = await recoverExpiredPostCallJobLeases({ now }, { database });
   const blocked = await deadLetterBlockedPostCallDependents({ database, now });
   const jobs = await leaseReadyPostCallJobs({
     database,
@@ -869,6 +922,7 @@ export async function runPostCallWorkerOnce({
   return {
     leased: jobs.length,
     blockedDeadLettered: blocked.length,
+    recoveredLeases: recoveredLeases.length,
     counts,
     results,
     providerSemaphores: providerSemaphores.snapshot(),

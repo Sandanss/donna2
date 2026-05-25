@@ -1496,8 +1496,14 @@ export async function releaseOutboundCallGuard(input, { database = db } = {}) {
   return rowsFrom(result)[0] || null;
 }
 
+// markQueuedCallInitiating and markQueuedCallStarted require leaseOwner so
+// they no-op (return null) if the lease was recovered by another dispatcher
+// while we were processing. Without this guard, the row's state machine can
+// be corrupted by a stale dispatcher writing INITIATING/STARTED after a
+// second dispatcher already CANCELLED it (guard-loser path).
 export async function markQueuedCallInitiating(input, { database = db } = {}) {
   const queueId = requireString(input.queueId, 'queueId');
+  const leaseOwner = requireString(input.leaseOwner, 'leaseOwner');
   const attemptId = input.attemptId || null;
 
   const result = await database.execute(sql`
@@ -1507,6 +1513,8 @@ export async function markQueuedCallInitiating(input, { database = db } = {}) {
         last_attempt_id = ${attemptId},
         updated_at = NOW()
     WHERE id = ${queueId}
+      AND lease_owner = ${leaseOwner}
+      AND status = ${CALL_QUEUE_STATUSES.LEASED}
     RETURNING *
   `);
 
@@ -1515,6 +1523,7 @@ export async function markQueuedCallInitiating(input, { database = db } = {}) {
 
 export async function markQueuedCallStarted(input, { database = db } = {}) {
   const queueId = requireString(input.queueId, 'queueId');
+  const leaseOwner = requireString(input.leaseOwner, 'leaseOwner');
   const attemptId = input.attemptId || null;
   const callControlId = input.callControlId || null;
 
@@ -1524,6 +1533,8 @@ export async function markQueuedCallStarted(input, { database = db } = {}) {
         last_attempt_id = ${attemptId},
         updated_at = NOW()
     WHERE id = ${queueId}
+      AND lease_owner = ${leaseOwner}
+      AND status = ${CALL_QUEUE_STATUSES.INITIATING}
     RETURNING *
   `);
 
@@ -1875,6 +1886,10 @@ export async function dispatchQueuedCalls({
       trackCapacityReservation({ reservationId, queueId });
       result.reserved++;
 
+      // Pass leaseSeconds so defaultGuardExpiry can compute the tight
+      // expiry window (`targetAt + max(60s, 2 * leaseSeconds + 30s)`).
+      // A previous version hardcoded a 24h expiry here, which defeated the
+      // reconciler — a crashed dispatcher locked the senior for 24h.
       const guardResult = await acquireOutboundCallGuard({
         seniorId,
         queueId,
@@ -1882,7 +1897,7 @@ export async function dispatchQueuedCalls({
         callType,
         architecture,
         targetAt,
-        expiresAt: new Date(currentTime.getTime() + 24 * 60 * 60 * 1000),
+        leaseSeconds,
       }, { database });
 
       if (!guardResult.acquired) {
@@ -1913,10 +1928,27 @@ export async function dispatchQueuedCalls({
         dialStartedAt: currentTime,
       }, { database });
       attempt = attemptResult.row;
-      await markQueuedCallInitiating({
+      const initiating = await markQueuedCallInitiating({
         queueId,
+        leaseOwner: owner,
         attemptId: attempt?.id || null,
       }, { database });
+      if (!initiating) {
+        // Lease was recovered by another dispatcher mid-dial. Release our
+        // capacity reservation, mark the attempt suppressed, and skip the
+        // dial. The dial-authority guard would have caught a double-dial
+        // anyway, but bailing here avoids burning the Telnyx HTTP call.
+        result.suppressed++;
+        await markCallAttemptSuppressed({
+          attemptId: attempt?.id || null,
+          providerErrorCode: 'lease_lost_before_initiate',
+        }, { database });
+        await releaseReservation({ reservationId, queueId });
+        untrackCapacityReservation(reservationId);
+        reservationAcquired = false;
+        result.releasedReservations++;
+        continue;
+      }
 
       const guardInitiating = await markOutboundCallGuardInitiatingIfCallable({
         guardId: guardIdFromRow(guard),
@@ -1975,11 +2007,23 @@ export async function dispatchQueuedCalls({
         });
       }
       try {
-        await markQueuedCallStarted({
+        const started = await markQueuedCallStarted({
           queueId,
+          leaseOwner: owner,
           attemptId: attempt?.id || null,
           callControlId,
         }, { database });
+        if (!started.queue) {
+          // Row was cancelled / recovered by another dispatcher while we
+          // were dialing. Log loudly so we can correlate against the
+          // real Telnyx call that's now in flight; the dial-authority
+          // guard ensures it's actually ours.
+          log.warn('Queue row state changed mid-dial; STARTED filter did not match', {
+            queueId,
+            leaseOwner: owner,
+            callControlId,
+          });
+        }
       } catch (error) {
         log.warn('Failed to mark queue call started after Telnyx call started', {
           queueId,
