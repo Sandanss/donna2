@@ -265,6 +265,10 @@ async def run_post_call(
                 "duration_seconds": duration_seconds,
                 "status": "completed",
                 "transcript": transcript,
+                # Telemetry (migration 020): plumbed from QO / AMD handler.
+                "amd_result": session_state.get("_amd_result"),
+                "goodbye_detected_at": session_state.get("_goodbye_detected_at"),
+                "end_reason": session_state.get("_end_reason"),
             })
     except Exception as e:
         post_call_error_steps.append("complete conversation")

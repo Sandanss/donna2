@@ -10,7 +10,13 @@ companion-call categories used for guidance and the FrameProcessor wrapper.
 import asyncio
 from dataclasses import dataclass, field
 from loguru import logger
-from pipecat.frames.frames import EndFrame, Frame, TranscriptionFrame
+from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
+    EndFrame,
+    Frame,
+    TranscriptionFrame,
+)
 from pipecat.processors.frame_processor import FrameProcessor
 
 from processors.patterns import (
@@ -263,6 +269,14 @@ class QuickObserverProcessor(FrameProcessor):
     # Gives the LLM time to generate and TTS to speak the goodbye audio.
     GOODBYE_DELAY_SECONDS = 5.0
     PROGRAMMATIC_GOODBYE_MIN_ELAPSED_SECONDS = 0.0
+    # After the initial delay, keep checking every TTS_IDLE_POLL_SECONDS to
+    # see if Donna's audio output has gone idle. Caps total wait so the call
+    # can't hang forever if TTS keeps generating (model run-on).
+    TTS_IDLE_POLL_SECONDS = 0.5
+    MAX_END_WAIT_SECONDS = 30.0
+    # Buffer between BotStoppedSpeaking and the EndFrame fire, so the final
+    # frame of audio has time to flush out over the network.
+    POST_TTS_BUFFER_SECONDS = 0.6
 
     def __init__(self, session_state: dict | None = None, **kwargs):
         super().__init__(**kwargs)
@@ -271,19 +285,131 @@ class QuickObserverProcessor(FrameProcessor):
         self._session_state = session_state
         self._pipeline_task = None  # Set via set_pipeline_task() after pipeline creation
         self._goodbye_task: asyncio.Task | None = None
+        # Tracks whether Donna's TTS is currently producing audio frames.
+        # Updated by BotStartedSpeakingFrame / BotStoppedSpeakingFrame.
+        self._bot_speaking: bool = False
+        self._bot_last_stopped_at: float | None = None
 
     def set_pipeline_task(self, task):
         """Set the pipeline task reference for programmatic call ending."""
         self._pipeline_task = task
 
+    async def _try_transition_to_winding_down(self) -> bool:
+        """Programmatically transition the flow to winding_down.
+
+        Bypasses the LLM tool call (which is unreliable when the senior says
+        a weak goodbye like just 'bye'). Builds the winding_down node from
+        the cached flows_tools + session_state and asks flow_manager to
+        switch. Returns True on success, False if any prerequisite is
+        missing (in which case the caller should fall back to EndFrame).
+        """
+        if not self._session_state:
+            return False
+        flow_manager = self._session_state.get("_flow_manager")
+        flows_tools = self._session_state.get("_flow_tools")
+        if flow_manager is None or not flows_tools:
+            logger.warning(
+                "[QuickObserver] Can't programmatically transition — "
+                "flow_manager={fm} flow_tools={ft}",
+                fm=flow_manager is not None,
+                ft=bool(flows_tools),
+            )
+            return False
+        try:
+            from flows.nodes import build_winding_down_node
+            node = build_winding_down_node(self._session_state, flows_tools)
+            await flow_manager.set_node_from_config(node)
+            logger.info(
+                "[QuickObserver] Programmatic transition: main → winding_down"
+            )
+            if self._session_state is not None:
+                self._session_state["_end_reason"] = "goodbye_detected_qo_transition"
+            return True
+        except Exception as e:
+            logger.error(
+                "[QuickObserver] Transition to winding_down failed: {err}",
+                err=str(e),
+            )
+            return False
+
+    async def _wait_until_bot_silent(self, *, max_wait: float) -> bool:
+        """Wait until the bot is no longer speaking. Returns True if reached
+        a silent state (with the POST_TTS_BUFFER_SECONDS buffer), False if
+        we hit the cap while bot was still speaking."""
+        import time as _t
+        start = _t.time()
+        # If bot hasn't started speaking yet, give it a brief moment to begin
+        # (TTS pipeline takes ~100-500ms to first audio frame). Otherwise we'd
+        # bail out before Donna gets a chance to speak.
+        if not self._bot_speaking and self._bot_last_stopped_at is None:
+            grace_end = _t.time() + 1.0
+            while _t.time() < grace_end and not self._bot_speaking:
+                await asyncio.sleep(self.TTS_IDLE_POLL_SECONDS)
+        # Now wait for bot to stop speaking, capped at max_wait total.
+        while _t.time() - start < max_wait:
+            if not self._bot_speaking:
+                # Got silence — let the final audio frame flush.
+                await asyncio.sleep(self.POST_TTS_BUFFER_SECONDS)
+                # Re-check: if Donna started speaking again during the buffer,
+                # keep waiting (another turn of response generation).
+                if not self._bot_speaking:
+                    return True
+            await asyncio.sleep(self.TTS_IDLE_POLL_SECONDS)
+        return False
+
     async def _force_end_call(self):
-        """Wait for goodbye audio to play, then end the call via EndFrame."""
+        """End the call gracefully on detected goodbye.
+
+        Strategy (replaces the old fixed-delay EndFrame):
+          1. Try a programmatic transition to winding_down. The closing flow
+             will speak its piece and emit end_conversation. No cutoff.
+          2. If the transition succeeds, set a long max-wait safety net to
+             EndFrame if the flow gets stuck.
+          3. If the transition fails (no flow_manager/flow_tools available,
+             or any error), wait for Donna to stop speaking, then fire
+             EndFrame — preserves the original behavior but no longer cuts
+             her off mid-sentence.
+        """
         try:
             settings = (self._session_state or {}).get("call_settings") or {}
-            delay = settings.get("goodbye_delay_seconds", self.GOODBYE_DELAY_SECONDS)
-            await asyncio.sleep(delay)
+            initial_delay = settings.get("goodbye_delay_seconds", self.GOODBYE_DELAY_SECONDS)
+            max_wait = settings.get("goodbye_max_wait_seconds", self.MAX_END_WAIT_SECONDS)
+
+            # Phase 1: try programmatic transition immediately.
+            transitioned = await self._try_transition_to_winding_down()
+
+            if transitioned:
+                # Closing node has post_actions=end_conversation; the flow
+                # will end the call naturally. Set a long safety net just
+                # in case the closing flow stalls.
+                await asyncio.sleep(max_wait)
+                if self._pipeline_task and (self._session_state or {}).get("_end_reason") != "user_hangup":
+                    logger.warning(
+                        "[QuickObserver] Winding-down took longer than {s}s — "
+                        "force-ending as safety net",
+                        s=max_wait,
+                    )
+                    if self._session_state is not None:
+                        self._session_state["_end_reason"] = "goodbye_detected_safety_net"
+                    await self._pipeline_task.queue_frame(EndFrame())
+                return
+
+            # Phase 2: fall back to wait-for-TTS-silent then EndFrame.
+            logger.info(
+                "[QuickObserver] Transition not available — falling back to "
+                "TTS-aware EndFrame (delay={d}s, max_wait={m}s)",
+                d=initial_delay,
+                m=max_wait,
+            )
+            await asyncio.sleep(initial_delay)
+            reached_silent = await self._wait_until_bot_silent(max_wait=max_wait)
+            if not reached_silent:
+                logger.warning(
+                    "[QuickObserver] Bot still speaking after {s}s — force-ending anyway",
+                    s=max_wait,
+                )
             if self._pipeline_task:
-                logger.info("[QuickObserver] Goodbye timeout reached — ending call programmatically")
+                logger.info("[QuickObserver] Goodbye reached silent state — ending call")
                 if self._session_state is not None:
                     self._session_state["_end_reason"] = "goodbye_detected"
                 await self._pipeline_task.queue_frame(EndFrame())
@@ -306,6 +432,16 @@ class QuickObserverProcessor(FrameProcessor):
 
     async def process_frame(self, frame: Frame, direction):
         await super().process_frame(frame, direction)
+
+        # Track bot-speaking state so _wait_until_bot_silent can do its job.
+        # These frames originate downstream of the TTS service and are
+        # observed here purely for goodbye-timing logic. Always pass through.
+        if isinstance(frame, BotStartedSpeakingFrame):
+            self._bot_speaking = True
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            self._bot_speaking = False
+            import time as _t
+            self._bot_last_stopped_at = _t.time()
 
         if isinstance(frame, TranscriptionFrame):
             text = frame.text
@@ -392,9 +528,15 @@ class QuickObserverProcessor(FrameProcessor):
                         d=delay,
                     )
                     self._goodbye_task = asyncio.create_task(self._force_end_call())
-                    # Signal to Director to suppress stale guidance
+                    # Signal to Director to suppress stale guidance + stamp the
+                    # detection time so post-call analytics know when QO fired.
                     if self._session_state is not None:
                         self._session_state["_goodbye_in_progress"] = True
+                        if not self._session_state.get("_goodbye_detected_at"):
+                            import time as _t, datetime as _dt
+                            self._session_state["_goodbye_detected_at"] = (
+                                _dt.datetime.now(_dt.timezone.utc)
+                            )
 
             # Cancel goodbye timer if senior keeps speaking (false goodbye)
             elif self._goodbye_task is not None and not self._goodbye_task.done():

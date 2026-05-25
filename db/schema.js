@@ -70,6 +70,10 @@ export const conversations = pgTable('conversations', {
   // Discovery-call output (migration 015). Caregiver-reviewable list of
   // proposed profile facts; null on non-discovery calls.
   profileSuggestions: jsonb('profile_suggestions'),
+  // Telemetry (migration 020): AMD classification + goodbye timing + end reason.
+  amdResult: varchar('amd_result', { length: 40 }),
+  goodbyeDetectedAt: timestamp('goodbye_detected_at', { withTimezone: true }),
+  endReason: varchar('end_reason', { length: 60 }),
   createdAt: timestamp('created_at').defaultNow(),
 });
 

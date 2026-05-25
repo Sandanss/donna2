@@ -507,6 +507,11 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
             session_state["_caregiver_notes_content"] = metadata["caregiver_notes_content"]
         if metadata.get("call_settings"):
             session_state["call_settings"] = metadata["call_settings"]
+        # Carry Telnyx AMD classification through so post-call can persist it
+        # on conversations.amd_result for misclassification analytics.
+        amd_result = metadata.get("telnyx_amd_result")
+        if amd_result:
+            session_state["_amd_result"] = str(amd_result)
         if "is_outbound" in metadata:
             session_state["is_outbound"] = metadata["is_outbound"]
         # Populate prospect data for onboarding calls
@@ -803,6 +808,10 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
     # so bot.py and the live-sim pipeline (tests/simulation/pipeline.py) stay
     # in lockstep. Register new call types in _CALL_TYPE_TOOL_FACTORIES there.
     flows_tools = select_flows_tools(session_state)
+    # Stash for Quick Observer's programmatic transition path. When QO detects
+    # a strong goodbye, it builds the winding_down node directly and asks
+    # flow_manager to switch — bypassing the LLM tool call that's unreliable.
+    session_state["_flow_tools"] = flows_tools
     initial_node = build_initial_node(session_state, flows_tools)
 
     flow_manager = FlowManager(
