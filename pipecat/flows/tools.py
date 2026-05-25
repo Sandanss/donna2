@@ -38,7 +38,7 @@ SEARCH_MEMORIES_SCHEMA = {
     "properties": {
         "query": {
             "type": "string",
-            "description": "What to search for (e.g., 'gardening', 'grandson birthday', 'medication')",
+            "description": "What to search for (e.g., 'gardening', 'grandson birthday', 'local events')",
         },
     },
     "required": ["query"],
@@ -65,7 +65,7 @@ def _web_search_schema(today_date: date | None = None) -> dict:
             "or anything you're unsure about. Always include the current year in "
             "queries about recent events, scores, or elections. "
             "Never include names, phone numbers, addresses, caregiver names, or private "
-            "medical history in the query. Use anonymous general wording for health questions. "
+            "private history in the query. Use anonymous general wording for health questions. "
             "IMPORTANT: Before calling this tool, always say a brief natural filler "
             "like 'Let me look that up for you', 'One moment while I check on that', "
             "or 'Hmm, let me find out'. This gives the senior something to hear while "
@@ -105,16 +105,16 @@ CREATE_REMINDER_SCHEMA = {
         "<frequency> — does that sound right?') and only call this tool after they confirm. "
         "Compute scheduled_time in the senior's local timezone (from system prompt 'Current time') "
         "and emit ISO 8601 WITH offset. AFTER the tool returns success, briefly confirm aloud "
-        "(e.g., 'Got it — I saved that and I'll call you at that time'). Do NOT use this for "
-        "medication reminders the family already manages — only when the senior themselves asks."
+        "(e.g., 'Got it — I saved that and I'll call you at that time'). For clinical "
+        "instructions, ask them to have family manage that outside Donna."
     ),
     "properties": {
         "title": {
             "type": "string",
             "description": (
                 "Short human-readable title (max 200 chars), in the same language the "
-                "senior is speaking. Examples: 'Doctor appointment', 'Cita con el médico', "
-                "'Take blood pressure pill', 'Llamar a María'. Do NOT include the date/time "
+                "senior is speaking. Examples: 'Bridge club', 'Llamar a María', "
+                "'Water porch plants'. Do NOT include the date/time "
                 "in the title — that goes in scheduled_time."
             ),
         },
@@ -130,11 +130,10 @@ CREATE_REMINDER_SCHEMA = {
         },
         "type": {
             "type": "string",
-            "enum": ["medication", "appointment", "custom", "wellness", "social"],
+            "enum": ["appointment", "custom", "wellness", "social"],
             "description": (
-                "Category. Use 'medication' for pills/meds, 'appointment' for doctor/dentist/"
-                "salon visits, 'social' for calls/visits to family/friends, 'wellness' for "
-                "exercise/water/walks, 'custom' otherwise."
+                "Category. Use 'appointment' for appointments, 'social' for calls/visits "
+                "to family/friends, 'wellness' for exercise/water/walks, and 'custom' otherwise."
             ),
         },
         "description": {
@@ -319,6 +318,59 @@ def make_tool_handlers(session_state: dict) -> dict:
         Dict mapping tool name → async handler function.
     """
 
+    def _find_reminder_delivery(deliveries: list, reminder_id: str) -> dict | None:
+        needle = str(reminder_id or "").strip().lower()
+        if not needle:
+            return None
+
+        def _normalize(value: str) -> str:
+            return "".join(ch for ch in str(value or "").lower() if ch.isalnum())
+
+        def _tokens(value: str) -> set[str]:
+            stopwords = {"a", "an", "the", "to", "for", "with", "about", "and"}
+            return {
+                token
+                for token in re.findall(r"[a-z0-9]+", str(value or "").lower())
+                if len(token) > 2 and token not in stopwords
+            }
+
+        ordinal_patterns = (
+            (0, r"(?:the\s+)?(?:first|1st|one|#?1)(?:\s+(?:one|reminder))?"),
+            (1, r"(?:the\s+)?(?:second|2nd|two|#?2)(?:\s+(?:one|reminder))?"),
+            (2, r"(?:the\s+)?(?:third|3rd|three|#?3)(?:\s+(?:one|reminder))?"),
+            (3, r"(?:the\s+)?(?:fourth|4th|four|#?4)(?:\s+(?:one|reminder))?"),
+            (4, r"(?:the\s+)?(?:fifth|5th|five|#?5)(?:\s+(?:one|reminder))?"),
+        )
+        for index, pattern in ordinal_patterns:
+            if re.fullmatch(pattern, needle) and index < len(deliveries):
+                delivery = deliveries[index]
+                if isinstance(delivery, dict):
+                    return delivery
+
+        needle_normalized = _normalize(needle)
+        needle_tokens = _tokens(needle)
+        token_matches: list[tuple[int, int, dict]] = []
+        for delivery in deliveries:
+            if not isinstance(delivery, dict):
+                continue
+            candidates = (
+                delivery.get("reminder_id"),
+                delivery.get("id"),
+                delivery.get("title"),
+            )
+            if any(str(value or "").strip().lower() == needle for value in candidates):
+                return delivery
+            if any(_normalize(value) == needle_normalized for value in candidates):
+                return delivery
+            title_tokens = _tokens(delivery.get("title") or "")
+            if title_tokens and title_tokens <= needle_tokens:
+                token_matches.append((len(title_tokens), len(_normalize(delivery.get("title") or "")), delivery))
+            elif needle_tokens and needle_tokens <= title_tokens:
+                token_matches.append((len(needle_tokens), -len(title_tokens), delivery))
+        if token_matches:
+            return max(token_matches, key=lambda match: (match[0], match[1]))[2]
+        return None
+
     async def handle_search_memories(args: dict) -> dict:
         senior_id = session_state.get("senior_id")
         if not senior_id:
@@ -443,14 +495,25 @@ def make_tool_handlers(session_state: dict) -> dict:
         # Local tracking is synchronous (critical for prompt context), but
         # post-call cleanup verifies the DB status before skipping retries.
         delivered = session_state.setdefault("reminders_delivered", set())
+        deliveries = session_state.get("reminder_deliveries") or []
+        delivery = _find_reminder_delivery(deliveries, reminder_id)
+        if delivery is None:
+            delivery = session_state.get("reminder_delivery") or {}
+
         if reminder_id:
             delivered.add(reminder_id)
-        delivery = session_state.get("reminder_delivery") or {}
+        delivery_reminder_id = delivery.get("reminder_id") or delivery.get("id")
+        if delivery_reminder_id:
+            delivered.add(delivery_reminder_id)
         title = delivery.get("title")
         if title:
             delivered.add(title)
 
         session_state["_reminder_ack_attempted"] = True
+        attempted_ids = session_state.setdefault("_reminder_ack_attempted_ids", set())
+        for value in (reminder_id, delivery_reminder_id, title):
+            if value:
+                attempted_ids.add(value)
 
         async def _persist_ack():
             try:
@@ -546,7 +609,7 @@ def make_tool_handlers(session_state: dict) -> dict:
                 "result": "I need a title. Ask them what to remind them about.",
             }
 
-        if reminder_type not in {"medication", "appointment", "custom", "wellness", "social"}:
+        if reminder_type not in {"appointment", "custom", "wellness", "social"}:
             reminder_type = "custom"
 
         if frequency not in {"daily", "weekly", "one-time"}:

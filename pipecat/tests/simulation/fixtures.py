@@ -41,7 +41,7 @@ class TestSenior:
         phone: 10-digit phone number (not dialled in sim tests).
         timezone: IANA timezone for scheduling logic.
         interests: List of interest strings injected into the system prompt.
-        medical_notes: Medical context available to the pipeline.
+        profile_notes: Profile notes available to the pipeline.
         city: City for weather/news personalisation.
         state: US state abbreviation.
     """
@@ -53,7 +53,7 @@ class TestSenior:
     interests: list[str] = field(default_factory=lambda: [
         "gardening", "cooking", "grandchildren", "bird watching", "crossword puzzles",
     ])
-    medical_notes: str = "Type 2 diabetes, mild arthritis in hands"
+    profile_notes: str = "Prefers gentle reminders and concise check-ins"
     city: str = "Dallas"
     state: str = "TX"
 
@@ -75,6 +75,37 @@ DEFAULT_CACHED_NEWS = (
     "Weather expected to be sunny with highs in the 70s."
 )
 
+_SENIOR_PROFILE_NOTES_COLUMN: str | None = None
+
+
+def _pick_profile_notes_column(columns: set[str]) -> str:
+    """Choose the active senior notes column during the rename migration."""
+    if "profile_notes" in columns:
+        return "profile_notes"
+    if "medical_notes" in columns:
+        return "medical_notes"
+    return "profile_notes"
+
+
+async def _senior_profile_notes_column() -> str:
+    """Return the DB column used for senior profile notes in this environment."""
+    global _SENIOR_PROFILE_NOTES_COLUMN
+    if _SENIOR_PROFILE_NOTES_COLUMN:
+        return _SENIOR_PROFILE_NOTES_COLUMN
+
+    from db import query_many
+
+    rows = await query_many(
+        """SELECT column_name
+             FROM information_schema.columns
+            WHERE table_name = 'seniors'
+              AND column_name IN ('profile_notes', 'medical_notes')"""
+    )
+    _SENIOR_PROFILE_NOTES_COLUMN = _pick_profile_notes_column(
+        {str(row["column_name"]) for row in rows}
+    )
+    return _SENIOR_PROFILE_NOTES_COLUMN
+
 
 # ---------------------------------------------------------------------------
 # seed_test_senior
@@ -95,11 +126,12 @@ async def seed_test_senior(senior: TestSenior | None = None) -> TestSenior:
     from db import execute, query_one
 
     senior = senior or TestSenior()
+    notes_column = await _senior_profile_notes_column()
 
     # Insert senior -- ON CONFLICT guards against re-runs
     await execute(
-        """INSERT INTO seniors (id, name, phone, timezone, interests,
-               medical_notes, cached_news, is_active)
+        f"""INSERT INTO seniors (id, name, phone, timezone, interests,
+               {notes_column}, cached_news, is_active)
            VALUES ($1, $2, $3, $4, $5, $6, $7, true)
            ON CONFLICT (id) DO NOTHING""",
         uuid.UUID(senior.id),
@@ -107,7 +139,7 @@ async def seed_test_senior(senior: TestSenior | None = None) -> TestSenior:
         senior.phone,
         senior.timezone,
         senior.interests,
-        senior.medical_notes,
+        senior.profile_notes,
         DEFAULT_CACHED_NEWS,
     )
 
@@ -208,7 +240,7 @@ async def build_session_state(
             "phone": senior.phone,
             "timezone": senior.timezone,
             "interests": senior.interests,
-            "medical_notes": senior.medical_notes,
+            "profile_notes": senior.profile_notes,
             "interest_scores": None,
         },
         "memory_context": memory_context,

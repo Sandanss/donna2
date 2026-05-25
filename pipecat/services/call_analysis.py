@@ -288,7 +288,7 @@ async def analyze_completed_call(
         ANALYSIS_TURN_TEMPLATE
         .replace("{{SENIOR_NAME}}", (senior_context or {}).get("name") or "Unknown")
         .replace("{{CALL_DATETIME}}", call_datetime)
-        .replace("{{HEALTH_CONDITIONS}}", (senior_context or {}).get("medical_notes") or "None known")
+        .replace("{{HEALTH_CONDITIONS}}", (senior_context or {}).get("profile_notes") or "None known")
         .replace(
             "{{FAMILY_MEMBERS}}",
             ", ".join((senior_context or {}).get("family") or []) or "Unknown",

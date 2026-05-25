@@ -68,6 +68,18 @@ class TestToolSchemas:
         sanitized = sanitize_web_search_query("I take metformin and feel dizzy in Springfield", session_state)
         assert sanitized == "a person take metformin and feel dizzy"
 
+    def test_web_search_sanitizer_removes_contact_and_address_details(self):
+        session_state = {"senior": {"name": "Alice Parker"}}
+        sanitized = sanitize_web_search_query(
+            "Find garden services for Alice at 123 Maple Street, 555-121-3434",
+            session_state,
+        )
+
+        assert "Alice" not in sanitized
+        assert "123 Maple" not in sanitized
+        assert "555" not in sanitized
+        assert "garden services" in sanitized
+
     def test_web_search_sanitizer_drops_prompt_injection_canary(self):
         session_state = {
             "senior": {

@@ -43,7 +43,7 @@ class CreateSeniorRequest(BaseModel):
     timezone: str = "America/New_York"
     interests: Optional[list[str]] = None
     family_info: Optional[dict] = None
-    medical_notes: Optional[str] = Field(default=None, max_length=10000)
+    profile_notes: Optional[str] = Field(default=None, max_length=10000)
     preferred_call_times: Optional[dict] = None
     is_active: bool = True
 
@@ -61,7 +61,7 @@ class UpdateSeniorRequest(BaseModel):
     timezone: Optional[str] = None
     interests: Optional[list[str]] = None
     family_info: Optional[dict] = None
-    medical_notes: Optional[str] = Field(default=None, max_length=10000)
+    profile_notes: Optional[str] = Field(default=None, max_length=10000)
     preferred_call_times: Optional[dict] = None
     is_active: Optional[bool] = None
 

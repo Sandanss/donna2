@@ -18,7 +18,7 @@ export default function Seniors() {
   const [phone, setPhone] = useState('');
   const [location, setLocation] = useState('');
   const [interests, setInterests] = useState('');
-  const [medicalNotes, setMedicalNotes] = useState('');
+  const [profileNotes, setProfileNotes] = useState('');
   const [adding, setAdding] = useState(false);
 
   // Edit modal state
@@ -28,7 +28,7 @@ export default function Seniors() {
   const [editPhone, setEditPhone] = useState('');
   const [editLocation, setEditLocation] = useState('');
   const [editInterests, setEditInterests] = useState('');
-  const [editMedicalNotes, setEditMedicalNotes] = useState('');
+  const [editProfileNotes, setEditProfileNotes] = useState('');
   const [editMemories, setEditMemories] = useState<Memory[]>([]);
   const [newMemoryType, setNewMemoryType] = useState<string>('fact');
   const [newMemoryContent, setNewMemoryContent] = useState('');
@@ -70,14 +70,14 @@ export default function Seniors() {
         phone: phone.trim(),
         interests: interests ? interests.split(',').map((s) => s.trim()).filter(Boolean) : [],
         familyInfo: { location: location.trim() },
-        medicalNotes: medicalNotes.trim(),
+        profileNotes: profileNotes.trim(),
       });
       showToast('Senior added successfully');
       setName('');
       setPhone('');
       setLocation('');
       setInterests('');
-      setMedicalNotes('');
+      setProfileNotes('');
       await loadSeniors();
     } catch (e: any) {
       showToast(e.message || 'Failed to add senior', 'error');
@@ -113,7 +113,7 @@ export default function Seniors() {
     setEditPhone(senior.phone);
     setEditLocation(senior.familyInfo?.location || '');
     setEditInterests(senior.interests?.join(', ') || '');
-    setEditMedicalNotes(senior.medicalNotes || '');
+    setEditProfileNotes(senior.profileNotes || '');
     setEditMemories(senior.memories || []);
     setNewMemoryType('fact');
     setNewMemoryContent('');
@@ -129,7 +129,7 @@ export default function Seniors() {
         phone: editPhone.trim(),
         interests: editInterests ? editInterests.split(',').map((s) => s.trim()).filter(Boolean) : [],
         familyInfo: { location: editLocation.trim() },
-        medicalNotes: editMedicalNotes.trim(),
+        profileNotes: editProfileNotes.trim(),
       });
       showToast('Senior updated');
       setEditModalOpen(false);
@@ -217,14 +217,14 @@ export default function Seniors() {
             </div>
           </div>
           <div className="mt-3.5">
-            <label htmlFor="senior-medical-notes" className="block text-sm font-semibold text-admin-text-light mb-1">Medical Notes</label>
+            <label htmlFor="senior-profile-notes" className="block text-sm font-semibold text-admin-text-light mb-1">Profile Notes</label>
             <textarea
-              id="senior-medical-notes"
+              id="senior-profile-notes"
               className="w-full px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-admin-primary focus:border-admin-primary transition-colors"
               rows={2}
-              value={medicalNotes}
-              onChange={(e) => setMedicalNotes(e.target.value)}
-              placeholder="Any relevant medical information..."
+              value={profileNotes}
+              onChange={(e) => setProfileNotes(e.target.value)}
+              placeholder="Conversation preferences, routines, and family context..."
             />
           </div>
           <button
@@ -334,13 +334,13 @@ export default function Seniors() {
             </div>
           </div>
           <div className="mt-3.5">
-            <label htmlFor="edit-senior-medical-notes" className="block text-sm font-semibold text-admin-text-light mb-1">Medical Notes</label>
+            <label htmlFor="edit-senior-profile-notes" className="block text-sm font-semibold text-admin-text-light mb-1">Profile Notes</label>
             <textarea
-              id="edit-senior-medical-notes"
+              id="edit-senior-profile-notes"
               className="w-full px-3 py-2.5 border border-admin-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-admin-primary focus:border-admin-primary transition-colors"
               rows={2}
-              value={editMedicalNotes}
-              onChange={(e) => setEditMedicalNotes(e.target.value)}
+              value={editProfileNotes}
+              onChange={(e) => setEditProfileNotes(e.target.value)}
             />
           </div>
           <button

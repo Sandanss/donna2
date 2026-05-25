@@ -30,7 +30,7 @@ def session_state():
             "id": "senior-test-001",
             "name": "Margaret Johnson",
             "interests": ["gardening", "cooking", "grandchildren"],
-            "medical_notes": "Type 2 diabetes, mild arthritis",
+            "profile_notes": "Prefers gentle reminders and concise check-ins",
             "timezone": "America/New_York",
         },
         "memory_context": "Margaret loves her rose garden. Grandson Jake plays baseball.",
@@ -53,20 +53,20 @@ def reminder_session_state(session_state):
     """Session state pre-configured for a reminder call."""
     session_state["call_type"] = "reminder"
     session_state["reminder_prompt"] = (
-        "MEDICATION REMINDER: Margaret needs to take her metformin (500mg) with dinner. "
+        "REMINDER: Margaret needs to water the porch plants after dinner. "
         "Deliver this naturally during conversation."
     )
     session_state["reminder_delivery"] = {
         "id": "delivery-001",
         "reminder_id": "rem-001",
-        "title": "Take metformin",
-        "description": "500mg with dinner",
+        "title": "Water the porch plants",
+        "description": "After dinner",
     }
     session_state["_pending_reminders"] = [
         {
             "id": "rem-001",
-            "title": "Take metformin",
-            "description": "500mg with dinner",
+            "title": "Water the porch plants",
+            "description": "After dinner",
         }
     ]
     return session_state

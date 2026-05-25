@@ -85,7 +85,7 @@ class ConcurrentRunSummary:
 def _auto_senior(scenario: LiveSimScenario, index: int) -> TestSenior:
     """Generate a unique TestSenior for one slot in a concurrent run.
 
-    Copies scenario interests / city / state / medical_notes so the call
+    Copies scenario interests / city / state / profile_notes so the call
     runs with the same context the scenario expects, but assigns a fresh
     UUID + phone to keep DB writes per-call isolated.
     """
@@ -98,7 +98,7 @@ def _auto_senior(scenario: LiveSimScenario, index: int) -> TestSenior:
         phone=f"55512{index:05d}"[:10].ljust(10, "0"),
         timezone=template.timezone,
         interests=list(template.interests),
-        medical_notes=template.medical_notes,
+        profile_notes=template.profile_notes,
         city=template.city,
         state=template.state,
     )

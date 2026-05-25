@@ -278,17 +278,17 @@ def _build_senior_context(session_state: dict) -> str:
             dedupe_key="senior_context:topics_to_avoid",
         )
 
-    medical = senior.get("medical_notes") or senior.get("medicalNotes")
-    if medical:
-        medical_text = f"Health notes: {medical}"
-        parts.append(medical_text)
+    profile_notes = senior.get("profile_notes") or senior.get("profileNotes")
+    if profile_notes:
+        profile_text = f"Profile notes: {profile_notes}"
+        parts.append(profile_text)
         _record_prompt_event(
             session_state,
-            source="medical_notes",
-            label="Health notes",
-            content=medical_text,
+            source="profile_notes",
+            label="Profile notes",
+            content=profile_text,
             provider="seniors",
-            dedupe_key="senior_context:medical_notes",
+            dedupe_key="senior_context:profile_notes",
         )
 
     # Profile authority: explicit profile data overrides conversation memories
@@ -509,10 +509,75 @@ def _record_node_prompts(
 # Transition functions
 # ---------------------------------------------------------------------------
 
+def _reminders_missing_acknowledgement(session_state: dict) -> list[dict]:
+    """Return pending reminders that have not been acknowledged this call."""
+    pending = session_state.get("_pending_reminders") or []
+    delivered = session_state.get("reminders_delivered") or set()
+    if not pending:
+        if session_state.get("reminder_prompt") and not session_state.get("_reminder_ack_attempted"):
+            delivery = session_state.get("reminder_delivery") or {}
+            return [delivery] if delivery else [{"id": "", "title": ""}]
+        return []
+
+    missing: list[dict] = []
+    for reminder in pending:
+        if not isinstance(reminder, dict):
+            continue
+        keys = {
+            reminder.get("id"),
+            reminder.get("reminder_id"),
+            reminder.get("title"),
+        }
+        if not any(key and key in delivered for key in keys):
+            missing.append(reminder)
+    return missing
+
+
 def _make_transition_reminder_to_main(session_state: dict, flows_tools: dict):
     """Create transition function: reminder → main."""
 
     async def transition_to_main(args: dict, flow_manager) -> tuple[dict, NodeConfig]:
+        missing_reminders = _reminders_missing_acknowledgement(session_state)
+        if (
+            session_state.get("reminder_prompt")
+            and missing_reminders
+            and "mark_reminder_acknowledged" in flows_tools
+        ):
+            logger.info(
+                "Recording reminder acknowledgement before transitioning to main"
+            )
+            try:
+                for reminder in missing_reminders:
+                    reminder_id = (
+                        reminder.get("reminder_id")
+                        or reminder.get("id")
+                        or reminder.get("title")
+                        or ""
+                    )
+                    await flows_tools["mark_reminder_acknowledged"].handler({
+                        "reminder_id": reminder_id,
+                        "status": "acknowledged",
+                        "user_response": (
+                            "Senior responded to the reminder before Donna moved "
+                            "into the main conversation."
+                        ),
+                    })
+            except Exception as exc:
+                logger.error(
+                    "Reminder acknowledgement failed before transition: {err}",
+                    err=str(exc),
+                )
+                return (
+                    {
+                        "status": "needs_acknowledgement",
+                        "message": (
+                            "Before moving on, call mark_reminder_acknowledged "
+                            "for the reminder the senior just responded to."
+                        ),
+                    },
+                    build_reminder_node(session_state, flows_tools),
+                )
+
         logger.info("Transitioning: reminder → main")
         _record_phase_transition(session_state, "main")
         _update_tracking_context(session_state)
@@ -579,7 +644,8 @@ def build_reminder_node(
         greeting_task = _build_greeting_task(session_state)
         reminder_task = (
             greeting_task
-            + " After they respond to your greeting, move to the reminders promptly."
+            + " In this opening greeting, naturally include every pending "
+            + "reminder instead of waiting for a later turn."
             + "\n\n" + reminder_task
         )
 
@@ -593,7 +659,12 @@ def build_reminder_node(
 
     functions.append(FlowsFunctionSchema(
         name="transition_to_main",
-        description="Call this after all reminders have been delivered and acknowledged, to move into the main conversation.",
+        description=(
+            "Call this only after all reminders have been delivered and "
+            "mark_reminder_acknowledged has already been called for each reminder. "
+            "If the senior just responded to a reminder, call "
+            "mark_reminder_acknowledged before this transition."
+        ),
         properties={},
         required=[],
         handler=_make_transition_reminder_to_main(session_state, flows_tools),
