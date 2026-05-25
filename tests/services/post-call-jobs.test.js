@@ -377,6 +377,36 @@ describe('post-call jobs Phase 6 queue foundation', () => {
     });
   });
 
+  it('does not mark a leased job running until its provider semaphore starts the handler', async () => {
+    const database = { execute: vi.fn() };
+    const providerSemaphores = {
+      run: vi.fn(async () => ({
+        status: 'waiting_for_provider_slot',
+      })),
+    };
+
+    const resultRow = await executePostCallJob({
+      database,
+      job: {
+        id: '88888888-8888-4888-8888-888888888888',
+        jobType: POST_CALL_JOB_TYPES.ANALYSIS,
+      },
+      workerId: 'post-call-worker-1',
+      handlers: {
+        [POST_CALL_JOB_TYPES.ANALYSIS]: async () => undefined,
+      },
+      providerSemaphores,
+      now: new Date('2035-03-11T14:00:00.000Z'),
+    });
+
+    expect(resultRow).toEqual({ status: 'waiting_for_provider_slot' });
+    expect(providerSemaphores.run).toHaveBeenCalledWith(
+      POST_CALL_PROVIDER_KEYS.GEMINI_FLASH,
+      expect.any(Function),
+    );
+    expect(database.execute).not.toHaveBeenCalled();
+  });
+
   it('builds PHI-free shadow handlers that verify completed post-call artifacts', async () => {
     const database = {
       execute: vi.fn()

@@ -4,6 +4,7 @@ import tls from 'node:tls';
 const PIPECAT_HEARTBEAT_KEY_PREFIX = 'pipecat:instance:';
 const PIPECAT_RESERVATION_KEY_PREFIX = 'pipecat:reservation:';
 const PIPECAT_QUEUE_RESERVATION_KEY_PREFIX = 'pipecat:queue-reservations:';
+const PIPECAT_RESERVATION_SLOT_KEY_PREFIX = 'pipecat:reservation-slot:';
 const DEFAULT_HEARTBEAT_MAX_AGE_SECONDS = 15;
 const DEFAULT_REDIS_TIMEOUT_MS = 5000;
 const DEFAULT_RESERVATION_TTL_SECONDS = 300;
@@ -334,6 +335,8 @@ export function buildPipecatCapacityReservation({
   queueId,
   createdAt = new Date(),
   ttlSeconds = DEFAULT_RESERVATION_TTL_SECONDS,
+  slotIndex = null,
+  slotKey = null,
 } = {}) {
   const reservedAt = createdAt instanceof Date ? createdAt : new Date(createdAt);
   if (Number.isNaN(reservedAt.getTime())) {
@@ -346,12 +349,15 @@ export function buildPipecatCapacityReservation({
     reserved_capacity: 1,
     created_at: reservedAt.toISOString(),
     expires_at: new Date(reservedAt.getTime() + safeTtl * 1000).toISOString(),
+    ...(slotIndex == null ? {} : { slot_index: slotIndex }),
+    ...(slotKey == null ? {} : { slot_key: slotKey }),
   };
 }
 
 export async function acquirePipecatCapacityReservation({
   reservationId,
   queueId,
+  maxReservations = null,
   ttlSeconds = DEFAULT_RESERVATION_TTL_SECONDS,
   createdAt = new Date(),
   env = process.env,
@@ -371,6 +377,11 @@ export async function acquirePipecatCapacityReservation({
 
   const reservationKey = `${PIPECAT_RESERVATION_KEY_PREFIX}${reservation.reservation_id}`;
   const queueKey = `${PIPECAT_QUEUE_RESERVATION_KEY_PREFIX}${reservation.queue_id}`;
+  const boundedMaxReservations = maxReservations == null
+    ? null
+    : parsePositiveInteger(maxReservations, 0);
+  let slotKey = null;
+  let slotIndex = null;
 
   try {
     const queueClaim = await runtime.command(
@@ -391,30 +402,79 @@ export async function acquirePipecatCapacityReservation({
       };
     }
 
+    if (boundedMaxReservations != null) {
+      if (boundedMaxReservations <= 0) {
+        await runtime.command('DEL', queueKey);
+        return {
+          acquired: false,
+          reason: 'capacity_full',
+          reservation,
+          reservationKey,
+          queueKey,
+        };
+      }
+
+      for (let index = 0; index < boundedMaxReservations; index++) {
+        const candidateSlotKey = `${PIPECAT_RESERVATION_SLOT_KEY_PREFIX}${index}`;
+        const slotClaim = await runtime.command(
+          'SET',
+          candidateSlotKey,
+          reservation.reservation_id,
+          'EX',
+          safeTtl,
+          'NX',
+        );
+        if (redisSetNxSucceeded(slotClaim)) {
+          slotKey = candidateSlotKey;
+          slotIndex = index;
+          break;
+        }
+      }
+
+      if (!slotKey) {
+        await runtime.command('DEL', queueKey);
+        return {
+          acquired: false,
+          reason: 'capacity_full',
+          reservation,
+          reservationKey,
+          queueKey,
+        };
+      }
+    }
+
+    const storedReservation = {
+      ...reservation,
+      ...(slotIndex == null ? {} : { slot_index: slotIndex }),
+      ...(slotKey == null ? {} : { slot_key: slotKey }),
+    };
+
     const reservationClaim = await runtime.command(
       'SET',
       reservationKey,
-      JSON.stringify(reservation),
+      JSON.stringify(storedReservation),
       'EX',
       safeTtl,
       'NX',
     );
     if (!redisSetNxSucceeded(reservationClaim)) {
-      await runtime.command('DEL', queueKey);
+      await runtime.command('DEL', ...[queueKey, slotKey].filter(Boolean));
       return {
         acquired: false,
         reason: 'reservation_already_exists',
-        reservation,
+        reservation: storedReservation,
         reservationKey,
         queueKey,
+        ...(slotKey ? { slotKey } : {}),
       };
     }
 
     return {
       acquired: true,
-      reservation,
+      reservation: storedReservation,
       reservationKey,
       queueKey,
+      ...(slotKey ? { slotKey, slotIndex } : {}),
     };
   } finally {
     await runtime.close();
@@ -434,8 +494,26 @@ export async function releasePipecatCapacityReservation({
   }
 
   const keys = [`${PIPECAT_RESERVATION_KEY_PREFIX}${reservation}`];
+  let slotKey = null;
+
+  try {
+    const storedReservation = await runtime.command('GET', keys[0]);
+    if (storedReservation) {
+      const parsed = JSON.parse(storedReservation);
+      if (parsed?.slot_key) {
+        slotKey = String(parsed.slot_key);
+      }
+    }
+  } catch {
+    // Reservation releases are best-effort; deleting the known keys still
+    // lets TTL clean up an unreadable slot claim.
+  }
+
   if (queueId) {
     keys.push(`${PIPECAT_QUEUE_RESERVATION_KEY_PREFIX}${requireString(queueId, 'queueId')}`);
+  }
+  if (slotKey) {
+    keys.push(slotKey);
   }
 
   try {
@@ -566,5 +644,6 @@ export {
   DEFAULT_RESERVATION_TTL_SECONDS,
   PIPECAT_HEARTBEAT_KEY_PREFIX,
   PIPECAT_QUEUE_RESERVATION_KEY_PREFIX,
+  PIPECAT_RESERVATION_SLOT_KEY_PREFIX,
   PIPECAT_RESERVATION_KEY_PREFIX,
 };

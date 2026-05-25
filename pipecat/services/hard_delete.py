@@ -106,6 +106,12 @@ async def _assert_no_active_senior_legal_hold(conn, senior_id: str) -> None:
                 AND lh.resource_id = ssc.id::text
             )
             OR EXISTS (
+              SELECT 1 FROM canary_cohort_membership ccm
+              WHERE ccm.senior_id = $1
+                AND lh.resource_type = 'canary_cohort_membership'
+                AND lh.resource_id = ccm.id::text
+            )
+            OR EXISTS (
               SELECT 1 FROM caregiver_notes cn
               WHERE cn.senior_id = $1
                 AND lh.resource_type = 'caregiver_note'
@@ -193,6 +199,7 @@ async def hard_delete_senior(
                 """),
                 ("outbound_call_guards", "SELECT COUNT(*) FROM outbound_call_guards WHERE senior_id = $1"),
                 ("scheduler_shadow_comparisons", "SELECT COUNT(*) FROM scheduler_shadow_comparisons WHERE senior_id = $1"),
+                ("canary_cohort_membership", "SELECT COUNT(*) FROM canary_cohort_membership WHERE senior_id = $1"),
                 ("memories", "SELECT COUNT(*) FROM memories WHERE senior_id = $1"),
                 ("conversations", "SELECT COUNT(*) FROM conversations WHERE senior_id = $1"),
             ]
@@ -257,6 +264,10 @@ async def hard_delete_senior(
             )
             await conn.execute(
                 "DELETE FROM scheduler_shadow_comparisons WHERE senior_id = $1",
+                senior_id,
+            )
+            await conn.execute(
+                "DELETE FROM canary_cohort_membership WHERE senior_id = $1",
                 senior_id,
             )
             await conn.execute(

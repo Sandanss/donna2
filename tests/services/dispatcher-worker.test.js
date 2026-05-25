@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   reconcileOutboundCallGuards: vi.fn(),
   readPipecatCapacityRegistry: vi.fn(),
   resolveCallArchitectureConfig: vi.fn(),
+  resolveMergedCanarySeniorIds: vi.fn(async ids => ids),
 }));
 
 vi.mock('../../services/call-queue.js', async () => {
@@ -40,6 +41,10 @@ vi.mock('../../lib/growthbook.js', () => ({
 
 vi.mock('../../lib/security-config.js', () => ({
   getPipecatPublicUrl: () => 'https://pipecat.test',
+}));
+
+vi.mock('../../services/canary-cohort.js', () => ({
+  resolveMergedCanarySeniorIds: mocks.resolveMergedCanarySeniorIds,
 }));
 
 const { dispatchOnce, reconcileOnce, loadCapacityInputs } = await import('../../scripts/run-dispatcher-worker.js');
@@ -78,6 +83,8 @@ describe('dispatcher worker', () => {
     mocks.reconcileOutboundCallGuards.mockReset();
     mocks.readPipecatCapacityRegistry.mockReset();
     mocks.resolveCallArchitectureConfig.mockReset();
+    mocks.resolveMergedCanarySeniorIds.mockReset();
+    mocks.resolveMergedCanarySeniorIds.mockImplementation(async ids => ids);
   });
 
   afterEach(() => {
@@ -134,6 +141,28 @@ describe('dispatcher worker', () => {
     expect(call.canarySeniorIds).toEqual(['s1']);
     expect(call.cohort).toBe('canary_queue');
     expect(call.architecture).toBe('queue');
+  });
+
+  it('merges DB canary cohort members before live canary dispatch', async () => {
+    mocks.resolveCallArchitectureConfig.mockReturnValue(configFor({
+      mode: 'canary_queue',
+      allowRealDial: true,
+      canaryPercent: 0,
+      canarySeniorIds: ['env-senior'],
+    }));
+    mocks.resolveMergedCanarySeniorIds.mockResolvedValue(['db-senior', 'env-senior']);
+    mocks.readPipecatCapacityRegistry.mockResolvedValue({
+      configured: true,
+      backend: 'redis',
+      instances: [{ instanceId: 'replica-a', healthy: true, ready: true, maxCalls: 50, activeCalls: 0 }],
+      scanned: 1,
+    });
+    mocks.dispatchQueuedCalls.mockResolvedValue({ requested: 50, leased: 1, dialed: 1 });
+
+    await dispatchOnce({ baseUrl: 'https://pipecat.test' });
+
+    expect(mocks.resolveMergedCanarySeniorIds).toHaveBeenCalledWith(['env-senior']);
+    expect(mocks.dispatchQueuedCalls.mock.calls[0][0].canarySeniorIds).toEqual(['db-senior', 'env-senior']);
   });
 
   it('skips dispatch when dispatcher is disabled in legacy modes', async () => {

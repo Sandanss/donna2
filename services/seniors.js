@@ -119,6 +119,12 @@ async function assertNoActiveSeniorLegalHold(tx, seniorId) {
             AND lh.resource_id = ssc.id::text
         )
         OR EXISTS (
+          SELECT 1 FROM canary_cohort_membership ccm
+          WHERE ccm.senior_id = ${seniorId}
+            AND lh.resource_type = 'canary_cohort_membership'
+            AND lh.resource_id = ccm.id::text
+        )
+        OR EXISTS (
           SELECT 1 FROM caregiver_notes cn
           WHERE cn.senior_id = ${seniorId}
             AND lh.resource_type = 'caregiver_note'

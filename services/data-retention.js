@@ -40,11 +40,11 @@ const RETENTION_DAYS = {
   prospects:             parseInt(process.env.RETENTION_PROSPECTS_DAYS                  || '90',  10),
   senior_profile_review: parseInt(process.env.RETENTION_INACTIVE_SENIOR_REVIEW_DAYS     || '365', 10),
   idempotency_keys:      parseInt(process.env.RETENTION_IDEMPOTENCY_KEYS_DAYS           || '1',   10),
-  call_queue:            parseInt(process.env.RETENTION_CALL_QUEUE_DAYS                 || '90',  10),
   call_attempts:         parseInt(process.env.RETENTION_CALL_ATTEMPTS_DAYS              || '180', 10),
   post_call_jobs:        parseInt(process.env.RETENTION_POST_CALL_JOBS_DAYS             || '180', 10),
   outbound_call_guards:  parseInt(process.env.RETENTION_OUTBOUND_CALL_GUARDS_DAYS       || '30',  10),
   scheduler_shadow_comparisons: parseInt(process.env.RETENTION_SCHEDULER_SHADOW_COMPARISONS_DAYS || '30', 10),
+  call_queue:            parseInt(process.env.RETENTION_CALL_QUEUE_DAYS                 || '90',  10),
   canary_cohort_membership: parseInt(process.env.RETENTION_CANARY_COHORT_MEMBERSHIP_DAYS || '365', 10),
   waitlist:              parseInt(process.env.RETENTION_WAITLIST_DAYS                   || '365', 10),
   audit_logs:            parseInt(process.env.RETENTION_AUDIT_LOGS_DAYS                 || '2190', 10),
@@ -110,6 +110,15 @@ function legalHoldExclusion(alias, table) {
   `;
 }
 
+function dependencyExclusion(alias, table) {
+  if (table !== 'call_queue') return sql`TRUE`;
+  return sql`
+    NOT EXISTS (SELECT 1 FROM call_attempts ca WHERE ca.queue_id = ${sql.raw(`${alias}.id`)})
+    AND NOT EXISTS (SELECT 1 FROM outbound_call_guards ocg WHERE ocg.queue_id = ${sql.raw(`${alias}.id`)})
+    AND NOT EXISTS (SELECT 1 FROM scheduler_shadow_comparisons ssc WHERE ssc.queue_id = ${sql.raw(`${alias}.id`)})
+  `;
+}
+
 // ---------------------------------------------------------------------------
 // Core purge logic
 // ---------------------------------------------------------------------------
@@ -137,6 +146,7 @@ async function purgeTable(table, dateColumn, days) {
         FROM ${sql.raw(table)} AS target
         WHERE target.${sql.raw(dateColumn)} < NOW() - make_interval(days => ${days})
           AND ${legalHoldExclusion('target', table)}
+          AND ${dependencyExclusion('target', table)}
         ORDER BY target.${sql.raw(dateColumn)}
         LIMIT ${BATCH_SIZE}
       ),

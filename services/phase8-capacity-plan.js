@@ -131,6 +131,29 @@ function queueDemandRowsToSummary(rows = []) {
   };
 }
 
+function mergeQueueDemandSummaries(...summaries) {
+  const merged = {
+    total: 0,
+    byLane: normalizeLanePressure(),
+    byStatus: {},
+    unknownLane: 0,
+  };
+
+  for (const summary of summaries) {
+    if (!summary) continue;
+    merged.total += countValue(summary.total);
+    merged.unknownLane += countValue(summary.unknownLane);
+    for (const lane of Object.values(PRIORITY_LANES)) {
+      merged.byLane[lane] += countValue(summary.byLane?.[lane]);
+    }
+    for (const [status, count] of Object.entries(summary.byStatus || {})) {
+      merged.byStatus[status] = (merged.byStatus[status] || 0) + countValue(count);
+    }
+  }
+
+  return merged;
+}
+
 function instanceActiveCalls(instance) {
   return Math.max(
     countValue(instance?.activeCalls ?? instance?.active_calls),
@@ -292,6 +315,24 @@ async function fetchFutureQueueDemand({ database, windowStart, windowEnd }) {
   return queueDemandRowsToSummary(rowsFrom(result));
 }
 
+async function fetchCurrentQueueBacklog({ database, now, windowStart }) {
+  const result = await database.execute(sql`
+    SELECT priority_lane, status, COUNT(*)::int AS count
+    FROM call_queue
+    WHERE status IN (
+      ${CALL_QUEUE_STATUSES.QUEUED},
+      ${CALL_QUEUE_STATUSES.DEFERRED},
+      ${CALL_QUEUE_STATUSES.LEASED},
+      ${CALL_QUEUE_STATUSES.INITIATING}
+    )
+      AND earliest_at <= ${now}
+      AND target_at < ${windowStart}
+    GROUP BY priority_lane, status
+  `);
+
+  return queueDemandRowsToSummary(rowsFrom(result));
+}
+
 async function fetchCriticalPostCallBacklog({ database }) {
   const result = await database.execute(sql`
     SELECT COUNT(*)::int AS count
@@ -372,11 +413,13 @@ export async function buildPhase8CapacityPlan({
   const safeWindowMinutes = parseInteger(windowMinutes, DEFAULT_WINDOW_MINUTES, { min: 1, max: 240 });
   const safeWindowEnd = addMinutes(safeWindowStart, safeWindowMinutes);
 
-  const [demand, criticalBacklog, registry] = await Promise.all([
+  const [futureDemand, currentBacklog, criticalBacklog, registry] = await Promise.all([
     fetchFutureQueueDemand({ database, windowStart: safeWindowStart, windowEnd: safeWindowEnd }),
+    fetchCurrentQueueBacklog({ database, now: safeNow, windowStart: safeWindowStart }),
     fetchCriticalPostCallBacklog({ database }),
     capacityRegistryReader({ now: safeNow }),
   ]);
+  const demand = mergeQueueDemandSummaries(futureDemand, currentBacklog);
   const capacity = summarizeCapacityRegistry(registry, {
     overbookFactor,
     fallbackMaxCallsPerReplica: maxCallsPerReplica,
@@ -424,6 +467,10 @@ export async function buildPhase8CapacityPlan({
       readyMinutesBeforeWindow,
     },
     demand,
+    demandBreakdown: {
+      futureWindow: futureDemand,
+      currentBacklog,
+    },
     capacity: {
       ...capacity,
       currentReplicas: resolvedCurrentReplicas,

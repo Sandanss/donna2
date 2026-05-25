@@ -52,6 +52,7 @@ const {
   markCallAttemptSuppressed,
   markOutboundCallGuardInitiated,
   markOutboundCallGuardInitiatingIfCallable,
+  markQueuedCallDispatchAmbiguous,
   markQueuedCallInitiating,
   markQueuedCallStarted,
   materializeLegacyCallPlan,
@@ -516,6 +517,7 @@ describe('call queue persistence helpers', () => {
 
     expect(rows).toHaveLength(1);
     expect(rows[0].lease_owner).toBe('worker-1');
+    expect(JSON.stringify(database.execute.mock.calls[0][0])).toContain(CALL_QUEUE_STATUSES.DEFERRED);
     expect(database.execute).toHaveBeenCalledTimes(1);
   });
 
@@ -666,10 +668,14 @@ describe('call queue persistence helpers', () => {
 
     expect(rows).toHaveLength(1);
     expect(rows[0].status).toBe(CALL_QUEUE_STATUSES.QUEUED);
+    const inspected = JSON.stringify(database.execute.mock.calls[0][0]);
+    expect(inspected).toContain(CALL_QUEUE_STATUSES.INITIATING);
+    expect(inspected).toContain('dial_result_ambiguous');
+    expect(inspected).toContain('outbound_call_guards');
     expect(database.execute).toHaveBeenCalledTimes(1);
   });
 
-  it('expires queued or leased calls after their dispatch window closes', async () => {
+  it('expires queued, deferred, leased, or initiating calls after their dispatch window closes', async () => {
     const database = mockDatabase([
       [{ id: 'queue-1', status: CALL_QUEUE_STATUSES.EXPIRED, cancel_reason: 'dispatch_window_expired' }],
     ]);
@@ -682,6 +688,9 @@ describe('call queue persistence helpers', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].status).toBe(CALL_QUEUE_STATUSES.EXPIRED);
     expect(rows[0].cancel_reason).toBe('dispatch_window_expired');
+    const inspected = JSON.stringify(database.execute.mock.calls[0][0]);
+    expect(inspected).toContain(CALL_QUEUE_STATUSES.DEFERRED);
+    expect(inspected).toContain(CALL_QUEUE_STATUSES.INITIATING);
     expect(database.execute).toHaveBeenCalledTimes(1);
   });
 
@@ -743,6 +752,10 @@ describe('call queue persistence helpers', () => {
     // Missing/invalid lease -> defaults to 60s -> 150s cushion
     const fallback = defaultGuardExpiry({ targetAt: target });
     expect(fallback.getTime() - target.getTime()).toBe(150 * 1000);
+
+    const lateNow = new Date('2035-03-11T13:35:00.000Z');
+    const late = defaultGuardExpiry({ targetAt: target, leaseSeconds: 60, now: lateNow });
+    expect(late.getTime() - lateNow.getTime()).toBe(150 * 1000);
   });
 
   it('acquireOutboundCallGuard uses the tightened expires_at default (not 24h)', async () => {
@@ -902,7 +915,7 @@ describe('call queue persistence helpers', () => {
       [{ id: 'queue-1', status: CALL_QUEUE_STATUSES.INITIATING, attempt_count: 1 }],
       [{ id: 'queue-1', status: CALL_QUEUE_STATUSES.STARTED }],
       [{ id: 'attempt-1', status: 'initiated', call_control_id: 'v3:test-call' }],
-      [{ id: 'queue-2', status: CALL_QUEUE_STATUSES.QUEUED }],
+      [{ id: 'queue-2', status: CALL_QUEUE_STATUSES.DEFERRED }],
       [{ id: 'attempt-2', status: 'suppressed', provider_error_code: 'senior_inactive_or_missing' }],
     ]);
 
@@ -929,9 +942,10 @@ describe('call queue persistence helpers', () => {
     await expect(releaseQueuedCallForRetry({
       queueId: 'queue-2',
       errorCode: 'temporary_failure',
+      now: '2035-03-11T13:31:15.000Z',
     }, { database })).resolves.toEqual({
       id: 'queue-2',
-      status: CALL_QUEUE_STATUSES.QUEUED,
+      status: CALL_QUEUE_STATUSES.DEFERRED,
     });
     await expect(markCallAttemptSuppressed({
       attemptId: 'attempt-2',
@@ -942,6 +956,25 @@ describe('call queue persistence helpers', () => {
       provider_error_code: 'senior_inactive_or_missing',
     });
     expect(database.execute).toHaveBeenCalledTimes(5);
+  });
+
+  it('marks ambiguous post-authority dial failures without requeueing', async () => {
+    const database = mockDatabase([
+      [{ id: 'queue-1', status: CALL_QUEUE_STATUSES.INITIATING, last_error_code: 'dial_result_ambiguous' }],
+    ]);
+
+    await expect(markQueuedCallDispatchAmbiguous({
+      queueId: 'queue-1',
+      providerErrorCode: 'network_timeout',
+    }, { database })).resolves.toEqual({
+      id: 'queue-1',
+      status: CALL_QUEUE_STATUSES.INITIATING,
+      last_error_code: 'dial_result_ambiguous',
+    });
+
+    const inspected = JSON.stringify(database.execute.mock.calls[0][0]);
+    expect(inspected).toContain('dial_result_ambiguous');
+    expect(inspected).toContain(CALL_QUEUE_STATUSES.INITIATING);
   });
 
   it('flips an outbound guard to initiating only after rechecking senior state', async () => {
@@ -1345,6 +1378,64 @@ describe('call queue persistence helpers', () => {
     expect(result.failed).toBe(0);
     expect(releaseReservation).not.toHaveBeenCalled();
     expect(dialCall).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps post-authority dial errors ambiguous instead of retrying a possible Telnyx call', async () => {
+    const queueRow = {
+      id: 'queue-1',
+      senior_id: 'senior-1',
+      call_type: 'schedule',
+      priority_lane: PRIORITY_LANES.SCHEDULED_CHECKIN,
+      dedupe_key: 'schedule:senior-1:2035-03-11:schedule-1',
+      target_at: '2035-03-11T13:30:00.000Z',
+      attempt_count: 0,
+    };
+    const database = mockDatabase([
+      [queueRow],
+      [{ id: 'guard-1', guard_key: queueRow.dedupe_key }],
+      [{ id: 'attempt-1', queue_id: 'queue-1', attempt_number: 1 }],
+      [{ id: 'queue-1', status: CALL_QUEUE_STATUSES.INITIATING }],
+      [{ id: 'guard-1', status: 'initiating', initiated: true, guard_key: queueRow.dedupe_key }],
+      [{ id: 'queue-1', status: CALL_QUEUE_STATUSES.INITIATING, last_error_code: 'dial_result_ambiguous' }],
+    ]);
+    const acquireReservation = vi.fn(async ({ reservationId, queueId, maxReservations }) => ({
+      acquired: true,
+      reservation: { reservation_id: reservationId, queue_id: queueId, max_reservations: maxReservations },
+    }));
+    const releaseReservation = vi.fn(async () => ({ released: true }));
+    const dialCall = vi.fn(async () => {
+      throw new Error('Pipecat create-call request timed out');
+    });
+
+    const result = await dispatchQueuedCalls({
+      leaseOwner: 'queue-dispatcher-1',
+      capacitySlots: 1,
+      limit: 1,
+      now: '2035-03-11T13:31:15.000Z',
+      respectLanePolicy: false,
+    }, {
+      database,
+      acquireReservation,
+      releaseReservation,
+      dialCall,
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      requested: 1,
+      leased: 1,
+      reserved: 1,
+      dialed: 0,
+      suppressed: 0,
+      failed: 1,
+      releasedReservations: 0,
+    }));
+    expect(acquireReservation).toHaveBeenCalledWith(expect.objectContaining({
+      queueId: 'queue-1',
+      maxReservations: 1,
+    }));
+    expect(releaseReservation).not.toHaveBeenCalled();
+    expect(dialCall).toHaveBeenCalledTimes(1);
+    expect(database.execute).toHaveBeenCalledTimes(6);
   });
 
   it('writes shadow comparison rows and audit entries with bounded operational values', async () => {
