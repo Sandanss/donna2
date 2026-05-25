@@ -19,6 +19,7 @@ import os
 import uuid
 
 import pytest
+import pytest_asyncio
 
 from tests.simulation.fixtures import (
     TestSenior,
@@ -55,9 +56,13 @@ pytestmark = [
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def test_senior():
-    """Seed a test senior and clean up after the test."""
+    """Seed a test senior and clean up after the test.
+
+    Uses pytest_asyncio.fixture (not pytest.fixture) so the async generator
+    is materialised correctly under pytest-asyncio strict mode (1.x).
+    """
     senior = await seed_test_senior()
     yield senior
     await cleanup_test_senior(senior.id)
