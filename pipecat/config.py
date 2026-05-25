@@ -168,6 +168,7 @@ class Settings:
     retention_post_call_jobs_days: int = 180
     retention_outbound_call_guards_days: int = 30
     retention_scheduler_shadow_comparisons_days: int = 30
+    retention_canary_cohort_membership_days: int = 365
     retention_waitlist_days: int = 365
     retention_audit_logs_days: int = 2190
 
@@ -465,6 +466,7 @@ def _load_settings() -> Settings:
         retention_post_call_jobs_days=int(_env("RETENTION_POST_CALL_JOBS_DAYS", "180")),
         retention_outbound_call_guards_days=int(_env("RETENTION_OUTBOUND_CALL_GUARDS_DAYS", "30")),
         retention_scheduler_shadow_comparisons_days=int(_env("RETENTION_SCHEDULER_SHADOW_COMPARISONS_DAYS", "30")),
+        retention_canary_cohort_membership_days=int(_env("RETENTION_CANARY_COHORT_MEMBERSHIP_DAYS", "365")),
         retention_waitlist_days=int(_env("RETENTION_WAITLIST_DAYS", "365")),
         retention_audit_logs_days=int(_env("RETENTION_AUDIT_LOGS_DAYS", "2190")),
     )

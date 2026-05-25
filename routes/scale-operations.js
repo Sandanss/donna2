@@ -86,6 +86,10 @@ router.post('/api/scale-operations/phase8/autoscale-once', requireAdmin, async (
       planOptions: stripUndefined(planOptionsFromRequest(req.body || {})),
       confirmScale: booleanValue(req.body?.confirmScale, false),
       dryRun: !booleanValue(req.body?.confirmScale, false) || booleanValue(req.body?.dryRun, true),
+      actor: req.auth?.userId || 'admin',
+      actorRole: authToRole(req.auth),
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
       scaleOptions: scaleOptionsFromRequest(req.body || {}),
     });
     res.json(result);

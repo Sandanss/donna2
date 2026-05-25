@@ -498,7 +498,27 @@ async def startup():
             except Exception:
                 return 0
 
-        asyncio.create_task(start_capacity_heartbeat(
+        # Watch the heartbeat task so a silent termination (in
+        # PIPECAT_REQUIRE_REDIS=true mode, a publish failure re-raises and
+        # terminates the loop) flips the replica out of /health=ok. Without
+        # this, the Pipecat process keeps accepting calls but peers stop
+        # seeing fresh heartbeats — silent fleet-capacity loss.
+        def _on_heartbeat_task_done(task: asyncio.Task) -> None:
+            global _is_ready
+            if task.cancelled():
+                logger.info("Capacity heartbeat task cancelled (expected on shutdown)")
+                return
+            exc = task.exception()
+            if exc is None:
+                logger.warning("Capacity heartbeat task exited cleanly without cancellation")
+                return
+            logger.error(
+                "Capacity heartbeat task died; flipping /health to unready: {err}",
+                err=str(exc),
+            )
+            _is_ready = False
+
+        heartbeat_task = asyncio.create_task(start_capacity_heartbeat(
             get_active_calls=lambda: _active_calls,
             get_inbound_active_calls=lambda: _inbound_active_calls,
             get_max_calls=lambda: MAX_CALLS,
@@ -507,6 +527,7 @@ async def startup():
             get_circuit_breakers_open_count=_capacity_open_breakers,
             get_is_ready=lambda: _is_ready,
         ))
+        heartbeat_task.add_done_callback(_on_heartbeat_task_done)
         logger.info("Capacity heartbeat loop started")
     except Exception as e:
         if settings.pipecat_require_redis:

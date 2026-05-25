@@ -45,6 +45,7 @@ const RETENTION_DAYS = {
   post_call_jobs:        parseInt(process.env.RETENTION_POST_CALL_JOBS_DAYS             || '180', 10),
   outbound_call_guards:  parseInt(process.env.RETENTION_OUTBOUND_CALL_GUARDS_DAYS       || '30',  10),
   scheduler_shadow_comparisons: parseInt(process.env.RETENTION_SCHEDULER_SHADOW_COMPARISONS_DAYS || '30', 10),
+  canary_cohort_membership: parseInt(process.env.RETENTION_CANARY_COHORT_MEMBERSHIP_DAYS || '365', 10),
   waitlist:              parseInt(process.env.RETENTION_WAITLIST_DAYS                   || '365', 10),
   audit_logs:            parseInt(process.env.RETENTION_AUDIT_LOGS_DAYS                 || '2190', 10),
 };
@@ -68,6 +69,7 @@ const TABLE_DATE_COLUMNS = {
   post_call_jobs:       'created_at',
   outbound_call_guards: 'created_at',
   scheduler_shadow_comparisons: 'created_at',
+  canary_cohort_membership: 'removed_at',
   waitlist:             'created_at',
   audit_logs:           'created_at',
 };
@@ -89,6 +91,7 @@ const LEGAL_HOLD_RESOURCE_TYPES = {
   post_call_jobs: 'post_call_job',
   outbound_call_guards: 'outbound_call_guard',
   scheduler_shadow_comparisons: 'scheduler_shadow_comparison',
+  canary_cohort_membership: 'canary_cohort_membership',
   waitlist: 'waitlist',
   audit_logs: 'audit_log',
 };

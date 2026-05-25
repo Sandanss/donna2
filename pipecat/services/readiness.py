@@ -539,8 +539,17 @@ async def prepare_for_traffic(
 
     pool_task = _time_check("db_pool_warm", _pool_check, required=req_pool, timeout_seconds=timeout)
     gb_task = _time_check("growthbook_loaded", check_growthbook_loaded, required=req_gb, timeout_seconds=timeout)
-    primer_task = _time_check(
-        "anthropic_prompt_cache_primer", check_anthropic_prompt_cache_primer, required=req_primer, timeout_seconds=timeout
+    # The Anthropic prompt-cache primer is the only readiness check that
+    # incurs real provider cost (a billable Anthropic call per replica
+    # restart). Skip it entirely when not required — operators who don't
+    # want the per-replica spend can set READINESS_REQUIRE_PROMPT_CACHE_PRIMER=false
+    # and stop paying for primer calls on every redeploy / autoscale event.
+    primer_task = (
+        _time_check(
+            "anthropic_prompt_cache_primer", check_anthropic_prompt_cache_primer, required=req_primer, timeout_seconds=timeout
+        )
+        if req_primer
+        else asyncio.sleep(0, result=_skipped("anthropic_prompt_cache_primer"))
     )
     deepgram_task = _time_check(
         "deepgram_session", check_deepgram_session, required=req_deepgram, timeout_seconds=timeout

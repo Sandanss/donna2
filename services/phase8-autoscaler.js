@@ -68,6 +68,11 @@ export async function runPhase8AutoscalerOnce({
   planOptions = {},
   confirmScale = false,
   dryRun = true,
+  actor = 'system',
+  actorRole = 'system',
+  ipAddress = null,
+  userAgent = null,
+  auditWriter = writeAudit,
   scaleExecutor = applyRailwayScale,
   scaleOptions = {},
   now = new Date(),
@@ -100,6 +105,35 @@ export async function runPhase8AutoscalerOnce({
     dryRun: resolvedDryRun,
     now,
   });
+
+  // Audit any Railway scale action — even one triggered by the autoscaler
+  // rather than an operator. Without this, an operator can hit
+  // POST /api/scale-operations/phase8/autoscale-once with confirmScale=true
+  // and resize the fleet with no audit trail.
+  if (auditWriter && scaleOperation.applied) {
+    try {
+      await auditWriter({
+        userId: actor,
+        userRole: actorRole,
+        action: 'update',
+        resourceType: 'scale_operation',
+        resourceId: null,
+        ipAddress,
+        userAgent,
+        metadata: {
+          operation: 'phase8_autoscale_once',
+          targetReplicas: plan.recommendation.targetReplicas,
+          recommendationReason: plan.recommendation.reason,
+          dryRun: Boolean(scaleOperation.dryRun),
+          applied: Boolean(scaleOperation.applied),
+        },
+      });
+    } catch (error) {
+      // Audit failure must not mask the actual scale result the operator
+      // needs to see; log and continue.
+      log.warn('Phase 8 autoscale audit failed', { error: error.message });
+    }
+  }
 
   return {
     ok: plan.ok && scaleOperation.ok,

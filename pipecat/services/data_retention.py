@@ -39,6 +39,7 @@ TABLE_DATE_COLUMNS: dict[str, str] = {
     "post_call_jobs": "created_at",
     "outbound_call_guards": "created_at",
     "scheduler_shadow_comparisons": "created_at",
+    "canary_cohort_membership": "removed_at",
     "waitlist": "created_at",
     "audit_logs": "created_at",
 }
@@ -62,6 +63,7 @@ LEGAL_HOLD_RESOURCE_TYPES: dict[str, str] = {
     "post_call_jobs": "post_call_job",
     "outbound_call_guards": "outbound_call_guard",
     "scheduler_shadow_comparisons": "scheduler_shadow_comparison",
+    "canary_cohort_membership": "canary_cohort_membership",
     "waitlist": "waitlist",
     "audit_logs": "audit_log",
 }
@@ -267,6 +269,7 @@ async def purge_expired_data() -> dict[str, int]:
         "post_call_jobs": settings.retention_post_call_jobs_days,
         "outbound_call_guards": settings.retention_outbound_call_guards_days,
         "scheduler_shadow_comparisons": settings.retention_scheduler_shadow_comparisons_days,
+        "canary_cohort_membership": settings.retention_canary_cohort_membership_days,
         "waitlist": settings.retention_waitlist_days,
         "audit_logs": settings.retention_audit_logs_days,
     }

@@ -87,9 +87,16 @@ def build_capacity_heartbeat(
         else bool(db_pool_stats_available)
     )
     pool_size = max(0, _int_value(db_pool_size))
+    pool_idle = max(0, _int_value(db_pool_idle))
     open_breakers = max(0, int(circuit_breakers_open))
     capacity_ready = health and not drain and active < max_capacity
-    pool_ready = stats_available and pool_size > 0
+    # A pool with size=N, idle=0 is fully saturated — accepting a new call
+    # means it can't open a DB connection. Require at least 1 idle slot.
+    # If pool stats aren't available, fall back to the old size>0 check
+    # so we don't reject readiness on instances without pool telemetry.
+    pool_ready = stats_available and pool_size > 0 and (
+        pool_idle >= 1 if db_pool_idle is not None else True
+    )
     gate_ready = True if warmup_gate_green is None else bool(warmup_gate_green)
     readiness_ready = bool(is_ready) if is_ready is not None else pool_ready and gate_ready
     ready_flag = capacity_ready and readiness_ready and open_breakers == 0

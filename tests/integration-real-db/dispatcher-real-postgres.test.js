@@ -143,7 +143,11 @@ describe.skipIf(skipIfNoDb())('Tier-2 real Postgres — dispatcher exit criteria
     expect(rows[0].n).toBe(1);
   });
 
-  it('senior-delete race: deactivating senior before markGuardInitiating yields cancelled across 50 trials', async () => {
+  // 50 trials × ~4 sequential PG round-trips against Neon ≈ 200 round-trips.
+  // At realistic CI-to-Neon latency (40-60ms each) this comfortably exceeds
+  // the default 10s Vitest timeout. Bump to 30s so a slightly slower CI
+  // network doesn't fail the run.
+  it('senior-delete race: deactivating senior before markGuardInitiating yields cancelled across 50 trials', { timeout: 30000 }, async () => {
     const pool = await getPool();
     const TRIALS = 50;
     const initiatedDespiteDeactivation = [];
