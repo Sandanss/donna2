@@ -260,13 +260,15 @@ async def run_post_call(
             session_state, conversation_tracker, duration_seconds
         )
 
+    queued_heavy_post_call = False
     try:
-        from services.post_call_jobs import maybe_enqueue_post_call_job_graph
-        await maybe_enqueue_post_call_job_graph(
+        from services.post_call_jobs import maybe_enqueue_post_call_job_graph, post_call_queue_enabled
+        queued_jobs = await maybe_enqueue_post_call_job_graph(
             conversation_id=conversation_id,
             call_sid=call_sid,
             senior_id=senior_id,
         )
+        queued_heavy_post_call = post_call_queue_enabled() and bool(queued_jobs)
     except Exception as e:
         logger.error("[{cs}] Post-call job graph enqueue failed: {err}", cs=call_sid, err=str(e))
 
@@ -316,6 +318,8 @@ async def run_post_call(
 
     # --- Parallel group: independent steps (2, 3, 5, 6) ---
     async def _step2_analysis():
+        if queued_heavy_post_call:
+            return None
         from lib.growthbook import is_on
         if not (_transcript_has_content(transcript) and senior and is_on("post_call_analysis_enabled", session_state)):
             return None
@@ -349,6 +353,8 @@ async def run_post_call(
         return result
 
     async def _step3_memory():
+        if queued_heavy_post_call:
+            return
         if not (_transcript_has_content(transcript) and senior_id):
             return
         from services.memory import extract_from_conversation
@@ -485,7 +491,7 @@ async def run_post_call(
 
     # 3.6 Compute and persist interest engagement scores
     try:
-        if senior_id and senior:
+        if not queued_heavy_post_call and senior_id and senior:
             from services.interest_discovery import compute_interest_scores, update_interest_scores
             interests = senior.get("interests") or []
             if interests:
@@ -498,7 +504,7 @@ async def run_post_call(
 
     # 4. Save daily context
     try:
-        if senior_id and conversation_tracker:
+        if not queued_heavy_post_call and senior_id and conversation_tracker:
             from services.daily_context import save_call_context
             senior = session_state.get("senior") or {}
             await save_call_context(
@@ -520,7 +526,7 @@ async def run_post_call(
 
     # 7. Rebuild call context snapshot for next call
     try:
-        if senior_id:
+        if not queued_heavy_post_call and senior_id:
             from services.call_snapshot import build_snapshot, save_snapshot
             tz = (senior or {}).get("timezone", "America/New_York")
             snapshot = await build_snapshot(
@@ -533,6 +539,12 @@ async def run_post_call(
     except Exception as e:
         post_call_error_steps.append("call snapshot")
         logger.error("[{cs}] Post-call step 7 (call snapshot) failed: {err}", cs=call_sid, err=str(e))
+
+    if queued_heavy_post_call:
+        logger.info(
+            "[{cs}] Heavy post-call processing deferred to post_call_jobs queue",
+            cs=call_sid,
+        )
 
     # 8. Persist call metrics for observability
     try:

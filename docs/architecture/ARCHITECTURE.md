@@ -147,7 +147,7 @@ Prompt context events are recorded through `services.context_trace` without logg
 
 ## Post-Call Processing (`services/post_call.py`)
 
-Runs after the telephony WebSocket disconnects. If `POST_CALL_QUEUE_ENABLED=true`, Pipecat first seeds the `post_call_jobs` graph, but the current runtime still continues through the inline chain below. `run_bot()` awaits this post-call task before releasing the Pipecat active-call semaphore, so Phase 6 is a migration seam and evidence path, not yet a full capacity release until the inline work is disabled behind flags.
+Runs after the telephony WebSocket disconnects. If `POST_CALL_QUEUE_ENABLED=true`, Pipecat seeds the `post_call_jobs` graph and keeps only immediate cleanup inline: conversation completion, caregiver-note delivery evidence, discovery profile suggestions, reminder recovery, cache clearing, and call metrics. Heavy work moves to the Pipecat post-call worker.
 
 ```
 Step 1: Complete conversation (prerequisite) ───────── sequential
@@ -215,9 +215,9 @@ Manual caregiver/admin calls through Node `routes/calls.js` call Pipecat `/telny
 
 ## Post-Call Job Workflow (Phase 6)
 
-**Active files**: `services/post-call-jobs.js`, `pipecat/services/post_call_jobs.py`, `scripts/run-post-call-worker-once.js`, `routes/post-call-jobs.js`, `db/migrations/012_post_call_job_state_machine.sql`
+**Active files**: `services/post-call-jobs.js`, `pipecat/services/post_call_jobs.py`, `pipecat/services/post_call_job_worker.py`, `pipecat/scripts/run_post_call_worker_once.py`, `scripts/run-post-call-worker-once.js`, `routes/post-call-jobs.js`, `db/migrations/012_post_call_job_state_machine.sql`
 
-Phase 6 lands the infrastructure for moving post-call work (analysis, memory extraction, snapshot rebuild, caregiver notifications, etc.) onto the `post_call_jobs` queue instead of running inline in `pipecat/services/post_call.py`. **Activation is still gated**: Pipecat only enqueues when `POST_CALL_QUEUE_ENABLED=true`, and the Node worker has no continuous loop in `index.js` — it runs via `scripts/run-post-call-worker-once.js` in shadow mode while the active runtime stays on the inline path. The state machine is `queued → leased → running → completed | failed | dead_letter`. Jobs with unresolved `depends_on` IDs are not leasable.
+Phase 6 moves post-call work (analysis, memory extraction, snapshot rebuild, caregiver notifications, etc.) onto the `post_call_jobs` queue instead of running inline in `pipecat/services/post_call.py`. **Activation is still gated**: Pipecat only enqueues and defers heavy work when `POST_CALL_QUEUE_ENABLED=true`. The Pipecat worker runs via `npm run phase6:post-call-pipecat-worker-once -- --confirm-db-writes`; the Node worker remains the artifact-verification/shadow path. The state machine is `queued -> leased -> running -> completed | failed | dead_letter`. Jobs with unresolved `depends_on` IDs are not leasable.
 
 **Job graph (`POST_CALL_JOB_GRAPH`):**
 
@@ -232,7 +232,7 @@ Phase 6 lands the infrastructure for moving post-call work (analysis, memory ext
 | `interest_discovery` | `memory_extraction` | `openAiEmbeddings` |
 | `snapshot_rebuild` | `memory_extraction`, `daily_context` | `db` |
 
-**Provider semaphores (`DEFAULT_PROVIDER_LIMITS`):** `db=200`, `anthropicHaiku=1`, `geminiFlash=1`, `openAiEmbeddings=1`, `resend=1`. These are in-process semaphores, so they cap concurrency per worker process, not globally across a fleet. The current JS worker validates artifacts instead of generating subscriber analysis; inline Pipecat analysis uses Claude Haiku. Limits can be overridden per process via `--{db,gemini-flash,openai-embeddings,resend}-concurrency` on `scripts/run-post-call-worker-once.js`.
+**Provider/work concurrency:** the JS shadow worker keeps its provider semaphores (`db=200`, `anthropicHaiku=1`, `geminiFlash=1`, `openAiEmbeddings=1`, `resend=1`). The Pipecat execution worker uses bounded per-process concurrency (`--concurrency`, default 2), so fleet-wide caps still require worker-count control or a future distributed limiter.
 
 **Retry policy (`POST_CALL_RETRY_POLICIES`):** default is 5 attempts with backoff `[30, 120, 480, 1920]` seconds. `analysis` and `memory_extraction` use longer per-type backoff. After `max_attempts`, the job moves to `dead_letter` with a PHI-free `dead_letter_reason`.
 

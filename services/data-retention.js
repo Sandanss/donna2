@@ -29,6 +29,7 @@ const RETENTION_DAYS = {
   conversation_phi:      parseInt(process.env.RETENTION_CONVERSATIONS_DAYS              || '365', 10),
   conversations:         parseInt(process.env.RETENTION_CONVERSATION_METADATA_DAYS      || '1095', 10),
   memories:              parseInt(process.env.RETENTION_MEMORIES_DAYS                   || '730', 10),
+  prospect_memories:     parseInt(process.env.RETENTION_MEMORIES_DAYS                   || '730', 10),
   call_analyses:         parseInt(process.env.RETENTION_CALL_ANALYSES_DAYS              || '365', 10),
   daily_call_context:    parseInt(process.env.RETENTION_DAILY_CONTEXT_DAYS              || '90',  10),
   call_metrics:          parseInt(process.env.RETENTION_CALL_METRICS_DAYS               || '180', 10),
@@ -57,6 +58,7 @@ const RETENTION_DAYS = {
 const TABLE_DATE_COLUMNS = {
   conversations:        'started_at',
   memories:             'created_at',
+  prospect_memories:    'created_at',
   call_analyses:        'created_at',
   daily_call_context:   'call_date',
   call_metrics:         'created_at',
@@ -79,6 +81,7 @@ const ALLOWED_TABLES = new Set(Object.keys(TABLE_DATE_COLUMNS));
 const LEGAL_HOLD_RESOURCE_TYPES = {
   conversations: 'conversation',
   memories: 'memory',
+  prospect_memories: 'memory',
   call_analyses: 'call_analysis',
   daily_call_context: 'daily_call_context',
   call_metrics: 'call_metric',

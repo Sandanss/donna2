@@ -403,11 +403,11 @@ The opening phase is merged into main — the bot starts directly in main (or re
 
 ## Post-Call Processing
 
-When the telephony client disconnects, `run_post_call()` in `services/post_call.py` executes. If `POST_CALL_QUEUE_ENABLED=true`, Pipecat seeds the `post_call_jobs` graph early, then artifact-verification handlers wait for completed conversation/metrics/analysis records while the inline chain continues today. `run_bot()` awaits this post-call task before active-call capacity is released.
+When the telephony client disconnects, `run_post_call()` in `services/post_call.py` executes. If `POST_CALL_QUEUE_ENABLED=true`, Pipecat seeds the `post_call_jobs` graph and keeps only immediate cleanup inline: conversation completion, caregiver-note delivery evidence, discovery profile suggestions, reminder recovery, cache clearing, and call metrics. Heavy work is handled by `pipecat/services/post_call_job_worker.py`.
 
 1. **Complete conversation** — Updates DB with duration, status, transcript
-2. **Call analysis** — Anthropic Claude Haiku forced tool-use generates a companion-call summary, engagement score (1-10), mood, and caregiver takeaways. Legacy concern/action/follow-up fields remain empty for compatibility. The encrypted JSON still includes a legacy `caregiver_sms` key, but SMS delivery is inactive.
-2.5. **Caregiver notes + notifications** — Marks caregiver notes delivered only when assistant transcript evidence shows Donna delivered them. POSTs to Node.js API for call_completed notifications, raising on non-2xx responses and retrying transient failures once. Node sends email/in-app notification records; SMS is inactive.
+2. **Call analysis** — Anthropic Claude Haiku forced tool-use generates a companion-call summary, engagement score (1-10), mood, and caregiver takeaways. In queue mode this runs in the post-call worker.
+2.5. **Caregiver notes + notifications** — Marks caregiver notes delivered inline only when assistant transcript evidence shows Donna delivered them. Call-completed notifications run in the post-call worker in queue mode.
 3. **Summary persistence** — Writes analysis summary through encrypted summary storage with legacy plaintext read fallback during migration (enables `get_recent_summaries()` and cross-call context)
 3.5. **Interest discovery** — Maps new topics to predefined interest categories and updates `seniors.interests` plus editable `familyInfo.interestDetails`
 3.6. **Interest scores** — Computes engagement scores per interest topic
@@ -476,7 +476,7 @@ The Node-side Phase 8 actuator (`services/phase8-autoscaler.js`) reads the same 
 
 ### Post-call queue seam (Phase 6 — gated)
 
-Phase 6 wires the seam to move post-call work onto the Node-managed `post_call_jobs` queue. When `POST_CALL_QUEUE_ENABLED=true`, `services/post_call.py` calls `services/post_call_jobs.maybe_enqueue_post_call_job_graph` after writing the conversation record, and the Node worker (`services/post-call-jobs.js`) leases and runs jobs under per-process provider semaphores. The flag is **off by default**: the active runtime still executes the full inline analyzer chain in `services/post_call.py`. Even when the graph is seeded, inline work still continues today and `run_bot()` awaits the post-call task before active-call capacity is released. The DAG (`metrics_finalize`, `reminder_recovery`, `analysis`, `memory_extraction`, `daily_context`, `caregiver_notifications`, `interest_discovery`, `snapshot_rebuild`) and dead-letter handling live on the Node side. See [`docs/architecture/ARCHITECTURE.md`](../../docs/architecture/ARCHITECTURE.md#post-call-job-workflow-phase-6) for the provider-semaphore and retry-policy contract.
+Phase 6 moves heavy post-call work onto the shared `post_call_jobs` queue. When `POST_CALL_QUEUE_ENABLED=true`, `services/post_call.py` calls `services/post_call_jobs.maybe_enqueue_post_call_job_graph`, then `pipecat/services/post_call_job_worker.py` leases and executes the heavy jobs: `analysis`, `memory_extraction`, `daily_context`, `caregiver_notifications`, `interest_discovery`, and `snapshot_rebuild`. The Node worker (`services/post-call-jobs.js`) remains available for artifact-verification/shadow evidence and dead-letter tooling. The flag is off by default.
 
 ## Directory Structure
 

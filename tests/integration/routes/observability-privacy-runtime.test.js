@@ -42,6 +42,7 @@ const harness = vi.hoisted(() => {
     callAnalysisService: {
       getLatestByConversationIds: vi.fn(),
     },
+    getDatabaseScalingSnapshot: vi.fn(),
     db: {
       select: vi.fn(() => makeSelectBuilder()),
       execute: vi.fn((...args) => harness.execute(...args)),
@@ -69,6 +70,10 @@ vi.mock('../../../lib/encryption.js', () => ({
 
 vi.mock('../../../services/call-analyses.js', () => ({
   callAnalysisService: harness.callAnalysisService,
+}));
+
+vi.mock('../../../services/db-observability.js', () => ({
+  getDatabaseScalingSnapshot: harness.getDatabaseScalingSnapshot,
 }));
 
 vi.mock('../../../services/audit.js', () => ({
@@ -137,6 +142,15 @@ describe('observability route privacy behavior', () => {
     });
     harness.decryptJson.mockImplementation((value) => value);
     harness.callAnalysisService.getLatestByConversationIds.mockResolvedValue(new Map());
+    harness.getDatabaseScalingSnapshot.mockResolvedValue({
+      capturedAt: '2035-01-01T00:00:00.000Z',
+      pool: { max: 20, total: 8, idle: 4, waiting: 0 },
+      activity: { available: true, active_backends: 1, byState: [] },
+      locks: { available: true, waiting_locks: 0, waiting_backends: 0, blocked_backends: 0 },
+      hotTables: { available: true, tables: [{ table_name: 'memories', estimated_live_rows: 10 }] },
+      slowQueries: { available: true, queries: [{ query_id: '123', mean_exec_time_ms: 42 }] },
+      phiPolicy: { outputContainsRawPhi: false },
+    });
   });
 
   it('enforces admin auth before querying observability data', async () => {
@@ -245,5 +259,24 @@ describe('observability route privacy behavior', () => {
     expect(response.body.contextTrace.latency_breakdown['call.answer_to_ws'].avg_ms).toBe(900);
     expect(response.body.captured).toBe(true);
     expect(JSON.stringify(response.body)).not.toContain('enc:bad-context-trace');
+  });
+
+  it('returns database scaling stats without query text or PHI-bearing fields', async () => {
+    const response = await requestJson(observabilityRouter, {
+      method: 'GET',
+      path: '/api/observability/db',
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body.pool.total).toBe(8);
+    expect(response.body.slowQueries.queries[0]).toEqual({
+      query_id: '123',
+      mean_exec_time_ms: 42,
+    });
+    expect(JSON.stringify(response.body)).not.toMatch(/query_text|transcript|summary|phone|senior_name/i);
+    expect(harness.logAudit).toHaveBeenCalledWith(expect.objectContaining({
+      resourceType: 'database',
+      metadata: expect.objectContaining({ endpoint: 'db_scaling' }),
+    }));
   });
 });

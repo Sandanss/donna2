@@ -1,4 +1,4 @@
-import { pgTable, uuid, varchar, text, timestamp, boolean, json, jsonb, integer, vector, time, date } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, text, timestamp, boolean, json, jsonb, integer, vector, time, date, primaryKey } from 'drizzle-orm/pg-core';
 
 // Senior profiles
 export const seniors = pgTable('seniors', {
@@ -77,10 +77,11 @@ export const conversations = pgTable('conversations', {
   createdAt: timestamp('created_at').defaultNow(),
 });
 
-// Memories with vector embeddings for semantic search
+// Senior memories with vector embeddings for semantic search.
+// The physical table is hash-partitioned by senior_id in migration 021.
 export const memories = pgTable('memories', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  seniorId: uuid('senior_id').references(() => seniors.id),
+  id: uuid('id').defaultRandom().notNull(),
+  seniorId: uuid('senior_id').notNull().references(() => seniors.id),
   type: varchar('type', { length: 50 }).notNull(), // fact, preference, event, concern, relationship
   content: text('content').notNull(),
   contentEncrypted: text('content_encrypted'),
@@ -88,6 +89,24 @@ export const memories = pgTable('memories', {
   importance: integer('importance').default(50), // 0-100
   embedding: vector('embedding', { dimensions: 1536 }), // OpenAI text-embedding-3-small
   metadata: json('metadata'), // additional context
+  createdAt: timestamp('created_at').defaultNow(),
+  lastAccessedAt: timestamp('last_accessed_at'),
+}, (table) => [
+  primaryKey({ columns: [table.seniorId, table.id] }),
+]);
+
+// Onboarding/prospect memories stay off the senior-partitioned table so
+// subscriber memory reads can be pruned by senior_id.
+export const prospectMemories = pgTable('prospect_memories', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  prospectId: uuid('prospect_id').notNull(),
+  type: varchar('type', { length: 50 }).notNull(),
+  content: text('content').notNull(),
+  contentEncrypted: text('content_encrypted'),
+  source: varchar('source', { length: 255 }),
+  importance: integer('importance').default(50),
+  embedding: vector('embedding', { dimensions: 1536 }),
+  metadata: json('metadata'),
   createdAt: timestamp('created_at').defaultNow(),
   lastAccessedAt: timestamp('last_accessed_at'),
 });

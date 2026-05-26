@@ -168,6 +168,18 @@ class TestStore:
             insert_sql = mock_q.call_args[0][0]
             assert "INSERT INTO memories" in insert_sql
 
+    @pytest.mark.asyncio
+    async def test_prospect_memory_uses_prospect_table(self):
+        with patch("services.memory.generate_embedding", new_callable=AsyncMock, return_value=[0.1, 0.2]), \
+             patch("db.query_many", new_callable=AsyncMock, return_value=[]), \
+             patch("db.query_one", new_callable=AsyncMock, return_value={"id": "m-new", "content": "new memory"}) as mock_q:
+            from services.memory import store
+            result = await store(None, "fact", "new memory", prospect_id="p1")
+            assert result is not None
+            insert_sql = mock_q.call_args[0][0]
+            assert "INSERT INTO prospect_memories" in insert_sql
+            assert "prospect_id" in insert_sql
+
 
 class TestSearch:
     @pytest.mark.asyncio
@@ -218,6 +230,18 @@ class TestSearch:
         assert count == 2
         mock_exec.assert_awaited_once()
         assert mock_exec.await_args.args[1:] == ("m1", "m2")
+
+    @pytest.mark.asyncio
+    async def test_prospect_search_uses_prospect_table(self):
+        rows = [{"id": "m1", "type": "fact", "content": "test", "importance": 50, "metadata": None, "created_at": datetime.now(timezone.utc), "similarity": 0.8}]
+        with patch("services.memory.generate_embedding", new_callable=AsyncMock, return_value=[0.1]), \
+             patch("db.query_many", new_callable=AsyncMock, return_value=rows) as mock_query, \
+             patch("db.execute", new_callable=AsyncMock) as mock_exec:
+            from services.memory import search
+            result = await search(None, "test", prospect_id="p1")
+            assert len(result) == 1
+            assert "FROM prospect_memories" in mock_query.await_args.args[0]
+            assert "UPDATE prospect_memories" in mock_exec.await_args.args[0]
 
 
 class TestBuildContext:

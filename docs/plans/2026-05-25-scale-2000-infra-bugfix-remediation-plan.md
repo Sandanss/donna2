@@ -47,9 +47,8 @@ Close the scale-2000 infrastructure defects found in the latest-main review befo
    - Fix direction: only mark jobs `running` after provider semaphore acquisition, or add explicit stale-running dead-letter/recovery path.
    - Evidence: worker test for crash-before-handler recoverability.
 
-8. **Post-call queue does not release Pipecat capacity yet**
-   - Fix direction: document as activation blocker or add a flag that enqueues and skips inline non-critical post-call work only after artifact coverage is proven.
-   - Evidence: post-call capacity release test or documented cutover gate.
+8. **Post-call queue does not release Pipecat capacity yet** — RESOLVED
+   - Evidence: with `POST_CALL_QUEUE_ENABLED=true`, `pipecat/services/post_call.py` enqueues the heavy post-call job graph and skips inline analysis, memory extraction, daily-context, interest-discovery, and snapshot-rebuild work. `pipecat/services/post_call_job_worker.py` drains those jobs from `post_call_jobs`.
 
 9. **Pipecat hard-delete misses `canary_cohort_membership`**
    - Fix direction: add legal-hold check, counts, and delete statements to the Pipecat hard-delete mirror.
@@ -96,6 +95,8 @@ Close the scale-2000 infrastructure defects found in the latest-main review befo
 - 2026-05-25: Changed dispatch failures to `deferred` retry/backoff with a terminal `failed` state after bounded attempts.
 - 2026-05-25: Treat post-authority dial errors as ambiguous and avoid releasing guard/capacity or requeueing a call that may already exist in Telnyx.
 - 2026-05-25: Added Phase 8 current-backlog demand, moved post-call `running` transitions behind provider semaphores, removed canary free-form notes, fixed retention purge order, mirrored canary hard-delete behavior, merged DB canary cohort into the standalone dispatcher, and queued manual calls in `queue_primary`.
+- 2026-05-25: Added Pipecat heavy post-call queue activation so enabling `POST_CALL_QUEUE_ENABLED` skips heavy inline post-call work and releases voice capacity sooner.
+- 2026-05-25: Added 64-way senior memory hash partitioning plus `prospect_memories`, and added PHI-safe DB observability for pool/lock/hot-table/slow-query pressure.
 
 ## Validation Checklist
 

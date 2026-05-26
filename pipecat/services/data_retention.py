@@ -27,6 +27,7 @@ from db.client import query_one
 TABLE_DATE_COLUMNS: dict[str, str] = {
     "conversations": "started_at",
     "memories": "created_at",
+    "prospect_memories": "created_at",
     "call_analyses": "created_at",
     "daily_call_context": "call_date",
     "call_metrics": "created_at",
@@ -51,6 +52,7 @@ BATCH_SIZE = 5000
 LEGAL_HOLD_RESOURCE_TYPES: dict[str, str] = {
     "conversations": "conversation",
     "memories": "memory",
+    "prospect_memories": "memory",
     "call_analyses": "call_analysis",
     "daily_call_context": "daily_call_context",
     "call_metrics": "call_metric",
@@ -266,6 +268,7 @@ async def purge_expired_data() -> dict[str, int]:
         "conversation_phi": settings.retention_conversations_days,
         "conversations": settings.retention_conversation_metadata_days,
         "memories": settings.retention_memories_days,
+        "prospect_memories": settings.retention_memories_days,
         "call_analyses": settings.retention_call_analyses_days,
         "daily_call_context": settings.retention_daily_context_days,
         "call_metrics": settings.retention_call_metrics_days,

@@ -5,6 +5,7 @@ import { eq, desc, and, sql } from 'drizzle-orm';
 import { requireAdmin } from '../middleware/auth.js';
 import { decrypt, decryptJson } from '../lib/encryption.js';
 import { callAnalysisService } from '../services/call-analyses.js';
+import { getDatabaseScalingSnapshot } from '../services/db-observability.js';
 import { routeError } from './helpers.js';
 import { logAudit, authToRole } from '../services/audit.js';
 
@@ -895,6 +896,26 @@ router.get('/api/observability/metrics/latency', requireAdmin, async (req, res) 
     res.json({ latency: rows.rows, hours });
   } catch (error) {
     routeError(res, error, 'GET /api/observability/metrics/latency');
+  }
+});
+
+// PHI-safe database scaling snapshot: pool pressure, lock waits, table stats,
+// and slow-query aggregates by queryid only.
+router.get('/api/observability/db', requireAdmin, async (req, res) => {
+  try {
+    const snapshot = await getDatabaseScalingSnapshot();
+    logAudit({
+      userId: req.auth.userId,
+      userRole: authToRole(req.auth),
+      action: 'read',
+      resourceType: 'database',
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+      metadata: { surface: 'observability', endpoint: 'db_scaling' },
+    });
+    res.json(snapshot);
+  } catch (error) {
+    routeError(res, error, 'GET /api/observability/db');
   }
 });
 
