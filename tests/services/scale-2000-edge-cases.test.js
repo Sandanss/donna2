@@ -392,6 +392,7 @@ describe('syncSeniorCallSchedulesFromPreferredCallTimes orphan cleanup', () => {
     const senior = {
       id: 'senior-orphan',
       timezone: 'America/New_York',
+      voiceDiscoveryStatus: 'complete',
       preferredCallTimes: {
         schedule: [
           { id: 'schedule-keep', frequency: 'daily', time: '9:30 AM' },

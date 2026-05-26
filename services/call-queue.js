@@ -592,7 +592,7 @@ export function resolveCallArchitectureConfig(env = process.env) {
     requireCapacityRegistry: parseBoolean(env.CALL_QUEUE_REQUIRE_CAPACITY_REGISTRY, false),
     lanePolicyVersion: String(env.CALL_LANE_POLICY_VERSION || 'v1').trim() || 'v1',
     shadowCapacitySlots: optionalNonNegativeInteger(env.CALL_QUEUE_SHADOW_CAPACITY, 10000),
-    enabledCallTypes: String(env.CALL_QUEUE_ENABLED_CALL_TYPES || 'manual,reminder,schedule,welfare')
+    enabledCallTypes: String(env.CALL_QUEUE_ENABLED_CALL_TYPES || 'manual,reminder,schedule,discovery,welfare')
       .split(',')
       .map(type => type.trim())
       .filter(Boolean),
@@ -741,6 +741,9 @@ export function buildCallDedupeKey({
   if (type === 'schedule') {
     return `schedule:${senior}:${dateKey}:${requireString(scheduleId || target?.toISOString(), 'scheduleId or targetAt')}`;
   }
+  if (type === 'discovery') {
+    return `discovery:${senior}:${dateKey}:${requireString(scheduleId || target?.toISOString(), 'scheduleId or targetAt')}`;
+  }
   if (type === 'reminder') {
     return `reminder:${requireString(reminderId, 'reminderId')}:${requireString(target?.toISOString(), 'targetAt')}`;
   }
@@ -783,6 +786,7 @@ export function priorityLaneForCallSpec(spec) {
     return spec.existingDelivery?.id ? PRIORITY_LANES.REMINDER_RETRY : PRIORITY_LANES.HARD_REMINDER;
   }
   if (spec?.type === 'schedule') return PRIORITY_LANES.SCHEDULED_CHECKIN;
+  if (spec?.type === 'discovery') return PRIORITY_LANES.SCHEDULED_CHECKIN;
   if (spec?.type === 'welfare') return PRIORITY_LANES.WELFARE;
   return PRIORITY_LANES.LOW_PRIORITY_RETRY;
 }
@@ -1016,7 +1020,7 @@ export async function leaseQueuedCalls({
           WHEN ${PRIORITY_LANES.SCHEDULED_CHECKIN} THEN 4
           WHEN ${PRIORITY_LANES.WELFARE} THEN 5
           WHEN ${PRIORITY_LANES.LOW_PRIORITY_RETRY} THEN 6
-          ELSE 7
+          ELSE 8
         END,
         priority_score DESC,
         target_at ASC
@@ -1817,7 +1821,7 @@ export function buildQueueOutboundCallParams(row, {
   const QUEUE_TO_PIPECAT_CALL_TYPE = {
     schedule: 'schedule',
     reminder: 'reminder',
-    onboarding: 'onboarding',
+    new_customer: 'new_customer',
     consent: 'consent',
     discovery: 'discovery',
   };

@@ -17,7 +17,7 @@ from services.time_context import format_call_time_label
 async def create(senior_id: str | None, call_sid: str, prospect_id: str | None = None, direction: str | None = None) -> dict:
     """Create a new conversation record.
 
-    Pass senior_id for subscriber calls, prospect_id for onboarding calls.
+    Pass senior_id for subscriber calls, prospect_id for new customer calls.
     """
     row = await query_one(
         """INSERT INTO conversations (senior_id, prospect_id, call_sid, started_at, status, direction)

@@ -701,7 +701,7 @@ async def _store_prospect_metadata(
         conv = await create(None, call_control_id, prospect_id=prospect_id, direction="inbound")
         conversation_id = str(conv["id"]) if conv else None
     except Exception as exc:
-        logger.error("[{cid}] Error creating Telnyx onboarding conversation: {err}", cid=call_control_id, err=str(exc))
+        logger.error("[{cid}] Error creating Telnyx new customer conversation: {err}", cid=call_control_id, err=str(exc))
 
     metadata = {
         "senior": None,
@@ -710,7 +710,7 @@ async def _store_prospect_metadata(
         "memory_context": memory_context,
         "conversation_id": conversation_id,
         "is_outbound": False,
-        "call_type": "onboarding",
+        "call_type": "new_customer",
         "target_phone": target_phone,
         "ws_token": ws_token,
         "ws_token_expires_at": time.time() + 300,
@@ -1205,10 +1205,26 @@ async def telnyx_events(request: Request, background_tasks: BackgroundTasks):
             try:
                 from services.call_attempts import mark_call_attempt_ended
 
-                await mark_call_attempt_ended(call_control_id, event_type)
+                error_reason = "machine_voicemail" if metadata.get("telnyx_voicemail_detected") else None
+                await mark_call_attempt_ended(call_control_id, event_type, error_reason=error_reason)
             except Exception as exc:
                 logger.warning(
                     "[{cid}] call_attempts ended hook failed: {err}",
+                    cid=call_control_id,
+                    err=str(exc),
+                )
+            try:
+                from services.call_queue_lifecycle import finalize_queue_terminal_event
+
+                error_reason = "machine_voicemail" if metadata.get("telnyx_voicemail_detected") else None
+                await finalize_queue_terminal_event(
+                    call_control_id=call_control_id,
+                    event_type=event_type,
+                    error_reason=error_reason,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "[{cid}] call_queue terminal hook failed: {err}",
                     cid=call_control_id,
                     err=str(exc),
                 )

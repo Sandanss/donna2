@@ -14,6 +14,7 @@ import {
   zonedWallTimeToUtcDate,
 } from '../lib/timezone.js';
 import {
+  CALL_QUEUE_STATUSES,
   PRIORITY_LANES,
   buildCallDedupeKey,
   buildDispatchWindow,
@@ -22,8 +23,12 @@ import {
 } from './call-queue.js';
 
 const DEFAULT_WINDOW_MINUTES = 15;
+const DEFAULT_DISCOVERY_FALLBACK_TIME = '10:00';
 const MAX_LOOKAHEAD_DAYS = 370;
 export const CALL_SCHEDULE_MATERIALIZER_LOCK_ID = 8675310;
+const DISCOVERY_CALL_TYPE = 'discovery';
+const DISCOVERY_SOURCE_INDEX = -1;
+const DISCOVERY_ACTIVE_STATUSES = new Set(['not_started', 'scheduled', 'in_progress', 'partial']);
 
 function rowsFrom(result) {
   return result?.rows || [];
@@ -50,7 +55,7 @@ function hashScheduleSource(seniorId, item, index) {
     index,
     id: item?.id || null,
     frequency: item?.frequency || null,
-    recurringDays: Array.isArray(item?.recurringDays) ? [...item.recurringDays].sort() : null,
+    recurringDays: Array.isArray(item?.recurringDays || item?.days) ? [...(item.recurringDays || item.days)].sort() : null,
     date: item?.date || null,
     time: item?.time || null,
     reminderIds: Array.isArray(item?.reminderIds) ? [...item.reminderIds].sort() : null,
@@ -83,7 +88,31 @@ function dayOfWeek(parts) {
 
 function normalizeDays(days) {
   if (!Array.isArray(days)) return null;
-  const unique = [...new Set(days.map(day => Number.parseInt(day, 10)).filter(day => day >= 0 && day <= 6))];
+  const dayNameToIndex = {
+    sunday: 0,
+    sun: 0,
+    monday: 1,
+    mon: 1,
+    tuesday: 2,
+    tue: 2,
+    wednesday: 3,
+    wed: 3,
+    thursday: 4,
+    thu: 4,
+    friday: 5,
+    fri: 5,
+    saturday: 6,
+    sat: 6,
+  };
+  const unique = [...new Set(days
+    .map((day) => {
+      const normalized = String(day || '').trim().toLowerCase();
+      if (Object.prototype.hasOwnProperty.call(dayNameToIndex, normalized)) {
+        return dayNameToIndex[normalized];
+      }
+      return Number.parseInt(day, 10);
+    })
+    .filter(day => day >= 0 && day <= 6))];
   return unique.sort((a, b) => a - b);
 }
 
@@ -101,6 +130,123 @@ function encryptContextNotes(contextNotes) {
   if (!contextNotes) return null;
   const encrypted = encrypt(contextNotes);
   return typeof encrypted === 'string' && encrypted.startsWith('enc:') ? encrypted : null;
+}
+
+function preferredScheduleItems(senior) {
+  const rawSchedule = senior?.preferredCallTimes?.schedule;
+  if (Array.isArray(rawSchedule)) return rawSchedule;
+  if (rawSchedule && typeof rawSchedule === 'object') return [rawSchedule];
+  return [];
+}
+
+function normalizeVoiceDiscoveryStatus(senior) {
+  return String(
+    senior?.voiceDiscoveryStatus ??
+    senior?.voice_discovery_status ??
+    'not_started'
+  ).trim() || 'not_started';
+}
+
+function shouldScheduleInitialDiscovery(senior) {
+  return DISCOVERY_ACTIVE_STATUSES.has(normalizeVoiceDiscoveryStatus(senior));
+}
+
+function daysFromScheduleItem(item) {
+  return item?.recurringDays || item?.days || null;
+}
+
+function frequencyFromScheduleItem(item) {
+  const days = normalizeDays(daysFromScheduleItem(item));
+  if (item?.frequency === 'daily' && days && days.length > 0 && days.length < 7) return 'recurring';
+  if (item?.frequency) return item.frequency;
+  return days && days.length > 0 && days.length < 7 ? 'recurring' : 'daily';
+}
+
+function buildNormalizedScheduleRow({
+  seniorId,
+  item,
+  index,
+  now,
+  timezone,
+  callType = 'schedule',
+  priorityLane = PRIORITY_LANES.SCHEDULED_CHECKIN,
+}) {
+  const time = parseTimeString(item?.time);
+  if (!time) return null;
+
+  const frequency = frequencyFromScheduleItem(item);
+  const normalizedDays = frequency === 'recurring' ? normalizeDays(daysFromScheduleItem(item)) : null;
+  const oneTimeDate = frequency === 'one-time' ? localDateFromString(item.date) : null;
+  const nextRunAt = computeNextScheduleRunAt({
+    frequency,
+    recurringDays: normalizedDays,
+    daysOfWeek: normalizedDays,
+    date: item.date,
+    time: item.time,
+    timezone,
+  }, now);
+  if (!nextRunAt) return null;
+  const isInitialDiscovery = callType === DISCOVERY_CALL_TYPE;
+  const discoveryLocalDate = isInitialDiscovery ? getDatePartsInTimezone(nextRunAt, timezone) : null;
+  const rowOneTimeDate = discoveryLocalDate || oneTimeDate;
+
+  return {
+    seniorId,
+    sourceProfileHash: hashScheduleSource(
+      seniorId,
+      callType === DISCOVERY_CALL_TYPE
+        ? { ...item, id: `voice-discovery:${item?.id || index || 'first-call'}` }
+        : item,
+      index,
+    ),
+    callType,
+    timezone,
+    targetLocalTime: formatDbTime(time),
+    windowMinutes: DEFAULT_WINDOW_MINUTES,
+    frequency: isInitialDiscovery ? 'one-time' : frequency,
+    daysOfWeek: isInitialDiscovery ? null : normalizedDays,
+    oneTimeDate: rowOneTimeDate
+      ? `${rowOneTimeDate.year}-${String(rowOneTimeDate.month).padStart(2, '0')}-${String(rowOneTimeDate.day).padStart(2, '0')}`
+      : null,
+    priorityLane,
+    reminderIds: Array.isArray(item.reminderIds) ? item.reminderIds : null,
+    contextNotesEncrypted: encryptContextNotes(item.contextNotes),
+    nextRunAt,
+  };
+}
+
+function buildInitialDiscoveryRow({
+  seniorId,
+  schedule,
+  now,
+  timezone,
+}) {
+  for (let index = 0; index < schedule.length; index += 1) {
+    const row = buildNormalizedScheduleRow({
+      seniorId,
+      item: schedule[index],
+      index: DISCOVERY_SOURCE_INDEX,
+      now,
+      timezone,
+      callType: DISCOVERY_CALL_TYPE,
+      priorityLane: PRIORITY_LANES.SCHEDULED_CHECKIN,
+    });
+    if (row) return row;
+  }
+
+  return buildNormalizedScheduleRow({
+    seniorId,
+    item: {
+      id: 'fallback',
+      frequency: 'daily',
+      time: DEFAULT_DISCOVERY_FALLBACK_TIME,
+    },
+    index: DISCOVERY_SOURCE_INDEX,
+    now,
+    timezone,
+    callType: DISCOVERY_CALL_TYPE,
+    priorityLane: PRIORITY_LANES.SCHEDULED_CHECKIN,
+  });
 }
 
 export function computeNextScheduleRunAt(schedule, now = new Date()) {
@@ -141,46 +287,30 @@ export function normalizeSeniorCallScheduleRows(senior, now = new Date()) {
   const seniorId = senior?.id;
   if (!seniorId) throw new Error('senior.id is required');
 
-  const schedule = senior?.preferredCallTimes?.schedule;
-  if (!Array.isArray(schedule) || schedule.length === 0) return [];
+  const schedule = preferredScheduleItems(senior);
 
   const timezone = resolveTimezoneFromProfile(senior);
-  return schedule
-    .map((item, index) => {
-      const time = parseTimeString(item?.time);
-      if (!time) return null;
-
-      const frequency = item.frequency || 'daily';
-      const normalizedDays = frequency === 'recurring' ? normalizeDays(item.recurringDays) : null;
-      const oneTimeDate = frequency === 'one-time' ? localDateFromString(item.date) : null;
-      const nextRunAt = computeNextScheduleRunAt({
-        frequency,
-        recurringDays: normalizedDays,
-        date: item.date,
-        time: item.time,
-        timezone,
-      }, now);
-      if (!nextRunAt) return null;
-
-      return {
-        seniorId,
-        sourceProfileHash: hashScheduleSource(seniorId, item, index),
-        callType: 'schedule',
-        timezone,
-        targetLocalTime: formatDbTime(time),
-        windowMinutes: DEFAULT_WINDOW_MINUTES,
-        frequency,
-        daysOfWeek: normalizedDays,
-        oneTimeDate: oneTimeDate
-          ? `${oneTimeDate.year}-${String(oneTimeDate.month).padStart(2, '0')}-${String(oneTimeDate.day).padStart(2, '0')}`
-          : null,
-        priorityLane: PRIORITY_LANES.SCHEDULED_CHECKIN,
-        reminderIds: Array.isArray(item.reminderIds) ? item.reminderIds : null,
-        contextNotesEncrypted: encryptContextNotes(item.contextNotes),
-        nextRunAt,
-      };
-    })
+  const rows = schedule
+    .map((item, index) => buildNormalizedScheduleRow({
+      seniorId,
+      item,
+      index,
+      now,
+      timezone,
+    }))
     .filter(Boolean);
+
+  if (shouldScheduleInitialDiscovery(senior)) {
+    const discoveryRow = buildInitialDiscoveryRow({
+      seniorId,
+      schedule,
+      now,
+      timezone,
+    });
+    if (discoveryRow) return [discoveryRow, ...rows];
+  }
+
+  return rows;
 }
 
 export async function syncSeniorCallSchedulesFromPreferredCallTimes(senior, {
@@ -253,6 +383,24 @@ export async function syncSeniorCallSchedulesFromPreferredCallTimes(senior, {
       upserted += 1;
     }
 
+    const discoveryRow = rows.find(row => row.callType === DISCOVERY_CALL_TYPE);
+    if (discoveryRow) {
+      const window = buildDispatchWindow(
+        discoveryRow.nextRunAt,
+        discoveryRow.windowMinutes || DEFAULT_WINDOW_MINUTES,
+      );
+      await executor.execute(sql`
+        UPDATE call_queue
+        SET target_at = ${discoveryRow.nextRunAt},
+            earliest_at = ${window.earliestAt},
+            latest_at = ${window.latestAt},
+            updated_at = NOW()
+        WHERE senior_id = ${seniorId}
+          AND call_type = ${DISCOVERY_CALL_TYPE}
+          AND status IN (${CALL_QUEUE_STATUSES.QUEUED}, ${CALL_QUEUE_STATUSES.DEFERRED})
+      `);
+    }
+
     return upserted;
   };
 
@@ -298,7 +446,7 @@ export function buildQueueInputFromNormalizedSchedule(schedule) {
     earliestAt: window.earliestAt,
     latestAt: window.latestAt,
     dedupeKey: buildCallDedupeKey({
-      callType: 'schedule',
+      callType: schedule.callType || 'schedule',
       seniorId: schedule.seniorId,
       scheduleId: schedule.id,
       targetAt: nextRunAt,
@@ -333,8 +481,47 @@ async function materializeDueNormalizedSchedulesUnlocked({
     WHERE scs.is_active = true
       AND s.is_active = true
       ${isSchedulerConsentGateEnabled()
-        ? sql`AND s.callable = true AND s.consent_status = 'granted'`
+        ? sql`AND s.callable = true
+          AND (
+            (
+              scs.call_type = ${DISCOVERY_CALL_TYPE}
+              AND s.consent_status IN ('pending', 'granted')
+            )
+            OR (
+              scs.call_type <> ${DISCOVERY_CALL_TYPE}
+              AND s.consent_status = 'granted'
+            )
+          )`
         : sql``}
+      AND (
+        (
+          scs.call_type = ${DISCOVERY_CALL_TYPE}
+          AND s.voice_discovery_status IN ('not_started', 'scheduled', 'in_progress', 'partial')
+          AND NOT EXISTS (
+            SELECT 1
+            FROM call_queue q
+            WHERE q.senior_id = scs.senior_id
+              AND q.call_type = ${DISCOVERY_CALL_TYPE}
+              AND q.status IN (
+                ${CALL_QUEUE_STATUSES.QUEUED},
+                ${CALL_QUEUE_STATUSES.DEFERRED},
+                ${CALL_QUEUE_STATUSES.LEASED},
+                ${CALL_QUEUE_STATUSES.INITIATING},
+                ${CALL_QUEUE_STATUSES.STARTED}
+              )
+          )
+        )
+        OR (
+          scs.call_type <> ${DISCOVERY_CALL_TYPE}
+          AND (
+            s.voice_discovery_status = 'complete'
+            OR (
+              s.voice_discovery_status = 'declined'
+              AND s.callable = true
+            )
+          )
+        )
+      )
       AND scs.next_run_at <= ${horizon}
       AND NOT EXISTS (
         SELECT 1
@@ -358,6 +545,20 @@ async function materializeDueNormalizedSchedulesUnlocked({
       const enqueueResult = await enqueueCall(queueInput, { database });
       if (enqueueResult.inserted) inserted += 1;
       else existing += 1;
+
+      if (schedule.callType === DISCOVERY_CALL_TYPE) {
+        await database.execute(sql`
+          UPDATE seniors
+          SET voice_discovery_status = CASE
+                WHEN voice_discovery_status IN ('not_started', 'partial')
+                  THEN 'scheduled'
+                ELSE voice_discovery_status
+              END,
+              updated_at = NOW()
+          WHERE id = ${schedule.seniorId}
+            AND voice_discovery_status IN ('not_started', 'scheduled', 'in_progress', 'partial')
+        `);
+      }
 
       const nextRunAt = computeNextScheduleRunAt(schedule, new Date(materializedFor.getTime() + 60 * 1000));
       await database.execute(sql`

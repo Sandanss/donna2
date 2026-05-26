@@ -13,6 +13,27 @@ from unittest.mock import AsyncMock, patch
 from processors.conversation_tracker import ConversationTrackerProcessor
 
 
+class TestDiscoveryPostCallHelpers:
+    def test_detects_clear_no_more_calls_request(self):
+        from services.post_call import _discovery_opt_out_quote
+
+        quote = _discovery_opt_out_quote([
+            {"role": "assistant", "content": "Would another time be better?"},
+            {"role": "user", "content": "Please don't call me again."},
+        ])
+
+        assert quote == "Please don't call me again."
+
+    def test_does_not_treat_try_later_as_opt_out(self):
+        from services.post_call import _discovery_opt_out_quote
+
+        quote = _discovery_opt_out_quote([
+            {"role": "user", "content": "Now is not good. Please try another time."},
+        ])
+
+        assert quote is None
+
+
 class TestDiscoveryProfileSuggestions:
     """Discovery call post-call writer (services.post_call._save_discovery_profile_suggestions)."""
 
@@ -725,14 +746,14 @@ class TestPostCallProcessing:
             assert mock_analyze.await_args.args[0] == persisted_transcript
 
     @pytest.mark.asyncio
-    async def test_onboarding_post_call_falls_back_to_persisted_transcript(self, session_state):
-        """Onboarding post-call should also recover from the durable transcript."""
+    async def test_new_customer_post_call_falls_back_to_persisted_transcript(self, session_state):
+        """New customer post-call should also recover from the durable transcript."""
         persisted_transcript = [
             {"role": "user", "content": "Hi, I'm Lisa calling about my mom."},
             {"role": "assistant", "content": "Nice to meet you, Lisa."},
         ]
         session_state.update({
-            "call_type": "onboarding",
+            "call_type": "new_customer",
             "senior_id": None,
             "senior": None,
             "prospect_id": "prospect-001",
@@ -743,7 +764,7 @@ class TestPostCallProcessing:
         with patch("services.conversations.get_transcript_by_call_sid", new_callable=AsyncMock, return_value=persisted_transcript) as mock_get, \
              patch("services.conversations.complete", new_callable=AsyncMock) as mock_complete, \
              patch("services.memory.extract_from_conversation", new_callable=AsyncMock) as mock_memory, \
-             patch("services.post_call._summarize_onboarding_call", new_callable=AsyncMock, return_value="Lisa called about her mom."), \
+             patch("services.post_call._summarize_new_customer_call", new_callable=AsyncMock, return_value="Lisa called about her mom."), \
              patch("services.prospects.extract_prospect_details", new_callable=AsyncMock, return_value={}), \
              patch("services.prospects.update_after_call", new_callable=AsyncMock):
 
@@ -771,10 +792,10 @@ class TestPostCallProcessing:
             await run_post_call(session_state, tracker, duration_seconds=10)
 
     @pytest.mark.asyncio
-    async def test_onboarding_post_call_extracts_prospect_details_once(self, session_state):
-        """Onboarding calls extract prospect details post-call and update once."""
+    async def test_new_customer_post_call_extracts_prospect_details_once(self, session_state):
+        """New customer calls extract prospect details post-call and update once."""
         session_state.update({
-            "call_type": "onboarding",
+            "call_type": "new_customer",
             "senior_id": None,
             "senior": None,
             "prospect_id": "prospect-001",
@@ -789,7 +810,7 @@ class TestPostCallProcessing:
 
         with patch("services.conversations.complete", new_callable=AsyncMock) as mock_complete, \
              patch("services.memory.extract_from_conversation", new_callable=AsyncMock) as mock_memory, \
-             patch("services.post_call._summarize_onboarding_call", new_callable=AsyncMock) as mock_summary, \
+             patch("services.post_call._summarize_new_customer_call", new_callable=AsyncMock) as mock_summary, \
              patch("services.prospects.extract_prospect_details", new_callable=AsyncMock) as mock_details, \
              patch("services.prospects.update_after_call", new_callable=AsyncMock) as mock_update:
 

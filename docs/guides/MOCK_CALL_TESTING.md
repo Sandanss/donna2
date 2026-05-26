@@ -183,6 +183,13 @@ metrics logger emits during real calls.
 | `discovery_early_goodbye` | Partial discovery before an early goodbye |
 | `discovery_correction` | Senior corrects a stated discovery fact in-call |
 | `discovery_boundary_reminder_attempt` | Discovery call resists drifting into reminder scheduling |
+| `discovery_first_call_happy_path` | First senior discovery call intro; captures name preference, interests, routine, and family context |
+| `discovery_not_good_time` | First senior discovery call cannot continue; Donna should close naturally for retry |
+| `discovery_no_more_calls` | First senior discovery call opt-out; Donna should stop retrying and mark no future calls |
+| `discovery_first_call_quiet_preferences` | Reserved caller shares call timing and hobby preferences after simple prompts |
+| `discovery_first_call_weather` | First senior discovery call captures a routine and handles a current-weather question |
+| `discovery_first_call_early_goodbye` | Partial first-call capture before caller exits early |
+| `discovery_first_call_correction` | Caller corrects a non-medical fact during first-call capture |
 
 Choose with `--scenario <name>`. To add new scenarios see ["Adding a scenario"](#adding-a-scenario) below.
 
@@ -211,6 +218,9 @@ we want to keep exercising:
 | Bilingual reminder creation | `reminder_creation` | Spanish/English confirmation flow fails before `create_reminder` |
 | Consent boundary | `consent_boundary_reminder_attempt` | First call drifts into regular reminder workflow |
 | Discovery boundary | `discovery_boundary_reminder_attempt` | Profile-building call becomes reminder scheduling |
+| Discovery no-time | `discovery_not_good_time` | First scheduled Donna discovery call cannot collect facts and must retry cleanly |
+| Discovery opt-out | `discovery_no_more_calls` | Explicit no-more-calls request must not be retried |
+| Discovery interrupted | `discovery_first_call_early_goodbye` | Partial first-call facts should not mark discovery complete too early |
 | Reminder stampede | `build_reminder_stampede_specs(count)` | Concurrent reminder calls collide on state/DB rows |
 | Post-call stampede | `build_post_call_stampede_specs(count)` | Many calls end together. This saturates post-call jobs only when `POST_CALL_QUEUE_ENABLED=true`; otherwise Pipecat still runs inline post-call work. Use `npm run phase6:post-call-stampede` for the separate JS worker evidence path. |
 | Parallel flake detector | `build_parallel_flake_specs(factory, repetitions=N)` | State leaks and nondeterminism across repeated concurrent runs |

@@ -1,7 +1,7 @@
 """Pipecat Flows call phase node definitions.
 
 Defines subscriber phases ([reminder] → main → winding_down → closing) plus
-dedicated entry nodes for onboarding, consent, discovery, and the schedule
+dedicated entry nodes for new_customer, consent, discovery, and the schedule
 path. The opening phase is merged into the first active node — the bot greets
 and continues in one phase, eliminating the transition_to_main double-LLM-call
 penalty. The reminder phase is conditional and only activates when pending
@@ -30,10 +30,10 @@ from prompts import (
     MAIN_TASK,
     WINDING_DOWN_TASK,
     CLOSING_TASK_TEMPLATE,
-    ONBOARDING_SYSTEM_PROMPT,
-    ONBOARDING_TASK_FIRST_CALL,
-    ONBOARDING_TASK_RETURN_CALLER,
-    ONBOARDING_CLOSING_TASK,
+    NEW_CUSTOMER_SYSTEM_PROMPT,
+    NEW_CUSTOMER_TASK_FIRST_CALL,
+    NEW_CUSTOMER_TASK_RETURN_CALLER,
+    NEW_CUSTOMER_CLOSING_TASK,
     CONSENT_SYSTEM_PROMPT,
     CONSENT_TASK_TEMPLATE,
     CONSENT_CLOSING_TASK_TEMPLATE,
@@ -815,33 +815,33 @@ def build_closing_node(session_state: dict) -> NodeConfig:
 
 
 # ---------------------------------------------------------------------------
-# Onboarding nodes (unsubscribed callers)
+# New customer nodes (unsubscribed callers)
 # ---------------------------------------------------------------------------
 
 def _build_prospect_context(session_state: dict) -> str:
-    """Build context string for onboarding calls from prospect data."""
+    """Build context string for new customer calls from prospect data."""
     prospect = session_state.get("prospect") or {}
 
     from services.prospects import build_context_for_prompt
     return build_context_for_prompt(prospect)
 
 
-def _make_transition_to_onboarding_closing(session_state: dict):
-    """Create transition function: onboarding → closing."""
+def _make_transition_to_new_customer_closing(session_state: dict):
+    """Create transition function: new_customer → closing."""
 
     async def transition_to_closing(args: dict, flow_manager) -> tuple[dict, NodeConfig]:
-        logger.info("Transitioning: onboarding → closing")
+        logger.info("Transitioning: new_customer → closing")
         _record_phase_transition(session_state, "closing")
         return (
             {"status": "success"},
-            build_onboarding_closing_node(session_state),
+            build_new_customer_closing_node(session_state),
         )
 
     return transition_to_closing
 
 
-def build_onboarding_node(session_state: dict, flows_tools: dict) -> NodeConfig:
-    """Build the onboarding node for unsubscribed callers.
+def build_new_customer_node(session_state: dict, flows_tools: dict) -> NodeConfig:
+    """Build the new_customer node for unsubscribed callers.
 
     Single node covers all 6 conversation stages via prompt instructions.
     Tools: web_search, transition_to_closing.
@@ -861,12 +861,12 @@ def build_onboarding_node(session_state: dict, flows_tools: dict) -> NodeConfig:
             ctx_parts.append(f"You were looking into Donna for a loved one.")
         context_reference = " ".join(ctx_parts) if ctx_parts else "How have you been?"
 
-        task = ONBOARDING_TASK_RETURN_CALLER.format(
+        task = NEW_CUSTOMER_TASK_RETURN_CALLER.format(
             name=name,
             context_reference=context_reference,
         )
     else:
-        task = ONBOARDING_TASK_FIRST_CALL
+        task = NEW_CUSTOMER_TASK_FIRST_CALL
 
     # Memory context for return callers
     memory_ctx = session_state.get("memory_context")
@@ -875,42 +875,42 @@ def build_onboarding_node(session_state: dict, flows_tools: dict) -> NodeConfig:
         _record_prompt_event(
             session_state,
             source="memory_context",
-            label="Onboarding return-caller memory context",
+            label="New customer return-caller memory context",
             content=memory_ctx,
             provider="context_cache",
             item_count=_line_item_count(memory_ctx),
-            dedupe_key="onboarding:memory_context",
+            dedupe_key="new_customer:memory_context",
         )
 
-    # Tools: all onboarding tools + transition
+    # Tools: all new customer tools + transition
     functions: list = list(flows_tools.values())
     functions.append(FlowsFunctionSchema(
         name="transition_to_closing",
         description="Call this when the caller is ready to end the conversation or says goodbye.",
         properties={},
         required=[],
-        handler=_make_transition_to_onboarding_closing(session_state),
+        handler=_make_transition_to_new_customer_closing(session_state),
     ))
 
-    system_content = ONBOARDING_SYSTEM_PROMPT + "\n\n" + prospect_ctx
+    system_content = NEW_CUSTOMER_SYSTEM_PROMPT + "\n\n" + prospect_ctx
     _record_prompt_event(
         session_state,
         source="prospect_context",
-        label="Prospect onboarding context",
+        label="Prospect new customer context",
         content=prospect_ctx,
         provider="prospects",
-        dedupe_key="onboarding:prospect_context",
+        dedupe_key="new_customer:prospect_context",
     )
     _record_node_prompts(
         session_state,
-        node_name="onboarding",
-        system_prompt=ONBOARDING_SYSTEM_PROMPT,
+        node_name="new_customer",
+        system_prompt=NEW_CUSTOMER_SYSTEM_PROMPT,
         task_prompt=task,
-        prompt_variant="onboarding",
+        prompt_variant="new_customer",
     )
 
     return NodeConfig(
-        name="onboarding",
+        name="new_customer",
         role_messages=[{"role": "system", "content": system_content}],
         task_messages=[{"role": "user", "content": task}],
         functions=functions,
@@ -919,18 +919,18 @@ def build_onboarding_node(session_state: dict, flows_tools: dict) -> NodeConfig:
     )
 
 
-def build_onboarding_closing_node(session_state: dict) -> NodeConfig:
-    """Build the closing node for onboarding calls."""
+def build_new_customer_closing_node(session_state: dict) -> NodeConfig:
+    """Build the closing node for new customer calls."""
     _record_node_prompts(
         session_state,
-        node_name="onboarding_closing",
-        task_prompt=ONBOARDING_CLOSING_TASK,
-        prompt_variant="onboarding",
+        node_name="new_customer_closing",
+        task_prompt=NEW_CUSTOMER_CLOSING_TASK,
+        prompt_variant="new_customer",
     )
     return NodeConfig(
-        name="onboarding_closing",
+        name="new_customer_closing",
         role_messages=[],
-        task_messages=[{"role": "user", "content": ONBOARDING_CLOSING_TASK}],
+        task_messages=[{"role": "user", "content": NEW_CUSTOMER_CLOSING_TASK}],
         functions=[],
         post_actions=[{"type": "end_conversation"}],
         context_strategy=ContextStrategyConfig(strategy=ContextStrategy.APPEND),
@@ -1173,7 +1173,6 @@ def build_discovery_closing_node(session_state: dict) -> NodeConfig:
         respond_immediately=False,
     )
 
-
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -1185,7 +1184,7 @@ def build_discovery_closing_node(session_state: dict) -> NodeConfig:
 # stays inline because it routes on session state (pending reminders) in
 # addition to call_type.
 CALL_TYPE_INITIAL_NODES = {
-    "onboarding": ("onboarding", build_onboarding_node),
+    "new_customer": ("new_customer", build_new_customer_node),
     "consent": ("consent", build_consent_node),
     "discovery": ("discovery", build_discovery_node),
 }
@@ -1194,7 +1193,7 @@ CALL_TYPE_INITIAL_NODES = {
 def build_initial_node(session_state: dict, flows_tools: dict) -> NodeConfig:
     """Build the initial node for a new call.
 
-    Routes via CALL_TYPE_INITIAL_NODES for dedicated flows (onboarding,
+    Routes via CALL_TYPE_INITIAL_NODES for dedicated flows (new_customer,
     consent, discovery, …) or the standard subscriber flow (reminder vs main).
     """
     call_type = session_state.get("call_type", "")

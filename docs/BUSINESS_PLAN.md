@@ -237,7 +237,7 @@ Phone call → Deepgram STT → Quick Observer (regex) → Conversation Director
 Background: Memory prefetch, Claude web_search tool when needed, call analysis, caregiver notifications
 ```
 
-- **3 active LLM tools** available to Claude during subscribed calls (`web_search`, `mark_reminder_acknowledged`, `create_reminder`); memories and caregiver notes are prefetched/injected outside Claude tool calls, and onboarding exposes `web_search` only
+- **3 active LLM tools** available to Claude during subscribed calls (`web_search`, `mark_reminder_acknowledged`, `create_reminder`); memories and caregiver notes are prefetched/injected outside Claude tool calls, and new_customer exposes `web_search` only
 - **Semantic memory** with pgvector — Donna remembers across calls
 - **2-layer observer architecture** — instant regex patterns + background LLM analysis
 - **Post-call pipeline** — analysis, memory extraction, caregiver email/in-app notifications, snapshot rebuild

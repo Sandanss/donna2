@@ -412,7 +412,7 @@ Donna sends PHI to multiple vendors. Each vendor's data retention policy must be
 | Vendor | Data Sent | Vendor Retention Policy | Action Needed |
 |--------|-----------|------------------------|---------------|
 | **Anthropic** | Live conversation messages and completed-call analysis transcripts | 30-day default; opt out of training | Confirm via BAA; minimize API log retention and prompt-cache retention exposure |
-| **Google (Gemini)** | Director fallback turns and onboarding summary/evaluation payloads where enabled | Varies by API (typically no retention for API calls with data processing agreement) | Confirm via GCP data processing terms |
+| **Google (Gemini)** | Director fallback turns and new customer summary/evaluation payloads where enabled | Varies by API (typically no retention for API calls with data processing agreement) | Confirm via GCP data processing terms |
 | **Deepgram** | Audio stream | Streaming (not retained); confirm no log retention | Confirm via BAA |
 | **ElevenLabs** | TTS text input | Check vendor policy | Confirm via BAA or vendor inquiry |
 | **Cartesia** | TTS text input | Check vendor policy | Confirm via BAA or vendor inquiry |

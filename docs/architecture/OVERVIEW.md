@@ -278,7 +278,7 @@ pipecat/
 ├── bot.py                           ← Pipeline assembly + run_bot() + _run_post_call()
 ├── flows/
 │   ├── nodes.py                     ← 4 call phase NodeConfigs + system prompts
-│   └── tools.py                     ← 3 active subscriber-call Claude tools + retired handlers; onboarding exposes web_search only
+│   └── tools.py                     ← 3 active subscriber-call Claude tools + retired handlers; new_customer exposes web_search only
 ├── processors/
 │   ├── patterns.py                  ← companion-call regex patterns plus legacy inactive tables
 │   ├── quick_observer.py            ← Layer 1: analysis logic + goodbye EndFrame

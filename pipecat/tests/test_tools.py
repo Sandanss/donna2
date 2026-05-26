@@ -13,7 +13,7 @@ from flows.tools import (
     get_web_search_schema,
     make_tool_handlers,
     make_flows_tools,
-    make_onboarding_flows_tools,
+    make_new_customer_flows_tools,
     sanitize_web_search_query,
 )
 
@@ -218,9 +218,9 @@ class TestFlowsTools:
         for name, tool in tools.items():
             assert tool.handler is not None, f"{name} has no handler"
 
-    def test_onboarding_tools_only_include_web_search(self):
-        session_state = {"call_type": "onboarding", "prospect_id": "prospect-123"}
-        tools = make_onboarding_flows_tools(session_state)
+    def test_new_customer_tools_only_include_web_search(self):
+        session_state = {"call_type": "new_customer", "prospect_id": "prospect-123"}
+        tools = make_new_customer_flows_tools(session_state)
         assert list(tools) == ["web_search"]
         assert tools["web_search"].handler is not None
 
@@ -395,10 +395,15 @@ class TestSelectFlowsTools:
         tools = select_flows_tools({"senior_id": "sen-1", "call_type": "future_unknown_type"})
         assert "web_search" in tools and "create_reminder" in tools
 
-    def test_onboarding(self):
+    def test_new_customer(self):
         from flows.tools import select_flows_tools
-        tools = select_flows_tools({"call_type": "onboarding"})
+        tools = select_flows_tools({"call_type": "new_customer"})
         assert list(tools) == ["web_search"]
+
+    def test_discovery(self):
+        from flows.tools import select_flows_tools
+        tools = select_flows_tools({"call_type": "discovery", "senior_id": "sen-1"})
+        assert set(tools) == {"record_discovery_fact", "web_search"}
 
     def test_consent(self):
         from flows.tools import select_flows_tools

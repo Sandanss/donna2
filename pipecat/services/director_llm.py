@@ -135,7 +135,7 @@ Phases: opening(0-30s) → main(30s-8min) → winding_down(8-9min) → closing(9
 Reminders: natural pauses + high engagement only. Never during emotions/low engagement. Never repeat delivered.
 Low engagement: suggest personal questions, memories, or one uplifting news item if Has news=true.
 News: if Has news=true and tone is neutral/positive, suggest it during lulls, low/medium engagement, or topic wind-down. Avoid news during sadness, health/safety concerns, or active reminders.
-Onboarding calls (call_type="onboarding"): no reminders, no re-engage signals, focus on discovery.
+New customer calls (call_type="new_customer"): no reminders, no re-engage signals, focus on the prospective caregiver's questions.
 Discovery calls (call_type="discovery"): no reminders, no news pivots; one question per turn; reference what the senior just shared (a name, a routine, a hobby) before asking the next thing. Pacing note: time_to_close once 8-10 minutes in or after 3+ topics covered.
 Consent calls (call_type="consent"): the Director is bypassed for these calls — you will not be invoked. If you somehow are, return minimal guidance and do NOT inject reminders/news/memories.
 

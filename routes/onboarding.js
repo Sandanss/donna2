@@ -10,6 +10,8 @@ import { onboardingPhoneAvailabilitySchema, onboardingSchema } from '../validato
 import { cronExpressionFromTime, resolveTimezoneFromProfile, wallTimeTodayToUtcDate } from '../lib/timezone.js';
 import { sendError } from '../lib/http-response.js';
 import { decryptReminderPhi, decryptSeniorPhi, encryptReminderPhi, encryptSeniorPhi } from '../lib/phi.js';
+import { resolveCallArchitectureConfig } from '../services/call-queue.js';
+import { syncSeniorCallSchedulesFromPreferredCallTimes } from '../services/call-schedules.js';
 import { routeError } from './helpers.js';
 import { createLogger } from '../lib/logger.js';
 
@@ -28,6 +30,11 @@ function phonesMatch(a, b) {
 
 function blocksCaregiverPhoneReuse({ seniorPhone, caregiverPhone, relation }) {
   return Boolean(caregiverPhone) && relation !== 'Myself' && phonesMatch(seniorPhone, caregiverPhone);
+}
+
+function shouldSyncCallSchedules() {
+  const config = resolveCallArchitectureConfig();
+  return process.env.CALL_QUEUE_DUAL_WRITE_SCHEDULES === 'true' || config.shadowMaterialize;
 }
 
 router.post('/api/onboarding/validate-phone', requireAuth, validateBody(onboardingPhoneAvailabilitySchema), writeLimiter, async (req, res) => {
@@ -183,6 +190,17 @@ router.post('/api/onboarding', requireAuth, validateBody(onboardingSchema), idem
       seniorId: senior.id,
       remindersCreated: createdReminders.length,
     });
+
+    if (shouldSyncCallSchedules()) {
+      try {
+        await syncSeniorCallSchedulesFromPreferredCallTimes(senior);
+      } catch (error) {
+        log.warn('Onboarding call schedule dual-write failed; legacy schedule remains source of truth', {
+          seniorId: senior.id,
+          error: error.message,
+        });
+      }
+    }
 
     res.json({
       senior,

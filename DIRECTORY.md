@@ -126,15 +126,15 @@ pipecat/
 ├── prompts.py           System prompts + phase task instructions
 │
 ├── flows/               Call state machine (Pipecat Flows)
-│   ├── nodes.py         Conditional reminder → main → winding_down → closing (+ onboarding, consent, discovery)
+│   ├── nodes.py         Conditional reminder → main → winding_down → closing (+ new_customer, consent, discovery)
 │   │                    CALL_TYPE_INITIAL_NODES dispatch picks the entry node per call_type.
 │   │                    Imports prompts from prompts.py
 │   ├── tools.py         Tool factories per call type; select_flows_tools(session_state) is the
 │   │                    shared dispatch used by bot.py + tests/simulation/pipeline.py.
 │   │                    Subscriber: web_search, mark_reminder_acknowledged, create_reminder.
-│   │                    Onboarding: web_search only.
+│   │                    New customer: web_search only.
 │   │                    Consent: record_consent_response only (single combined ask, idempotent per call).
-│   │                    Discovery: record_discovery_fact + web_search.
+│   │                    Discovery: record_discovery_fact + web_search, including first senior call retry lifecycle.
 │   └── gemini_tools.py  Gemini Live tool adapter
 │
 ├── processors/          Frame processors in the audio pipeline
@@ -448,7 +448,7 @@ Only load these when your task specifically requires them.
 | `pipecat/processors/quick_observer.py` | Analysis logic, goodbye detection, and model recommendations |
 | `pipecat/services/director_llm.py` | Groq/Gemini Director prompts and response parsing |
 | `pipecat/bot.py` | Pipeline assembly, audio profile, and sentiment greetings |
-| `pipecat/flows/nodes.py` | Subscriber/onboarding flow config and context builders |
+| `pipecat/flows/nodes.py` | Subscriber/new_customer/consent/discovery flow config and context builders |
 | `services/scheduler.js` | Active Node.js reminder polling + outbound dispatch + dual-path coexistence (legacy plan, queue shadow materialize, shadow dispatch, queue dispatch) |
 | `services/call-queue.js` | Dispatcher core: enqueue, lease, lane policy, reconciler, modes |
 | `services/pipecat-capacity.js` | Cross-replica capacity registry reader with Redis/Upstash/none; queue code falls back to batch-size capacity only when the registry is not required |

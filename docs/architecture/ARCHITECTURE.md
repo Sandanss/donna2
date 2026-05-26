@@ -345,7 +345,7 @@ pipecat/
 ├── prompts.py                  ← System prompts + phase task instructions
 ├── flows/
 │   ├── nodes.py                ← 4 call phase NodeConfigs
-│   └── tools.py                ← 3 active subscriber-call Claude tools + retired handlers; onboarding exposes web_search only
+│   └── tools.py                ← 3 active subscriber-call Claude tools + retired handlers; new_customer exposes web_search only
 ├── processors/
 │   ├── patterns.py             ← active companion-call regex patterns plus legacy inactive tables
 │   ├── quick_observer.py       ← Layer 1: regex analysis + goodbye EndFrame

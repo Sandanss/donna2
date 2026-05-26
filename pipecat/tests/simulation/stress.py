@@ -17,6 +17,9 @@ from tests.simulation.scenarios import (
     cognitive_confusion_reminder_scenario,
     consent_boundary_reminder_attempt_scenario,
     discovery_boundary_reminder_attempt_scenario,
+    discovery_first_call_early_goodbye_scenario,
+    discovery_no_more_calls_scenario,
+    discovery_not_good_time_scenario,
     embedding_outage_scenario,
     empty_search_result_scenario,
     false_goodbye_reminder_ack_scenario,
@@ -50,6 +53,9 @@ STRESS_SCENARIO_FACTORIES: tuple[ScenarioFactory, ...] = (
     low_engagement_reminder_scenario,
     consent_boundary_reminder_attempt_scenario,
     discovery_boundary_reminder_attempt_scenario,
+    discovery_not_good_time_scenario,
+    discovery_no_more_calls_scenario,
+    discovery_first_call_early_goodbye_scenario,
 )
 
 

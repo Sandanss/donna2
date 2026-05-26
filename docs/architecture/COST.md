@@ -80,7 +80,7 @@ This document is now a forward-looking Telnyx model. It is not a historical carr
 | STT | Deepgram Nova-3 General streaming | Continuous stream for full call duration. |
 | Main voice LLM | Anthropic Claude Haiku 4.5 (`claude-haiku-4-5-20251001`) | Prompt caching remains assumed. Live dev tests showed materially lower TTFB than Sonnet while preserving Donna's voice quality. |
 | Director LLM | Groq `openai/gpt-oss-20b`, Gemini fallback | Runs off critical path for guidance/query extraction. |
-| Post-call analysis | Anthropic Claude Haiku 4.5 (`claude-haiku-4-5-20251001`) | Runtime default for completed-call analysis via forced tool-use. `CALL_ANALYSIS_MODEL` accepts Claude/Anthropic model IDs; onboarding summaries still use a lightweight Gemini Flash path and are not material to subscriber-call COGS. |
+| Post-call analysis | Anthropic Claude Haiku 4.5 (`claude-haiku-4-5-20251001`) | Runtime default for completed-call analysis via forced tool-use. `CALL_ANALYSIS_MODEL` accepts Claude/Anthropic model IDs; new customer summaries still use a lightweight Gemini Flash path and are not material to subscriber-call COGS. |
 | Memory extraction | OpenAI small model + embeddings | Runs post-call; embeddings are de minimis in cost. |
 | TTS | ElevenLabs Flash (`eleven_flash_v2_5`) | Keep this assumption for now. Active Telnyx calls request 16kHz PCM from TTS; higher-rate TTS output is only for non-phone paths. Other speech vendors are sensitivity only. |
 | Web/news | Tavily basic search, OpenAI web search fallback/news | Current feature remains enabled in the model. |

@@ -32,6 +32,13 @@ export const seniors = pgTable('seniors', {
   consentStatus: varchar('consent_status', { length: 20 }).default('pending').notNull(),
   consentDate: timestamp('consent_date', { withTimezone: true }),
   callable: boolean('callable').default(true).notNull(),
+  // First senior discovery call. Stores operational state only; facts collected
+  // during the call are written through encrypted/profile/memory paths.
+  voiceDiscoveryStatus: varchar('voice_discovery_status', { length: 40 }).default('not_started').notNull(),
+  voiceDiscoveryAttemptCount: integer('voice_discovery_attempt_count').default(0).notNull(),
+  voiceDiscoveryLastAttemptAt: timestamp('voice_discovery_last_attempt_at', { withTimezone: true }),
+  voiceDiscoveryLastOutcome: varchar('voice_discovery_last_outcome', { length: 80 }),
+  voiceDiscoveryCompletedAt: timestamp('voice_discovery_completed_at', { withTimezone: true }),
 });
 
 // Senior consent events (migration 014). One row per (senior, consent_type)

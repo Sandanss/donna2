@@ -23,6 +23,34 @@ def _transcript_has_content(transcript) -> bool:
     return bool(transcript)
 
 
+_DISCOVERY_OPT_OUT_RE = re.compile(
+    r"\b("
+    r"do\s+not\s+call\s+me\s+again|"
+    r"don't\s+call\s+me\s+again|"
+    r"stop\s+calling\s+me|"
+    r"please\s+stop\s+calling|"
+    r"never\s+call\s+me\s+again|"
+    r"take\s+me\s+off\s+(your\s+)?(list|call\s+list)"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def _discovery_opt_out_quote(transcript) -> str | None:
+    """Return the senior utterance if they clearly ask Donna not to call again."""
+    if isinstance(transcript, str):
+        return transcript[:500] if _DISCOVERY_OPT_OUT_RE.search(transcript) else None
+    if not isinstance(transcript, list):
+        return None
+    for turn in transcript:
+        if not isinstance(turn, dict) or turn.get("role") != "user":
+            continue
+        text = _content_to_text(turn.get("content")).strip()
+        if text and _DISCOVERY_OPT_OUT_RE.search(text):
+            return text[:500]
+    return None
+
+
 def _is_undefined_column_error(exc: Exception) -> bool:
     return getattr(exc, "sqlstate", None) == "42703" or exc.__class__.__name__ == "UndefinedColumnError"
 
@@ -254,9 +282,9 @@ async def run_post_call(
 
     logger.info("[{cs}] Running post-call processing", cs=call_sid)
 
-    # Route onboarding calls to a separate post-call flow
-    if session_state.get("call_type") == "onboarding":
-        return await _run_onboarding_post_call(
+    # Route new customer calls to the prospect/customer post-call flow.
+    if session_state.get("call_type") == "new_customer":
+        return await _run_new_customer_post_call(
             session_state, conversation_tracker, duration_seconds
         )
 
@@ -546,7 +574,27 @@ async def run_post_call(
             cs=call_sid,
         )
 
-    # 8. Persist call metrics for observability
+    # 8. Senior discovery completion/retry state
+    try:
+        if session_state.get("call_type") == "discovery" and senior_id:
+            from services.call_queue_lifecycle import finalize_discovery_post_call
+
+            opt_out_quote = _discovery_opt_out_quote(transcript)
+            await finalize_discovery_post_call(
+                senior_id=senior_id,
+                queue_id=session_state.get("queue_id"),
+                duration_seconds=duration_seconds,
+                captured_fact_count=len(session_state.get("_discovery_facts") or []),
+                transcript_has_content=_transcript_has_content(transcript),
+                senior_opted_out=bool(opt_out_quote),
+                conversation_id=session_state.get("conversation_id"),
+                senior_opt_out_quote=opt_out_quote,
+            )
+    except Exception as e:
+        post_call_error_steps.append("discovery lifecycle")
+        logger.error("[{cs}] Post-call step 8 (discovery lifecycle) failed: {err}", cs=call_sid, err=str(e))
+
+    # 9. Persist call metrics for observability
     try:
         await _persist_call_metrics(
             session_state,
@@ -555,7 +603,7 @@ async def run_post_call(
             error_count=len(post_call_error_steps),
         )
     except Exception as e:
-        logger.error("[{cs}] Post-call step 8 (call metrics) failed: {err}", cs=call_sid, err=str(e))
+        logger.error("[{cs}] Post-call step 9 (call metrics) failed: {err}", cs=call_sid, err=str(e))
 
     logger.info("[{cs}] Post-call processing complete", cs=call_sid)
 
@@ -871,17 +919,17 @@ async def _mark_delivered_caregiver_notes(session_state: dict, transcript: list 
         logger.info("[{cs}] Marked caregiver notes delivered after transcript evidence (count={n})", cs=call_sid, n=marked)
 
 
-async def _summarize_onboarding_call(transcript: list | str, call_sid: str) -> str | None:
-    """Summarize an onboarding call transcript into a brief context for the next call.
+async def _summarize_new_customer_call(transcript: list | str, call_sid: str) -> str | None:
+    """Summarize a new customer call transcript into a brief context for the next call.
 
-    Uses a lightweight Gemini path for onboarding summaries. Returns a short paragraph or None on failure.
+    Uses a lightweight Gemini path for new customer summaries. Returns a short paragraph or None on failure.
     """
     import os
     import google.generativeai as genai
 
     api_key = os.environ.get("GOOGLE_API_KEY")
     if not api_key:
-        logger.warning("[{cs}] No GOOGLE_API_KEY, skipping onboarding summary", cs=call_sid)
+        logger.warning("[{cs}] No GOOGLE_API_KEY, skipping new customer summary", cs=call_sid)
         return None
 
     formatted = _format_transcript(transcript)
@@ -893,7 +941,7 @@ async def _summarize_onboarding_call(transcript: list | str, call_sid: str) -> s
     model = genai.GenerativeModel("gemini-2.0-flash")
 
     prompt = (
-        "Summarize this onboarding phone call between Donna (an AI companion service for seniors) "
+        "Summarize this new customer phone call between Donna (an AI companion service for seniors) "
         "and a prospective caller. Extract:\n"
         "- Caller's name (if given)\n"
         "- Who they're calling about (parent, grandparent, themselves) and that person's name\n"
@@ -922,12 +970,12 @@ async def _summarize_onboarding_call(transcript: list | str, call_sid: str) -> s
         return None
 
 
-async def _run_onboarding_post_call(
+async def _run_new_customer_post_call(
     session_state: dict,
     conversation_tracker,
     duration_seconds: int,
 ) -> None:
-    """Post-call processing for onboarding (unsubscribed caller) calls.
+    """Post-call processing for new customer (unsubscribed caller) calls.
 
     Lighter than subscriber post-call: no daily context, interest discovery,
     reminder cleanup, or caregiver notifications.
@@ -937,7 +985,7 @@ async def _run_onboarding_post_call(
     prospect_id = session_state.get("prospect_id")
     call_started_at = _call_started_at(session_state)
 
-    logger.info("[{cs}] Running onboarding post-call processing", cs=call_sid)
+    logger.info("[{cs}] Running new customer post-call processing", cs=call_sid)
 
     transcript = await _get_post_call_transcript(session_state, conversation_tracker)
 
@@ -977,7 +1025,7 @@ async def _run_onboarding_post_call(
         update_data: dict = {}
         if formatted_transcript:
             summary_result, details_result = await asyncio.gather(
-                _summarize_onboarding_call(transcript, call_sid),
+                _summarize_new_customer_call(transcript, call_sid),
                 extract_prospect_details(formatted_transcript),
                 return_exceptions=True,
             )
@@ -991,7 +1039,7 @@ async def _run_onboarding_post_call(
             elif summary_result:
                 update_data.setdefault("caller_context", {})["call_summary"] = summary_result
                 logger.info(
-                    "[{cs}] Stored onboarding call summary ({n} chars)",
+                    "[{cs}] Stored new customer call summary ({n} chars)",
                     cs=call_sid,
                     n=len(summary_result),
                 )

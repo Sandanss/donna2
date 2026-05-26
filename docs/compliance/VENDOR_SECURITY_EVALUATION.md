@@ -152,7 +152,7 @@ Senior (phone call)
 
 | Criterion | Assessment |
 |-----------|-----------|
-| **PHI Exposure** | HIGH -- receives recent conversation transcripts for Director fallback analysis and onboarding/evaluation payloads where enabled. Active subscriber post-call analysis now uses Anthropic Claude Haiku, not Gemini. |
+| **PHI Exposure** | HIGH -- receives recent conversation transcripts for Director fallback analysis and new customer/evaluation payloads where enabled. Active subscriber post-call analysis now uses Anthropic Claude Haiku, not Gemini. |
 | **BAA Available** | **Yes** -- Google Cloud offers BAA as part of Google Cloud Healthcare |
 | **Security Certifications** | SOC 2 Type II, ISO 27001, HIPAA, FedRAMP, HITRUST |
 | **Data Retention** | Vertex AI API: no retention for model improvement. Logging configurable. |

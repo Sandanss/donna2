@@ -27,7 +27,7 @@ Scenarios shipped:
 * ``consent_mock_call_scenarios`` — five-branch consent coverage set
 * ``consent_boundary_reminder_attempt_scenario`` — consent call resists reminder drift
 * ``discovery_scenario`` — senior shares friends/hobbies/routines
-* ``discovery_mock_call_scenarios`` — six-branch discovery coverage set
+* ``discovery_mock_call_scenarios`` — discovery coverage set, including first-call retry branches
 * ``discovery_boundary_reminder_attempt_scenario`` — discovery call resists reminder creation drift
 * ``embedding_outage_scenario`` — memory search disabled by embedding failure
 * ``false_goodbye_scenario`` — goodbye-like phrase to someone else mid-call
@@ -64,7 +64,8 @@ class LiveSimScenario:
         senior: Senior profile to seed in the database before the call.
         persona: Caller identity and speech style for the Haiku agent.
         goals: Ordered conversational objectives the caller will pursue.
-        call_type: ``"check-in"`` or ``"reminder"``.
+        call_type: Runtime call type (for example ``"check-in"``,
+            ``"reminder"``, ``"consent"``, or ``"discovery"``).
         max_turns: Safety cap — caller says goodbye after this many exchanges.
         requires_audio: Reserved for Phase 2 audio transport scenarios.
         reminder_title: Reminder title (reminder scenarios only).
@@ -1550,7 +1551,7 @@ def discovery_correction_scenario() -> LiveSimScenario:
 
 
 def discovery_mock_call_scenarios() -> list[LiveSimScenario]:
-    """Six-branch discovery coverage set for the mock-call harness."""
+    """Discovery coverage set for the mock-call harness."""
     return [
         discovery_scenario(),
         discovery_quiet_routine_scenario(),
@@ -1558,6 +1559,13 @@ def discovery_mock_call_scenarios() -> list[LiveSimScenario]:
         discovery_boundary_redirect_scenario(),
         discovery_early_goodbye_scenario(),
         discovery_correction_scenario(),
+        discovery_first_call_scenario(),
+        discovery_not_good_time_scenario(),
+        discovery_no_more_calls_scenario(),
+        discovery_first_call_quiet_preferences_scenario(),
+        discovery_first_call_weather_scenario(),
+        discovery_first_call_early_goodbye_scenario(),
+        discovery_first_call_correction_scenario(),
     ]
 
 
@@ -1596,6 +1604,288 @@ def discovery_boundary_reminder_attempt_scenario() -> LiveSimScenario:
             CallerGoal(
                 description="Say goodbye warmly",
                 trigger_phrase="It was nice getting to know you, Donna. Bye.",
+            ),
+        ],
+        call_type="discovery",
+        max_turns=12,
+        expect_tool_calls=["record_discovery_fact"],
+        expect_memories_injected=False,
+        expect_post_call_analysis=True,
+    )
+
+
+def discovery_first_call_scenario() -> LiveSimScenario:
+    """Happy path for the first senior Donna discovery call."""
+    return LiveSimScenario(
+        name="discovery_first_call_happy_path",
+        description=(
+            "First senior discovery call: caller accepts the intro and shares "
+            "preferred name, interests, routine, and family context."
+        ),
+        senior=_margaret_senior(),
+        persona=CallerPersona(
+            name=_MARGARET_BASE.name,
+            age=_MARGARET_BASE.age,
+            personality=(
+                "Warm and open to a first call. Enjoys gardening, bridge, and "
+                "talking about family routines."
+            ),
+            speech_style=_MARGARET_BASE.speech_style,
+        ),
+        goals=[
+            CallerGoal(
+                description="Accept Donna's first-call introduction",
+                trigger_phrase="Yes, now is fine. It's nice to meet you, Donna.",
+            ),
+            CallerGoal(
+                description="Share preferred name",
+                trigger_phrase="Most people call me Maggie, not Margaret.",
+            ),
+            CallerGoal(
+                description="Share interests and weekly routine",
+                trigger_phrase=(
+                    "I usually garden after breakfast, and on Thursdays I play "
+                    "bridge with Eleanor."
+                ),
+            ),
+            CallerGoal(
+                description="Share family context",
+                trigger_phrase="My son Tom calls every Sunday evening.",
+            ),
+            CallerGoal(
+                description="Warm goodbye",
+                trigger_phrase="This was nice. I'll talk to you again soon. Bye.",
+            ),
+        ],
+        call_type="discovery",
+        max_turns=12,
+        expect_tool_calls=["record_discovery_fact"],
+        expect_memories_injected=False,
+        expect_post_call_analysis=True,
+    )
+
+
+def discovery_not_good_time_scenario() -> LiveSimScenario:
+    """Negative path: senior cannot talk during the first discovery call."""
+    return LiveSimScenario(
+        name="discovery_not_good_time",
+        description=(
+            "First senior discovery call: caller says now is not a good time. "
+            "Donna should close gracefully without forcing questions."
+        ),
+        senior=_harold_senior(),
+        persona=CallerPersona(
+            name=_HAROLD_BASE.name,
+            age=_HAROLD_BASE.age,
+            personality="Polite but busy and not ready for an introduction call.",
+            speech_style=_HAROLD_BASE.speech_style,
+        ),
+        goals=[
+            CallerGoal(
+                description="Decline to talk now",
+                trigger_phrase=(
+                    "I'm sorry, now isn't a good time. I have someone at the door."
+                ),
+            ),
+            CallerGoal(
+                description="Say goodbye",
+                trigger_phrase="Please try another time. Goodbye.",
+            ),
+        ],
+        call_type="discovery",
+        max_turns=5,
+        expect_tool_calls=[],
+        expect_memories_injected=False,
+        expect_post_call_analysis=True,
+    )
+
+
+def discovery_no_more_calls_scenario() -> LiveSimScenario:
+    """Opt-out path: senior clearly asks Donna not to call again."""
+    return LiveSimScenario(
+        name="discovery_no_more_calls",
+        description=(
+            "First senior discovery call: caller clearly asks Donna not to "
+            "call again. Post-call lifecycle should treat this as an opt-out."
+        ),
+        senior=_harold_senior(),
+        persona=CallerPersona(
+            name=_HAROLD_BASE.name,
+            age=_HAROLD_BASE.age,
+            personality="Direct and private; does not want repeated automated calls.",
+            speech_style=_HAROLD_BASE.speech_style,
+        ),
+        goals=[
+            CallerGoal(
+                description="Ask Donna to stop future calls",
+                trigger_phrase="I understand, but please don't call me again.",
+            ),
+            CallerGoal(
+                description="End the call",
+                trigger_phrase="That's all. Goodbye.",
+            ),
+        ],
+        call_type="discovery",
+        max_turns=5,
+        expect_tool_calls=[],
+        expect_memories_injected=False,
+        expect_post_call_analysis=True,
+    )
+
+
+def discovery_first_call_quiet_preferences_scenario() -> LiveSimScenario:
+    """Ambiguous/quiet path: senior gives terse answers before specifics."""
+    return LiveSimScenario(
+        name="discovery_first_call_quiet_preferences",
+        description=(
+            "First senior discovery call: quiet caller gives short answers, "
+            "then shares useful call preferences and a hobby."
+        ),
+        senior=_harold_senior(),
+        persona=CallerPersona(
+            name=_HAROLD_BASE.name,
+            age=_HAROLD_BASE.age,
+            personality=(
+                "Reserved and skeptical at first. Shares details only after "
+                "Donna keeps questions simple."
+            ),
+            speech_style=_HAROLD_BASE.speech_style,
+        ),
+        goals=[
+            CallerGoal(
+                description="Give a short opening answer",
+                trigger_phrase="I suppose a quick call is alright.",
+            ),
+            CallerGoal(
+                description="Share preferred call timing",
+                trigger_phrase="Mornings are better. After lunch I usually rest.",
+            ),
+            CallerGoal(
+                description="Share a hobby",
+                trigger_phrase="I do like old westerns, especially the black-and-white ones.",
+            ),
+            CallerGoal(
+                description="End politely",
+                trigger_phrase="That's enough for today. Goodbye.",
+            ),
+        ],
+        call_type="discovery",
+        max_turns=10,
+        expect_tool_calls=["record_discovery_fact"],
+        expect_memories_injected=False,
+        expect_post_call_analysis=True,
+    )
+
+
+def discovery_first_call_weather_scenario() -> LiveSimScenario:
+    """Interruption path: caller asks for current information mid-intro."""
+    return LiveSimScenario(
+        name="discovery_first_call_weather",
+        description=(
+            "First senior discovery call: caller shares a gardening routine "
+            "and asks about current weather, exercising fact capture plus search."
+        ),
+        senior=_margaret_senior(),
+        persona=CallerPersona(
+            name=_MARGARET_BASE.name,
+            age=_MARGARET_BASE.age,
+            personality="Friendly gardener who pivots to a weather question.",
+            speech_style=_MARGARET_BASE.speech_style,
+        ),
+        goals=[
+            CallerGoal(
+                description="Accept the first call",
+                trigger_phrase="Yes, I can talk for a few minutes.",
+            ),
+            CallerGoal(
+                description="Share a gardening routine",
+                trigger_phrase="I water my roses most mornings after breakfast.",
+            ),
+            CallerGoal(
+                description="Ask for current weather",
+                trigger_phrase="Could you check if rain is coming later today?",
+            ),
+            CallerGoal(
+                description="Warm goodbye",
+                trigger_phrase="Thank you for checking. Talk to you next time.",
+            ),
+        ],
+        call_type="discovery",
+        max_turns=12,
+        expect_tool_calls=["record_discovery_fact", "web_search"],
+        expect_memories_injected=False,
+        expect_post_call_analysis=True,
+    )
+
+
+def discovery_first_call_early_goodbye_scenario() -> LiveSimScenario:
+    """Interruption path: senior gives one fact then ends the first call."""
+    return LiveSimScenario(
+        name="discovery_first_call_early_goodbye",
+        description=(
+            "First senior discovery call: caller gives one useful fact, then "
+            "needs to leave. Donna should not pressure them to continue."
+        ),
+        senior=_margaret_senior(),
+        persona=CallerPersona(
+            name=_MARGARET_BASE.name,
+            age=_MARGARET_BASE.age,
+            personality="Pleasant but busy with a visitor arriving soon.",
+            speech_style=_MARGARET_BASE.speech_style,
+        ),
+        goals=[
+            CallerGoal(
+                description="Accept briefly",
+                trigger_phrase="I only have a minute, but hello Donna.",
+            ),
+            CallerGoal(
+                description="Share one safe topic preference",
+                trigger_phrase="I enjoy talking about old movies and church music.",
+            ),
+            CallerGoal(
+                description="End early",
+                trigger_phrase="Someone just arrived, so I need to go. Bye.",
+            ),
+        ],
+        call_type="discovery",
+        max_turns=7,
+        expect_tool_calls=["record_discovery_fact"],
+        expect_memories_injected=False,
+        expect_post_call_analysis=True,
+    )
+
+
+def discovery_first_call_correction_scenario() -> LiveSimScenario:
+    """Side-effect path: senior corrects a fact during first-call capture."""
+    return LiveSimScenario(
+        name="discovery_first_call_correction",
+        description=(
+            "First senior discovery call: caller shares a routine, then "
+            "corrects the friend's name. Tests correction-style fact capture."
+        ),
+        senior=_margaret_senior(),
+        persona=CallerPersona(
+            name=_MARGARET_BASE.name,
+            age=_MARGARET_BASE.age,
+            personality="Chatty and self-correcting when she notices a mistake.",
+            speech_style=_MARGARET_BASE.speech_style,
+        ),
+        goals=[
+            CallerGoal(
+                description="Share an initial social routine",
+                trigger_phrase="I play cards on Tuesday with Eleanor from church.",
+            ),
+            CallerGoal(
+                description="Correct the friend's name",
+                trigger_phrase="Oh, I said Eleanor, but I meant Nora. Nora is from church.",
+            ),
+            CallerGoal(
+                description="Share a topic to avoid",
+                trigger_phrase="I'd rather not talk about politics, if that's alright.",
+            ),
+            CallerGoal(
+                description="Warm goodbye",
+                trigger_phrase="I'm glad I corrected that. Goodbye for now.",
             ),
         ],
         call_type="discovery",

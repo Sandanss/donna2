@@ -349,8 +349,8 @@ class TestTelnyxAndCallContext:
         assert metadata == {}
 
     @pytest.mark.asyncio
-    async def test_inbound_unknown_telnyx_caller_uses_onboarding_and_starts_stream(self):
-        """Unknown inbound callers should answer as onboarding prospects and start media."""
+    async def test_inbound_unknown_telnyx_caller_uses_new_customer_and_starts_stream(self):
+        """Unknown inbound callers should answer as new customer prospects and start media."""
         from api.routes import telnyx
         from api.routes.call_context import call_metadata
 
@@ -376,7 +376,7 @@ class TestTelnyxAndCallContext:
 
                 metadata = call_metadata["v3:unknown-caller"]
                 assert metadata["senior"] is None
-                assert metadata["call_type"] == "onboarding"
+                assert metadata["call_type"] == "new_customer"
                 assert metadata["prospect_id"] == "prospect-1"
                 assert metadata["conversation_id"] == "conv-1"
                 assert metadata["telnyx_context_ready"] is True
@@ -392,7 +392,7 @@ class TestTelnyxAndCallContext:
             call_metadata.clear()
 
     @pytest.mark.asyncio
-    async def test_inbound_inactive_telnyx_senior_hangs_up_without_onboarding(self):
+    async def test_inbound_inactive_telnyx_senior_hangs_up_without_new_customer_flow(self):
         """Inactive known seniors should not be treated as new prospects."""
         from api.routes import telnyx
         from api.routes.call_context import call_metadata

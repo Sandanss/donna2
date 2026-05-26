@@ -15,11 +15,11 @@
 ### Inbound Calls (seniors call Donna)
 - Seniors can call Donna's number anytime
 - Caller ID lookup matches to senior profile
-- Unsubscribed callers routed to onboarding flow
+- Unsubscribed callers routed to `new_customer` flow
 - Return caller recognition with conversation memory
 
-### Onboarding Calls
-- Unrecognized callers get a warm onboarding conversation
+### New Customer Calls
+- Unrecognized callers get a warm new customer conversation
 - Learns caller name, relationship to senior, senior's name, interests, and useful non-medical context
 - Extracts and saves prospect details after the call to avoid in-call tool latency
 - Return callers recognized and greeted by name with prior context
