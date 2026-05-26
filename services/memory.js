@@ -111,7 +111,7 @@ export const memoryService = {
       if (importance > existing.importance) {
         await db.update(memories)
           .set({ importance, lastAccessedAt: new Date() })
-          .where(eq(memories.id, existing.id));
+          .where(and(eq(memories.seniorId, seniorId), eq(memories.id, existing.id)));
         log.info('Updated importance', { from: existing.importance, to: importance });
       }
       return null; // Don't store duplicate
@@ -159,7 +159,7 @@ export const memoryService = {
       const ids = results.rows.map(r => r.id);
       await db.update(memories)
         .set({ lastAccessedAt: new Date() })
-        .where(inArray(memories.id, ids));
+        .where(and(eq(memories.seniorId, seniorId), inArray(memories.id, ids)));
     }
 
     // Decrypt content: prefer encrypted column, fall back to original

@@ -33,6 +33,7 @@
     "phase5:live-ab-report": "node scripts/phase5-live-ab-report.js",
     "phase6:post-call-stampede": "node scripts/phase6-post-call-stampede.js",
     "phase6:post-call-worker-once": "node scripts/run-post-call-worker-once.js",
+    "phase6:post-call-pipecat-worker-once": "cd pipecat && uv run python scripts/run_post_call_worker_once.py",
     "phase7:canary-report": "node scripts/phase7-canary-report.js",
     "phase7:canary-daily-report": "node scripts/phase7-canary-daily-report.js",
     "phase7:canary-rollback-check": "node scripts/phase7-canary-rollback-check.js",

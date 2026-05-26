@@ -72,7 +72,7 @@ Telnyx call -> /telnyx/events -> /ws
 Pipecat call pipeline
     |
     v
-Inline post-call analysis/memory/snapshot work
+Inline post-call work, or queued heavy work when POST_CALL_QUEUE_ENABLED=true
 ```
 
 **Known limits:**
@@ -81,7 +81,7 @@ Inline post-call analysis/memory/snapshot work
 - Several dedupe/cooldown decisions are in process memory.
 - Legacy execution uses a fixed dial concurrency limit.
 - Pipecat `MAX_CONCURRENT_CALLS` is per replica unless the queue dispatcher consumes the capacity registry.
-- Post-call work normally runs inline after disconnect.
+- Post-call work normally runs inline after disconnect unless the queued post-call flag is enabled.
 - Raising replica count multiplies DB pools and provider concurrency unless capped elsewhere.
 
 The legacy path remains valuable as a rollback path, but it is not the target architecture for the 2,000-user burst.
@@ -231,11 +231,13 @@ Autoscaling is dry-run by default. Railway actuation requires explicit confirmat
 
 - `pipecat/services/post_call.py`
 - `pipecat/services/post_call_jobs.py`
+- `pipecat/services/post_call_job_worker.py`
 - `services/post-call-jobs.js`
+- `pipecat/scripts/run_post_call_worker_once.py`
 - `scripts/run-post-call-worker-once.js`
 - `routes/post-call-jobs.js`
 
-The active runtime still uses inline post-call work unless `POST_CALL_QUEUE_ENABLED=true`. The queued path writes a `post_call_jobs` DAG:
+The active runtime uses inline post-call work unless `POST_CALL_QUEUE_ENABLED=true`. The queued path writes a `post_call_jobs` DAG and the Pipecat worker executes the heavy jobs:
 
 - `metrics_finalize`
 - `reminder_recovery`
@@ -246,7 +248,7 @@ The active runtime still uses inline post-call work unless `POST_CALL_QUEUE_ENAB
 - `interest_discovery`
 - `snapshot_rebuild`
 
-The Node worker leases jobs with `FOR UPDATE SKIP LOCKED`, honors dependencies, applies in-process provider semaphores, retries with backoff, and moves exhausted jobs to `dead_letter`. Provider limits are per worker process until a distributed limiter or worker-count cap is added.
+The Pipecat worker leases jobs with `FOR UPDATE SKIP LOCKED`, honors dependencies, retries with backoff, and moves exhausted jobs to `dead_letter`. The Node worker remains the PHI-free artifact-verification/shadow path. Provider/work limits are per worker process until a distributed limiter or worker-count cap is added.
 
 ### Canary Membership
 

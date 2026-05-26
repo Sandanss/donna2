@@ -132,13 +132,13 @@ Use this after the live call drill, while inline Pipecat post-call processing re
    make deploy-staging-pipecat
    ```
 
-2. Complete one dummy/consenting live call, then run one shadow verification tick from the Node service environment:
+2. Complete one dummy/consenting live call, then run one Pipecat execution tick from the Pipecat service environment:
 
    ```bash
-   railway run --environment staging --service donna-api -- npm run phase6:post-call-worker-once -- --confirm-db-writes --limit=100
+   railway run --environment staging --service donna-pipecat -- npm run phase6:post-call-pipecat-worker-once -- --confirm-db-writes --limit=100
    ```
 
-   Expected: output is aggregate counts only, no job IDs or PHI-bearing payloads. `dead_letter` count is zero. If jobs return retryable `failed` status with `*_pending` error codes immediately after call end, wait for inline post-call completion/backoff and rerun the command. Do not replay rows until the inline post-call logs show completion or a bounded error.
+   Expected: output is aggregate counts only, no job IDs or PHI-bearing payloads. `dead_letter` count is zero. If jobs return retryable `failed` status with `*_pending` error codes immediately after call end, wait for the immediate inline cleanup and rerun after backoff. Do not replay rows until the worker logs show completion or a bounded error.
 
 3. Run the 600-completion stampede simulation with Phase 0 measured provider limits and observed staging DB pool headroom:
 

@@ -32,6 +32,18 @@ _TEMPORAL_REFERENCE_RE = re.compile(
 )
 
 
+def _memory_owner_target(
+    senior_id: str | None,
+    prospect_id: str | None,
+) -> tuple[str, str, str] | None:
+    """Return the physical memory table and owner predicate for this owner."""
+    if senior_id:
+        return ("memories", "senior_id", senior_id)
+    if prospect_id:
+        return ("prospect_memories", "prospect_id", prospect_id)
+    return None
+
+
 def _get_openai():
     global _openai_client
     if _openai_client is None:
@@ -101,11 +113,11 @@ async def store(
     """
     from db import query_one, query_many
 
-    owner_col = "senior_id" if senior_id else "prospect_id"
-    owner_id = senior_id or prospect_id
-    if not owner_id:
+    owner_target = _memory_owner_target(senior_id, prospect_id)
+    if not owner_target:
         logger.warning("store() called with no senior_id or prospect_id")
         return None
+    table, owner_col, owner_id = owner_target
 
     embedding = await generate_embedding(content)
     if embedding is None:
@@ -118,7 +130,7 @@ async def store(
     dupes = await query_many(
         f"""SELECT id, content, importance,
                   1 - (embedding <=> $1::vector) AS similarity
-           FROM memories
+           FROM {table}
            WHERE {owner_col} = $2
              AND 1 - (embedding <=> $1::vector) > 0.9
            ORDER BY similarity DESC
@@ -135,15 +147,18 @@ async def store(
         )
         if importance > existing["importance"]:
             await query_one(
-                "UPDATE memories SET importance = $1, last_accessed_at = NOW() WHERE id = $2",
+                f"""UPDATE {table}
+                   SET importance = $1, last_accessed_at = NOW()
+                   WHERE {owner_col} = $2 AND id = $3""",
                 importance,
+                owner_id,
                 existing["id"],
             )
             logger.info("Updated importance {old} -> {new}", old=existing["importance"], new=importance)
         return None
 
     row = await query_one(
-        f"""INSERT INTO memories ({owner_col}, type, content, content_encrypted, source, importance, embedding, metadata)
+        f"""INSERT INTO {table} ({owner_col}, type, content, content_encrypted, source, importance, embedding, metadata)
            VALUES ($1, $2, $3, $4, $5, $6, $7::vector, ($8::text)::json)
            RETURNING *""",
         owner_id,
@@ -177,10 +192,10 @@ async def search(
     """
     from db import query_many
 
-    owner_col = "senior_id" if senior_id else "prospect_id"
-    owner_id = senior_id or prospect_id
-    if not owner_id:
+    owner_target = _memory_owner_target(senior_id, prospect_id)
+    if not owner_target:
         return []
+    table, owner_col, owner_id = owner_target
 
     query_embedding = await generate_embedding(query)
     if query_embedding is None:
@@ -191,7 +206,7 @@ async def search(
     rows = await query_many(
         f"""SELECT id, type, content, content_encrypted, importance, metadata, created_at,
                   1 - (embedding <=> $1::vector) AS similarity
-           FROM memories
+           FROM {table}
            WHERE {owner_col} = $2
              AND 1 - (embedding <=> $1::vector) > $3
            ORDER BY embedding <=> $1::vector
@@ -203,7 +218,7 @@ async def search(
     )
 
     if rows and track_access:
-        await mark_accessed([r["id"] for r in rows])
+        await _mark_accessed_for_owner(table, owner_col, owner_id, [r["id"] for r in rows])
 
     # Decrypt content: prefer encrypted column, fall back to original
     for r in rows:
@@ -212,6 +227,30 @@ async def search(
         r.pop("content_encrypted", None)
 
     return rows
+
+
+async def _mark_accessed_for_owner(
+    table: str,
+    owner_col: str,
+    owner_id: str,
+    memory_ids: list[str],
+) -> int:
+    """Update last_accessed_at using the owner key so partition pruning works."""
+    from db import execute
+
+    unique_ids = [mid for mid in dict.fromkeys(memory_ids or []) if mid]
+    if not unique_ids:
+        return 0
+
+    placeholders = ", ".join(f"${i+2}" for i in range(len(unique_ids)))
+    await execute(
+        f"""UPDATE {table}
+           SET last_accessed_at = NOW()
+           WHERE {owner_col} = $1 AND id IN ({placeholders})""",
+        owner_id,
+        *unique_ids,
+    )
+    return len(unique_ids)
 
 
 async def mark_accessed(memory_ids: list[str]) -> int:
@@ -448,18 +487,33 @@ async def transfer_to_senior(prospect_id: str, senior_id: str) -> int:
 
     Returns the number of memories transferred.
     """
-    from db import execute, query_many
+    from db import get_pool
 
-    rows = await query_many(
-        "SELECT id FROM memories WHERE prospect_id = $1", prospect_id
-    )
-    if not rows:
-        return 0
-    await execute(
-        "UPDATE memories SET senior_id = $1, prospect_id = NULL WHERE prospect_id = $2",
-        senior_id,
-        prospect_id,
-    )
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            rows = await conn.fetch(
+                "SELECT id FROM prospect_memories WHERE prospect_id = $1",
+                prospect_id,
+            )
+            if not rows:
+                return 0
+            await conn.execute(
+                """INSERT INTO memories
+                   (id, senior_id, type, content, content_encrypted, source,
+                    importance, embedding, metadata, created_at, last_accessed_at)
+                   SELECT id, $1, type, content, content_encrypted, source,
+                          importance, embedding, metadata, created_at, last_accessed_at
+                   FROM prospect_memories
+                   WHERE prospect_id = $2
+                   ON CONFLICT (senior_id, id) DO NOTHING""",
+                senior_id,
+                prospect_id,
+            )
+            await conn.execute(
+                "DELETE FROM prospect_memories WHERE prospect_id = $1",
+                prospect_id,
+            )
     logger.info(
         "Transferred {n} memories from prospect {pid} to senior {sid}",
         n=len(rows),

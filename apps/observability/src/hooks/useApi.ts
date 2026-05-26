@@ -301,6 +301,59 @@ export interface LatencyPoint {
   avg_duration: number | null;
 }
 
+export interface DatabaseHealth {
+  capturedAt: string;
+  pool: {
+    max: number | null;
+    total: number | null;
+    idle: number | null;
+    waiting: number | null;
+  };
+  activity: {
+    available?: boolean;
+    active_backends?: number;
+    blocked_backends?: number;
+    max_query_age_seconds?: number;
+    max_transaction_age_seconds?: number;
+    byState?: Array<{ state: string; wait_event_type: string; count: number }>;
+    unavailableReason?: string;
+  };
+  locks: {
+    available?: boolean;
+    waiting_locks?: number;
+    waiting_backends?: number;
+    blocked_backends?: number;
+    unavailableReason?: string;
+  };
+  hotTables: {
+    available?: boolean;
+    tables: Array<{
+      table_name: string;
+      estimated_live_rows: number;
+      estimated_dead_rows: number;
+      dead_tuple_pct: number;
+      seq_scan: number;
+      idx_scan: number;
+      rows_inserted: number;
+      rows_updated: number;
+      rows_deleted: number;
+    }>;
+    unavailableReason?: string;
+  };
+  slowQueries: {
+    available?: boolean;
+    queries: Array<{
+      query_id: string;
+      calls: number;
+      rows_returned: number;
+      total_exec_time_ms: number;
+      mean_exec_time_ms: number;
+      max_exec_time_ms: number;
+    }>;
+    unavailableReason?: string;
+  };
+}
+
 export function useInfraMetrics(hours = 24) {
   const [metrics, setMetrics] = useState<InfraMetric[]>([]);
   const [loading, setLoading] = useState(true);
@@ -373,6 +426,33 @@ export function useLatencyTrends(hours = 24) {
   }, [hours]);
 
   useEffect(() => { refresh(); }, [refresh]);
+  return { data, loading, error, refresh };
+}
+
+export function useDatabaseHealth() {
+  const [data, setData] = useState<DatabaseHealth | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      const result = await fetchJson<DatabaseHealth>(getObservabilityUrl('/db'));
+      setData(result);
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+    const interval = setInterval(refresh, 15000);
+    return () => clearInterval(interval);
+  }, [refresh]);
+
   return { data, loading, error, refresh };
 }
 

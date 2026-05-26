@@ -1,9 +1,11 @@
 """Post-call job graph enqueue helpers.
 
 This module mirrors the Node Phase 6 job graph in ``services/post-call-jobs.js``.
-It stores operational IDs and encrypted payload references only. The current
-runtime keeps inline post-call processing as the active path unless
-POST_CALL_QUEUE_ENABLED is explicitly enabled for staging/canary materialization.
+It stores operational IDs and encrypted payload references only. When
+POST_CALL_QUEUE_ENABLED is enabled, ``services.post_call`` completes the
+conversation and seeds this graph, then the Pipecat post-call worker executes
+the heavy analysis, memory, daily-context, notification, interest, and snapshot
+jobs outside the call teardown path.
 """
 
 from __future__ import annotations
