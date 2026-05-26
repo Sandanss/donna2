@@ -120,10 +120,11 @@ async def test_purge_expired_data_calls_all_tables():
     assert mock_reminders.await_count == 1
     assert mock_review.await_count == 1
     # Should have attempted all delete tables after conversation PHI redaction.
-    assert mock_purge.call_count == 17
+    assert mock_purge.call_count == 18
     tables_purged = {call.args[0] for call in mock_purge.call_args_list}
     assert "conversations" in tables_purged
     assert "memories" in tables_purged
+    assert "prospect_memories" in tables_purged
     assert "call_analyses" in tables_purged
     assert "daily_call_context" in tables_purged
     assert "call_metrics" in tables_purged
@@ -207,7 +208,7 @@ async def test_purge_expired_data_handles_table_error():
         results = await purge_expired_data()
 
     # All delete tables should be attempted even though memories failed.
-    assert call_count == 17
+    assert call_count == 18
     assert results["memories"] == -1
     assert results["conversations"] == 10
 
