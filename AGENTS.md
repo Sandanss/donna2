@@ -108,5 +108,17 @@ Claude-facing mirrors live under `.claude/skills/` where present.
 - `senior-ux-review`
 - `donna-pipecat-debug`
 - `mock-call-test-creator`
+- `commit-process`
 
-Use them when the task is explicitly an audit/review, a Pipecat debugging investigation, or adding mock-call coverage for voice features.
+Use them when the task is explicitly an audit/review, a Pipecat debugging investigation, adding mock-call coverage for voice features, or when committing/pushing/PR-ing changes intended for `main`.
+
+## Commit & PR Workflow
+
+`main` is GitHub-protected (2 required status checks; direct push rejected with `GH013`). Every change reaches `main` via a PR from a developer's personal integration branch.
+
+- **Per-developer integration branch**, pattern `<lowercase-first-name>dev`: `zuludev` (David), `facudev` (Facu). Identify which one is yours via `git config user.name` and the local branch list.
+- **Flow**: commit on `<name>dev` → push `<name>dev` → PR from `<name>dev` → `main`. Never commit on `main` directly; never `git push origin main`.
+- **Stage explicitly** (no `git add -A`). Don't bundle unrelated modifications.
+- **PR creation is visible to others** — confirm with the user before running `gh pr create` unless they pre-authorized it in this session.
+- **Existing PR from `<name>dev`?** New commits appear automatically once pushed. Don't open a second PR.
+- See `.codex/skills/commit-process/SKILL.md` for the full procedure including guardrails, edge cases, and the `git log`-style commit subject convention.
