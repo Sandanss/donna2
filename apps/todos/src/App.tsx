@@ -45,8 +45,8 @@ type TodoItem = {
 
 type TodoDraft = Omit<TodoItem, 'id' | 'createdAt' | 'updatedAt'>;
 
-const STORAGE_KEY = 'donna.todos.v6';
-const LEGACY_STORAGE_KEYS = ['donna.todos.v5', 'donna.todos.v4', 'donna.todos.v3', 'donna.todos.v2', 'donna.todos.v1'];
+const STORAGE_KEY = 'donna.todos.v7';
+const LEGACY_STORAGE_KEYS = ['donna.todos.v6', 'donna.todos.v5', 'donna.todos.v4', 'donna.todos.v3', 'donna.todos.v2', 'donna.todos.v1'];
 const legacySeedIds = new Set([
   'seed-reminder-retry-ui',
   'seed-mobile-onboarding-pass',
@@ -1595,6 +1595,18 @@ function seedTodos(): TodoItem[] {
       owner: 'David',
       size: 'L',
       area: 'Infrastructure',
+    },
+    {
+      id: 'docs-feature-per-person-alert-tuning',
+      title: 'Fine-tune alerts per person',
+      description: 'Add per-person alert preference controls so caregivers can tune alert channels, cadence, quiet hours, urgency thresholds, and escalation/skip behavior by senior or relationship instead of relying on one global setting. Source: docs/FEATURE_BACKLOG.md.',
+      priority: 'P2',
+      dueIn: 24,
+      blockers: 'Needs notification channel and escalation policy scoping.',
+      status: 'todo',
+      owner: 'Nick',
+      size: 'M',
+      area: 'Product',
     },
     {
       id: 'docs-feature-direct-data-feeds',
