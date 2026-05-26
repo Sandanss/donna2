@@ -129,6 +129,11 @@ async function applyMigrations(pool) {
         } catch (error) {
           const message = String(error?.message || '');
           if (/already exists/i.test(message)) continue;
+          // Benign on re-runs: migration 021 partitions `memories`, after
+          // which the older `CREATE INDEX CONCURRENTLY ... ON memories` from
+          // 001 cannot apply (Postgres forbids CONCURRENTLY on partitioned
+          // tables). Equivalent per-partition indexes are created in 021.
+          if (/cannot create index on partitioned table/i.test(message)) continue;
           if (/cannot run inside a transaction block/i.test(message)) {
             throw new Error(
               `Migration ${entry} failed: a CONCURRENTLY statement was wrapped in a transaction. ` +
