@@ -7,7 +7,7 @@ from flows.nodes import (
     build_main_node,
     build_winding_down_node,
     build_closing_node,
-    build_onboarding_closing_node,
+    build_new_customer_closing_node,
     build_initial_node,
     _build_senior_context,
     _build_reminder_context,
@@ -292,15 +292,15 @@ class TestClosingNode:
         assert node["role_messages"] == []
 
 
-class TestOnboardingClosingNode:
+class TestNewCustomerClosingNode:
     def test_transition_node_has_no_system_prompt(self):
         state = _make_session_state(prospect={"learned_name": "Alex"})
-        node = build_onboarding_closing_node(state)
+        node = build_new_customer_closing_node(state)
         assert node["role_messages"] == []
 
     def test_node_has_end_conversation(self):
         state = _make_session_state(prospect={"learned_name": "Alex"})
-        node = build_onboarding_closing_node(state)
+        node = build_new_customer_closing_node(state)
         post_actions = node.get("post_actions", [])
         assert any(a["type"] == "end_conversation" for a in post_actions)
 
@@ -553,6 +553,18 @@ class TestDiscoveryFlow:
         assert "record_discovery_fact" in fn_names
         assert "web_search" in fn_names
         assert "transition_to_discovery_closing" in fn_names
+
+    def test_discovery_node_handles_first_call_intro_without_special_call_type(self):
+        from flows.nodes import build_discovery_node
+        from flows.tools import make_discovery_flows_tools
+        state = self._discovery_state()
+        tools = make_discovery_flows_tools(state)
+        node = build_discovery_node(state, tools)
+        task = node["task_messages"][0]["content"]
+
+        assert node["name"] == "discovery"
+        assert "Is now still okay" in task
+        assert "transition_to_discovery_closing" in task
 
     def test_discovery_node_includes_senior_context_in_system_prompt(self):
         from flows.nodes import build_discovery_node

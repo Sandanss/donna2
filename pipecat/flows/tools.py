@@ -827,8 +827,8 @@ def make_flows_tools(session_state: dict) -> dict[str, FlowsFunctionSchema]:
     return schemas
 
 
-def make_onboarding_flows_tools(session_state: dict) -> dict[str, FlowsFunctionSchema]:
-    """Create FlowsFunctionSchema instances for onboarding calls.
+def make_new_customer_flows_tools(session_state: dict) -> dict[str, FlowsFunctionSchema]:
+    """Create FlowsFunctionSchema instances for new customer calls.
 
     Returns: web_search only (prospect details are extracted post-call).
     """
@@ -836,7 +836,7 @@ def make_onboarding_flows_tools(session_state: dict) -> dict[str, FlowsFunctionS
 
     schemas = {}
 
-    # web_search (for onboarding too)
+    # web_search (for new customer calls too)
     web_search_schema = get_web_search_schema(session_state)
     schemas["web_search"] = FlowsFunctionSchema(
         name=web_search_schema["name"],
@@ -1121,7 +1121,7 @@ def make_discovery_flows_tools(session_state: dict) -> dict[str, FlowsFunctionSc
 # expose the same tool set Donna would see on a real call. Register new
 # flows here when adding a call type with its own tool set.
 _CALL_TYPE_TOOL_FACTORIES = {
-    "onboarding": make_onboarding_flows_tools,
+    "new_customer": make_new_customer_flows_tools,
     "consent": make_consent_flows_tools,
     "discovery": make_discovery_flows_tools,
 }

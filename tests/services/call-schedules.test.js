@@ -108,6 +108,7 @@ describe('call schedule normalization', () => {
     const rows = normalizeSeniorCallScheduleRows({
       id: 'senior-1',
       timezone: 'America/New_York',
+      voiceDiscoveryStatus: 'complete',
       preferredCallTimes: {
         schedule: [
           {
@@ -134,8 +135,105 @@ describe('call schedule normalization', () => {
     expect(JSON.stringify(rows[0])).not.toContain('Not copied');
   });
 
+  it('prepends initial discovery when a new senior has a single schedule object', () => {
+    const rows = normalizeSeniorCallScheduleRows({
+      id: 'senior-1',
+      timezone: 'America/New_York',
+      voiceDiscoveryStatus: 'not_started',
+      preferredCallTimes: {
+        schedule: {
+          id: 'schedule-1',
+          frequency: 'daily',
+          days: ['Mon', 'Wed', 'Fri'],
+          time: '09:30',
+        },
+      },
+    }, new Date('2035-03-10T12:00:00.000Z'));
+
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toEqual(expect.objectContaining({
+      callType: 'discovery',
+      priorityLane: 'scheduled_checkin',
+      frequency: 'one-time',
+      daysOfWeek: null,
+    }));
+    expect(rows[1]).toEqual(expect.objectContaining({
+      callType: 'schedule',
+      priorityLane: 'scheduled_checkin',
+      frequency: 'recurring',
+      daysOfWeek: [1, 3, 5],
+    }));
+  });
+
+  it('uses the first valid schedule item for initial discovery', () => {
+    const rows = normalizeSeniorCallScheduleRows({
+      id: 'senior-1',
+      timezone: 'America/New_York',
+      voiceDiscoveryStatus: 'not_started',
+      preferredCallTimes: {
+        schedule: [
+          {
+            id: 'bad-schedule',
+            frequency: 'daily',
+            time: 'not-a-time',
+          },
+          {
+            id: 'valid-schedule',
+            frequency: 'daily',
+            time: '11:15',
+          },
+        ],
+      },
+    }, new Date('2035-03-10T12:00:00.000Z'));
+
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toEqual(expect.objectContaining({
+      callType: 'discovery',
+      targetLocalTime: '11:15:00',
+    }));
+    expect(rows[1]).toEqual(expect.objectContaining({
+      callType: 'schedule',
+      targetLocalTime: '11:15:00',
+    }));
+  });
+
+  it('creates a fallback initial discovery row when no preferred schedule exists', () => {
+    const rows = normalizeSeniorCallScheduleRows({
+      id: 'senior-1',
+      timezone: 'America/New_York',
+      voiceDiscoveryStatus: 'not_started',
+      preferredCallTimes: {},
+    }, new Date('2035-03-10T12:00:00.000Z'));
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toEqual(expect.objectContaining({
+      callType: 'discovery',
+      targetLocalTime: '10:00:00',
+      frequency: 'one-time',
+    }));
+  });
+
+  it('does not add initial discovery after senior discovery is complete', () => {
+    const rows = normalizeSeniorCallScheduleRows({
+      id: 'senior-1',
+      timezone: 'America/New_York',
+      voiceDiscoveryStatus: 'complete',
+      preferredCallTimes: {
+        schedule: {
+          id: 'schedule-1',
+          frequency: 'daily',
+          time: '09:30',
+        },
+      },
+    }, new Date('2035-03-10T12:00:00.000Z'));
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].callType).toBe('schedule');
+  });
+
   it('dual-writes normalized schedules idempotently', async () => {
     const database = mockDatabase([
+      [],
       [],
       [],
     ]);
@@ -158,10 +256,13 @@ describe('call schedule normalization', () => {
 
     expect(result).toEqual({
       seniorId: 'senior-1',
-      total: 1,
-      upserted: 1,
+      total: 2,
+      upserted: 2,
     });
-    expect(database.execute).toHaveBeenCalledTimes(2);
+    expect(database.execute).toHaveBeenCalledTimes(4);
+    expect(JSON.stringify(database.execute.mock.calls[3][0])).toMatch(/UPDATE call_queue/i);
+    expect(JSON.stringify(database.execute.mock.calls[3][0])).toMatch(/queued/i);
+    expect(JSON.stringify(database.execute.mock.calls[3][0])).toMatch(/deferred/i);
   });
 });
 
@@ -182,6 +283,22 @@ describe('normalized schedule materialization', () => {
     expect(input.latestAt.toISOString()).toBe('2035-03-11T13:37:30.000Z');
     expect(input.targetAt.getTime()).toBeGreaterThanOrEqual(input.earliestAt.getTime());
     expect(input.targetAt.getTime()).toBeLessThanOrEqual(input.latestAt.getTime());
+  });
+
+  it('builds a distinct queue input for initial discovery', () => {
+    const input = buildQueueInputFromNormalizedSchedule({
+      id: 'schedule-discovery-1',
+      seniorId: 'senior-1',
+      callType: 'discovery',
+      timezone: 'America/New_York',
+      windowMinutes: 15,
+      priorityLane: 'scheduled_checkin',
+      nextRunAt: new Date('2035-03-11T13:30:00.000Z'),
+    });
+
+    expect(input.callType).toBe('discovery');
+    expect(input.priorityLane).toBe('scheduled_checkin');
+    expect(input.dedupeKey).toBe('discovery:senior-1:2035-03-11:schedule-discovery-1');
   });
 
   it('materializes due schedules and advances the next run', async () => {
@@ -216,6 +333,80 @@ describe('normalized schedule materialization', () => {
       failed: 0,
     });
     expect(database.execute).toHaveBeenCalledTimes(3);
+  });
+
+  it('materializes initial discovery and marks the senior scheduled', async () => {
+    const database = mockDatabase([
+      [{
+        id: 'schedule-discovery-1',
+        seniorId: 'senior-1',
+        callType: 'discovery',
+        timezone: 'America/New_York',
+        targetLocalTime: '09:30:00',
+        windowMinutes: 15,
+        frequency: 'one-time',
+        daysOfWeek: null,
+        oneTimeDate: '2035-03-11',
+        priorityLane: 'scheduled_checkin',
+        nextRunAt: new Date('2035-03-11T13:30:00.000Z'),
+      }],
+      [{ id: 'queue-1' }],
+      [],
+      [],
+    ]);
+
+    const result = await materializeDueNormalizedSchedules({
+      database,
+      now: new Date('2035-03-11T13:00:00.000Z'),
+      horizonMinutes: 45,
+    });
+
+    expect(result).toEqual({
+      scanned: 1,
+      inserted: 1,
+      existing: 0,
+      failed: 0,
+    });
+    expect(database.execute).toHaveBeenCalledTimes(4);
+    expect(JSON.stringify(database.execute.mock.calls[0][0])).toMatch(/FROM call_queue q/i);
+    expect(JSON.stringify(database.execute.mock.calls[2][0])).toMatch(/voice_discovery_status/i);
+  });
+
+  it('allows initial discovery through the consent gate while keeping regular schedules granted-only', async () => {
+    const original = process.env.SCHEDULER_REQUIRE_CONSENT;
+    process.env.SCHEDULER_REQUIRE_CONSENT = 'true';
+    const database = mockDatabase([[]]);
+
+    try {
+      await materializeDueNormalizedSchedules({
+        database,
+        now: new Date('2035-03-11T13:00:00.000Z'),
+        horizonMinutes: 45,
+      });
+    } finally {
+      if (original === undefined) delete process.env.SCHEDULER_REQUIRE_CONSENT;
+      else process.env.SCHEDULER_REQUIRE_CONSENT = original;
+    }
+
+    const queryText = JSON.stringify(database.execute.mock.calls[0][0]);
+    expect(queryText).toMatch(/s\.callable = true/i);
+    expect(queryText).toMatch(/discovery/i);
+    expect(queryText).toMatch(/pending/i);
+    expect(queryText).toMatch(/granted/i);
+  });
+
+  it('does not let declined discovery resume regular schedules when senior is not callable', async () => {
+    const database = mockDatabase([[]]);
+
+    await materializeDueNormalizedSchedules({
+      database,
+      now: new Date('2035-03-11T13:00:00.000Z'),
+      horizonMinutes: 45,
+    });
+
+    const queryText = JSON.stringify(database.execute.mock.calls[0][0]);
+    expect(queryText).toMatch(/voice_discovery_status = 'declined'/i);
+    expect(queryText).toMatch(/s\.callable = true/i);
   });
 
   it('uses a transaction-level advisory lock when the database supports transactions', async () => {

@@ -1,6 +1,6 @@
 """Pipecat Flows — call state machine.
 
-nodes.py: subscriber phases plus onboarding/consent/discovery/schedule entry nodes
+nodes.py: subscriber phases plus new_customer/consent/discovery/schedule entry nodes
 tools.py: call-type-specific LLM tool schemas and async handlers
 """
 

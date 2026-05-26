@@ -16,6 +16,13 @@ from tests.simulation.scenarios import (
     discovery_boundary_reminder_attempt_scenario,
     discovery_correction_scenario,
     discovery_early_goodbye_scenario,
+    discovery_first_call_correction_scenario,
+    discovery_first_call_early_goodbye_scenario,
+    discovery_first_call_quiet_preferences_scenario,
+    discovery_first_call_scenario,
+    discovery_first_call_weather_scenario,
+    discovery_no_more_calls_scenario,
+    discovery_not_good_time_scenario,
     discovery_off_topic_weather_scenario,
     discovery_quiet_routine_scenario,
     embedding_outage_scenario,
@@ -70,6 +77,13 @@ SCENARIO_FACTORIES = [
     discovery_early_goodbye_scenario,
     discovery_correction_scenario,
     discovery_boundary_reminder_attempt_scenario,
+    discovery_first_call_scenario,
+    discovery_not_good_time_scenario,
+    discovery_no_more_calls_scenario,
+    discovery_first_call_quiet_preferences_scenario,
+    discovery_first_call_weather_scenario,
+    discovery_first_call_early_goodbye_scenario,
+    discovery_first_call_correction_scenario,
     embedding_outage_scenario,
     false_goodbye_scenario,
     low_engagement_scenario,
@@ -110,6 +124,13 @@ EXPECTED_SCENARIO_NAMES = {
     "discovery_early_goodbye",
     "discovery_correction",
     "discovery_boundary_reminder_attempt",
+    "discovery_first_call_happy_path",
+    "discovery_not_good_time",
+    "discovery_no_more_calls",
+    "discovery_first_call_quiet_preferences",
+    "discovery_first_call_weather",
+    "discovery_first_call_early_goodbye",
+    "discovery_first_call_correction",
     "embedding_outage",
     "false_goodbye",
     "low_engagement",
@@ -135,6 +156,8 @@ def test_new_scenarios_are_exported_from_public_api():
         export_name = f"{name}_scenario"
         if name == "reminder":
             export_name = "reminder_scenario"
+        if name == "discovery_first_call_happy_path":
+            export_name = "discovery_first_call_scenario"
         assert hasattr(sim, export_name)
 
 
@@ -290,6 +313,9 @@ def test_stress_pack_catalog_matches_documented_factories():
         "low_engagement_reminder",
         "consent_boundary_reminder_attempt",
         "discovery_boundary_reminder_attempt",
+        "discovery_not_good_time",
+        "discovery_no_more_calls",
+        "discovery_first_call_early_goodbye",
     } <= names
 
 

@@ -116,7 +116,7 @@ def _clean_extracted_details(data: dict) -> dict:
 
 
 async def extract_prospect_details(transcript: str) -> dict:
-    """Extract structured prospect details from an onboarding transcript."""
+    """Extract structured prospect details from a new customer transcript."""
     if not transcript or len(transcript.strip()) < 50:
         return {}
 
@@ -130,7 +130,7 @@ async def extract_prospect_details(transcript: str) -> dict:
 
         client = AsyncOpenAI(api_key=api_key)
         prompt = (
-            "Analyze this onboarding phone conversation between Donna, an AI "
+            "Analyze this new customer phone conversation between Donna, an AI "
             "companion service for seniors, and a prospective caller. Extract "
             "only details clearly stated in the conversation.\n\n"
             f"Conversation:\n{transcript}\n\n"
@@ -164,7 +164,7 @@ async def extract_prospect_details(transcript: str) -> dict:
 
 
 def build_context_for_prompt(prospect: dict) -> str:
-    """Format prospect data into context string for the onboarding system prompt."""
+    """Format prospect data into context string for the new customer system prompt."""
     prospect = decrypt_prospect_phi(prospect) or {}
     parts: list[str] = []
 

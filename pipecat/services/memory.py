@@ -109,7 +109,7 @@ async def store(
 ) -> dict | None:
     """Store a memory with deduplication (cosine similarity > 0.9 = duplicate).
 
-    Pass senior_id for subscriber memories, prospect_id for onboarding caller memories.
+    Pass senior_id for subscriber memories, prospect_id for new customer caller memories.
     """
     from db import query_one, query_many
 
@@ -187,7 +187,7 @@ async def search(
 ) -> list[dict]:
     """Semantic search — find memories similar to *query*.
 
-    Pass senior_id for subscriber memories, prospect_id for onboarding caller memories.
+    Pass senior_id for subscriber memories, prospect_id for new customer caller memories.
     Set track_access=False for speculative searches that may never be shown.
     """
     from db import query_many

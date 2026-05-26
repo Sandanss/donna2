@@ -1,4 +1,4 @@
--- Migration: Add prospects table for unsubscribed caller onboarding
+-- Migration: Add prospects table for unsubscribed new customer callers
 -- Run against: dev, staging, production Neon branches
 
 -- Prospects table — tracks unsubscribed callers across calls

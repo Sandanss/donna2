@@ -319,11 +319,11 @@ def resolve_voice_backend(cfg, session_state: dict) -> str:
 
 
 def resolve_vad_params(transport_type: str, call_type: str | None) -> dict[str, float]:
-    """Return VAD settings tuned for senior speech unless caller is onboarding."""
-    is_onboarding = call_type == "onboarding"
+    """Return VAD settings tuned for senior speech unless caller is a new customer."""
+    is_new_customer = call_type == "new_customer"
     return {
         "start_secs": 0.3,
-        "stop_secs": 0.8 if is_onboarding else 1.2,
+        "stop_secs": 0.8 if is_new_customer else 1.2,
         "confidence": 0.68,
         "min_volume": 0.5,
     }
@@ -453,7 +453,7 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
             - reminders_delivered: set
             - conversation_id: str | None
             - call_sid: str | None
-            - call_type: str ("schedule" | "onboarding" | "consent" | "discovery" | subscriber/default)
+            - call_type: str ("schedule" | "new_customer" | "consent" | "discovery" | subscriber/default)
             - previous_calls_summary: str | None
             - todays_context: str | None
     """
@@ -486,6 +486,10 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
         session_state["memory_context"] = session_state.get("memory_context") or metadata.get("memory_context")
         session_state["conversation_id"] = session_state.get("conversation_id") or metadata.get("conversation_id")
         session_state["reminder_prompt"] = session_state.get("reminder_prompt") or metadata.get("reminder_prompt")
+        if metadata.get("queue_id"):
+            session_state["queue_id"] = metadata["queue_id"]
+        if metadata.get("reservation_id"):
+            session_state["reservation_id"] = metadata["reservation_id"]
         # call_type is pre-initialized to "check-in" (truthy), so `or` won't overwrite.
         # Always take metadata's value when present.
         if metadata.get("call_type"):
@@ -515,7 +519,7 @@ async def run_bot(websocket: WebSocket, session_state: dict, prepared_call: dict
             session_state["_amd_result"] = str(amd_result)
         if "is_outbound" in metadata:
             session_state["is_outbound"] = metadata["is_outbound"]
-        # Populate prospect data for onboarding calls
+        # Populate prospect data for new customer calls
         if metadata.get("prospect"):
             session_state["prospect"] = metadata["prospect"]
             session_state["prospect_id"] = metadata.get("prospect_id")

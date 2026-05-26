@@ -252,7 +252,7 @@ describe('call queue operational PHI guard', () => {
 });
 
 describe('call queue keys and windows', () => {
-  it('builds stable ID-only dedupe keys for scheduled, reminder, welfare, and manual work', () => {
+  it('builds stable ID-only dedupe keys for scheduled, discovery, reminder, welfare, and manual work', () => {
     const targetAt = new Date('2035-03-11T13:30:00.000Z');
 
     expect(buildCallDedupeKey({
@@ -262,6 +262,14 @@ describe('call queue keys and windows', () => {
       targetAt,
       localDate: '2035-03-11',
     })).toBe('schedule:senior-1:2035-03-11:schedule-1');
+
+    expect(buildCallDedupeKey({
+      callType: 'discovery',
+      seniorId: 'senior-1',
+      scheduleId: 'schedule-discovery-1',
+      targetAt,
+      localDate: '2035-03-11',
+    })).toBe('discovery:senior-1:2035-03-11:schedule-discovery-1');
 
     expect(buildCallDedupeKey({
       callType: 'reminder',
@@ -1017,6 +1025,26 @@ describe('call queue persistence helpers', () => {
       scheduledFor: '2035-03-11T13:30:00.000Z',
     });
     expect(JSON.stringify(params)).not.toMatch(/title|description|phone|medical|transcript/i);
+  });
+
+  it('maps discovery queue rows to the Pipecat discovery call type', () => {
+    const params = buildQueueOutboundCallParams({
+      id: 'queue-1',
+      senior_id: 'senior-1',
+      call_type: 'discovery',
+    }, {
+      baseUrl: 'https://pipecat.example.test',
+      reservationId: 'reservation-1',
+    });
+
+    expect(params).toEqual({
+      seniorId: 'senior-1',
+      callType: 'discovery',
+      queueId: 'queue-1',
+      reservationId: 'reservation-1',
+      serviceLabel: 'dispatcher',
+      baseUrl: 'https://pipecat.example.test',
+    });
   });
 
   it('does not lease live queue rows while the dispatcher is draining', async () => {

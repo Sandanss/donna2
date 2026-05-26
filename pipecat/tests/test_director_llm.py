@@ -114,9 +114,9 @@ class TestBuildTurnContent:
 
     def test_includes_call_type(self):
         from services.director_llm import _build_turn_content
-        session = {"senior": {"name": "Test"}, "_call_start_time": time.time(), "call_type": "onboarding"}
+        session = {"senior": {"name": "Test"}, "_call_start_time": time.time(), "call_type": "new_customer"}
         result = _build_turn_content("Hello", session)
-        assert "onboarding" in result
+        assert "new_customer" in result
 
     def test_includes_location_city_and_state(self):
         from services.director_llm import _build_turn_content

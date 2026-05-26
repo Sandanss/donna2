@@ -14,6 +14,7 @@ from tests.simulation.scenarios import (
     consent_decline_scenario,
     consent_grant_scenario,
     consent_mock_call_scenarios,
+    discovery_first_call_scenario,
     discovery_mock_call_scenarios,
     discovery_scenario,
     memory_recall_scenario,
@@ -337,7 +338,8 @@ class TestDiscoveryComplexScenarioSet:
         for s in discovery_mock_call_scenarios():
             _assert_scenario_is_well_formed(s)
             assert s.call_type == "discovery"
-            assert "record_discovery_fact" in s.expect_tool_calls
+            if s.expect_tool_calls:
+                assert "record_discovery_fact" in s.expect_tool_calls
             assert s.expect_post_call_analysis is True
 
     def test_weather_example_expects_search_and_fact_capture(self):
@@ -368,3 +370,104 @@ class TestDiscoveryComplexScenarioSet:
         )
         assert early.max_turns <= 7
         assert "bye" in " ".join(g.trigger_phrase.lower() for g in early.goals)
+
+
+class TestDiscoveryFirstCallScenario:
+    def test_call_type_is_discovery(self):
+        s = discovery_first_call_scenario()
+        assert s.call_type == "discovery"
+
+    def test_expects_discovery_fact_capture(self):
+        s = discovery_first_call_scenario()
+        assert "record_discovery_fact" in s.expect_tool_calls
+
+    def test_goals_cover_intro_preferences_and_context(self):
+        s = discovery_first_call_scenario()
+        text = " ".join(g.trigger_phrase.lower() for g in s.goals)
+        assert "nice to meet you" in text
+        assert "call me maggie" in text
+        assert "bridge" in text
+        assert "son tom" in text
+
+
+class TestDiscoveryFirstCallComplexScenarioSet:
+    def test_has_at_least_five_distinct_examples(self):
+        scenarios = [
+            s for s in discovery_mock_call_scenarios()
+            if s.name.startswith("discovery_first_call_") or s.name in {
+                "discovery_not_good_time",
+                "discovery_no_more_calls",
+            }
+        ]
+        names = [s.name for s in scenarios]
+        assert len(scenarios) >= 5
+        assert len(names) == len(set(names))
+        assert all(name.startswith("discovery") for name in names)
+
+    def test_examples_cover_required_branches(self):
+        names = _scenario_names(discovery_mock_call_scenarios())
+        assert "discovery_first_call_happy_path" in names
+        assert "discovery_not_good_time" in names
+        assert "discovery_no_more_calls" in names
+        assert "discovery_first_call_quiet_preferences" in names
+        assert "discovery_first_call_weather" in names
+        assert "discovery_first_call_early_goodbye" in names
+        assert "discovery_first_call_correction" in names
+
+    def test_all_examples_are_discovery_calls(self):
+        for s in discovery_mock_call_scenarios():
+            _assert_scenario_is_well_formed(s)
+            assert s.call_type == "discovery"
+            assert s.expect_post_call_analysis is True
+            assert s.expect_memories_injected is False
+
+    def test_not_good_time_example_does_not_expect_tool_calls(self):
+        not_good_time = next(
+            s for s in discovery_mock_call_scenarios()
+            if s.name == "discovery_not_good_time"
+        )
+        assert not_good_time.expect_tool_calls == []
+        text = " ".join(g.trigger_phrase.lower() for g in not_good_time.goals)
+        assert "not a good time" in text or "isn't a good time" in text
+        assert "try another time" in text
+
+    def test_no_more_calls_example_does_not_expect_tool_calls(self):
+        opt_out = next(
+            s for s in discovery_mock_call_scenarios()
+            if s.name == "discovery_no_more_calls"
+        )
+        assert opt_out.expect_tool_calls == []
+        text = " ".join(g.trigger_phrase.lower() for g in opt_out.goals)
+        assert "don't call me again" in text
+
+    def test_weather_example_expects_search_and_fact_capture(self):
+        weather = next(
+            s for s in discovery_mock_call_scenarios()
+            if s.name == "discovery_first_call_weather"
+        )
+        assert set(weather.expect_tool_calls) == {"record_discovery_fact", "web_search"}
+        text = " ".join(g.trigger_phrase.lower() for g in weather.goals)
+        assert "weather" in text or "rain" in text
+        assert "roses" in text
+
+    def test_examples_keep_fixture_content_non_medical(self):
+        banned = {
+            "medication",
+            "medicine",
+            "diagnosis",
+            "doctor",
+            "symptom",
+            "hospital",
+            "insurance",
+            "blood pressure",
+            "lisinopril",
+            "metformin",
+        }
+        for s in discovery_mock_call_scenarios():
+            text = " ".join([
+                s.name,
+                s.description,
+                *[goal.description for goal in s.goals],
+                *[goal.trigger_phrase or "" for goal in s.goals],
+            ]).lower()
+            assert not any(term in text for term in banned), s.name

@@ -229,7 +229,7 @@ def build_live_sim_pipeline(session_state: dict) -> LiveSimComponents:
     # Flow Manager (call phase management)
     # -----------------------------------------------------------------
     # Match bot.py's call_type → tool factory dispatch so mock-call scenarios
-    # for consent / discovery / onboarding expose the same tool set Donna
+    # for consent / discovery / new_customer expose the same tool set Donna
     # would see on a real call.
     flows_tools = select_flows_tools(session_state)
     initial_node = build_initial_node(session_state, flows_tools)

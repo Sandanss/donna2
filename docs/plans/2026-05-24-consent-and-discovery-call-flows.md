@@ -13,21 +13,21 @@ We need two new outbound call types:
 
 2. **`discovery`** — A new flow Nick and I discussed on 2026-05-24. After a senior has granted consent, Donna calls to get a richer picture of them (friends, hobbies, daily routines, family) and lightly explains what Donna can do for them. Output feeds context for every subsequent check-in.
 
-Today, four `call_type` values exist: `check-in` (default), `reminder`, `schedule`, `onboarding`. This plan adds `consent` and `discovery`.
+Today, four `call_type` values exist: `check-in` (default), `reminder`, `schedule`, `new_customer`. This plan adds `consent` and `discovery`.
 
 ---
 
-## Reference: how `onboarding` is wired today
+## Reference: how `new_customer` is wired today
 
 The codebase already supports per-call-type flows via three pivot points — both new flows follow the same shape:
 
 | Layer | File | Existing pivot |
 |---|---|---|
 | Outbound trigger | `pipecat/api/routes/telnyx.py` | `TelnyxOutboundCallRequest.call_type` is a free string; metadata carries it through |
-| Pipeline assembly | `pipecat/bot.py` (~line 802) | `if call_type == "onboarding": make_onboarding_flows_tools(...)` else default |
-| Flow entry | `pipecat/flows/nodes.py:build_initial_node` (line 889) | `if call_type == "onboarding": build_onboarding_node(...)` etc. |
-| Prompts | `pipecat/prompts.py` | `ONBOARDING_SYSTEM_PROMPT`, `ONBOARDING_TASK_FIRST_CALL`, ... |
-| Tools | `pipecat/flows/tools.py` | `make_onboarding_flows_tools(session_state)` |
+| Pipeline assembly | `pipecat/bot.py` | `select_flows_tools(session_state)` dispatches by call type |
+| Flow entry | `pipecat/flows/nodes.py:build_initial_node` | `CALL_TYPE_INITIAL_NODES` dispatches by call type |
+| Prompts | `pipecat/prompts.py` | `NEW_CUSTOMER_SYSTEM_PROMPT`, `NEW_CUSTOMER_TASK_FIRST_CALL`, ... |
+| Tools | `pipecat/flows/tools.py` | `make_new_customer_flows_tools(session_state)` |
 
 The first refactor in this plan turns the two `if` chains into a small dispatch dict so adding more call types stays one-liner-clean.
 
@@ -123,7 +123,7 @@ The post-call extractor for discovery should be **conservative**: only include s
 1. **Dispatch refactor** — `pipecat/flows/nodes.py:build_initial_node` becomes:
    ```python
    CALL_TYPE_INITIAL_NODES = {
-       "onboarding": build_onboarding_node,
+       "new_customer": build_new_customer_node,
        "consent": build_consent_node,
        "discovery": build_discovery_node,
    }
@@ -137,7 +137,7 @@ The post-call extractor for discovery should be **conservative**: only include s
    ```
    Same shape for `pipecat/bot.py` tool-factory selection.
 
-2. **Director awareness** — `pipecat/services/director_llm.py:138` already mentions `onboarding`. Add brief lines for `consent` (script-driven, capture the single combined consent before closing) and `discovery` (explore friends/hobbies/family; one question per turn; reference what they say). Consent skips the Director entirely (`ConversationDirectorProcessor.process_frame` short-circuits); discovery uses the full subscriber stack.
+2. **Director awareness** — `pipecat/services/director_llm.py` includes call-type guidance for `new_customer`, `consent`, and `discovery`. Consent skips the Director entirely (`ConversationDirectorProcessor.process_frame` short-circuits); discovery uses the full subscriber stack.
 
 3. **Manual trigger** — `routes/calls.js` already proxies to Pipecat's `/telnyx/outbound`. The new call types pass through with no API change. Admin-v2 button and mobile dashboard CTA are downstream work (see May 17 spec part 2).
 
@@ -191,5 +191,5 @@ Steps 3 and 4 are independent — could be parallelized across two PRs. I'll squ
 
 ## Open questions for follow-up
 
-- Should discovery be eligible for inbound calls (senior calls back after a consent call)? Currently designed outbound-only; inbound would route to the existing onboarding flow.
+- Should discovery be eligible for inbound calls (senior calls back after a consent call)? Currently designed outbound-only; unknown inbound callers route to the `new_customer` flow.
 - Split-consent UX: the original two-row design briefly considered "okay to call but not record" as a separate state. Collapsed to one combined consent on 2026-05-25 — any no is a full no. If we ever revisit, migration 019 left the legacy consent_type values reachable in the CHECK constraint so we could re-split without a new migration.

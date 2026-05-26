@@ -109,7 +109,7 @@ For active Telnyx calls, TTS output is requested at 16kHz before the serializer.
 ### VAD Settings Are Caller-Type Dependent
 Senior calls use `stop_secs=1.2` — elderly speakers pause longer between thoughts, have softer voices, and speak more slowly. Default settings cut them off. **Tuned settings:** `confidence=0.68`, `start_secs=0.3`, `stop_secs=1.2`, `min_volume=0.5`.
 
-Onboarding calls use `stop_secs=0.8` — these are adult caregivers with typical speech pace. The longer elderly pause tolerance makes the bot feel sluggish for them. `bot.py` switches `stop_secs` based on `call_type == "onboarding"`.
+New customer calls use `stop_secs=0.8` — these are adult caregivers with typical speech pace. The longer elderly pause tolerance makes the bot feel sluggish for them. `bot.py` switches `stop_secs` based on `call_type == "new_customer"`.
 
 ### Import Pipeline Modules at Startup
 Importing `run_bot` inside the WebSocket handler (lazy import) causes a 17-second cold start on the first call due to Pipecat module loading. Import at the top of `main.py` instead.
@@ -173,4 +173,4 @@ The Director's ephemeral context injection (via `LLMMessagesAppendFrame`) has no
 
 ---
 
-*Last updated: May 2026 — Gemini Live evaluation, Split Director architecture, ephemeral context, and current subscriber/onboarding tool surfaces*
+*Last updated: May 2026 — Gemini Live evaluation, Split Director architecture, ephemeral context, and current subscriber/new-customer tool surfaces*

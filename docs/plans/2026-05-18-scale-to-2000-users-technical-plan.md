@@ -275,7 +275,7 @@ Keep in memory:
 | Lane | Purpose | Initial reserve at 600 slots | Deadline behavior |
 | --- | --- | ---: | --- |
 | `manual` | Caregiver/admin "call now" | 8% | dispatch immediately if reserve available |
-| `inbound` | Inbound caregiver / onboarding / senior callback | 7% | not dispatched (Pipecat admits); reservation accounted for global capacity |
+| `inbound` | Inbound caregiver / new customer / senior callback | 7% | not dispatched (Pipecat admits); reservation accounted for global capacity |
 | `hard_reminder` | Medication/appointment reminders with hard times | 35% | dispatch close to target; protect capacity |
 | `reminder_retry` | Retry after missed/no-ack reminder | 15% | dispatch before retry deadline |
 | `scheduled_checkin` | Normal scheduled companion calls | 30% | smooth within 15-min window |
@@ -807,7 +807,7 @@ This phase runs in parallel with Phase 2. It is a hard prerequisite for Phase 7 
 | Recurring reminder | 10 | 10 | normalized scheduled instance, no duplicate delivery |
 | No answer / busy | 5 | 5 | reservation released, retry/defer state correct |
 | Inbound known senior | 5 | 5 | metadata visible across replicas, ws token consumed once |
-| Inbound onboarding | 5 | 5 | prospect path unaffected |
+| Inbound new customer | 5 | 5 | prospect path unaffected |
 | Post-call burst | 20 | 20 | job backlog drains inside SLO |
 | **Inbound surge during outbound** (rev 2) | 0 | 200 outbound + 50 inbound concurrent | both lanes within SLO, no drops |
 
@@ -883,7 +883,7 @@ Decision belongs to Phase 0 (Open Decisions closed in writing) — choose Tempor
    - Alerts fire if dead-letter rate per job type exceeds threshold.
 5. **Per-provider concurrency caps (tied to Phase 0 vendor inventory).**
    - Anthropic Haiku post-call analysis: cap at 60% of measured concurrent capacity from Phase 0 when generation is in the worker.
-   - Gemini Flash lane remains only for legacy/onboarding/artifact-verification paths unless a future handler intentionally routes analysis there.
+   - Gemini Flash lane remains only for legacy/new-customer/artifact-verification paths unless a future handler intentionally routes analysis there.
    - OpenAI embeddings: cap at 50% of measured RPM.
    - Resend notifications: cap at 50% of measured send rate.
 6. **Stampede test (rev 2 addition).** 600 simultaneous call completions against vendor stubs. Asserts:

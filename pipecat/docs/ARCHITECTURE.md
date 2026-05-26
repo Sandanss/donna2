@@ -507,7 +507,7 @@ pipecat/
 │
 ├── flows/
 │   ├── nodes.py                     ← 4 call phase NodeConfigs + system prompts
-│   └── tools.py                     ← LLM tool schemas + async handlers (3 active subscriber tools; onboarding exposes web_search only)
+│   └── tools.py                     ← LLM tool schemas + async handlers (3 active subscriber tools; new_customer exposes web_search only)
 │
 ├── processors/
 │   ├── patterns.py                  ← Regex pattern data
@@ -631,7 +631,7 @@ Running separate backends is an explicit decision. Pipecat handles real-time voi
 | **Post-Call** | Anthropic Claude Haiku 4.5 (`claude-haiku-4-5-20251001`) | Forced tool-use summary, engagement, caregiver takeaways |
 | **STT** | Deepgram Nova 3 | Telnyx 16kHz L16 is passed through as internal 16kHz PCM before STT; language follows `familyInfo.donnaLanguage` |
 | **TTS** | ElevenLabs by default; Cartesia behind provider flag | Telnyx calls request 16kHz PCM; optional Spanish voice IDs selected for Spanish calls |
-| **VAD** | Silero | confidence=0.68, start_secs=0.3, min_volume=0.5; stop_secs=1.2 (senior calls), 0.8 (onboarding) |
+| **VAD** | Silero | confidence=0.68, start_secs=0.3, min_volume=0.5; stop_secs=1.2 (senior calls), 0.8 (new_customer) |
 | **Database** | Neon PostgreSQL + pgvector | asyncpg, connection pooling |
 | **Embeddings** | OpenAI text-embedding-3-small | 1536 dimensions |
 | **News** | OpenAI GPT-4o-mini | Web search tool, 1hr cache |
@@ -690,7 +690,7 @@ DATABASE_URL=...
 # AI Services
 ANTHROPIC_API_KEY=...            # Claude Haiku (voice LLM)
 ANTHROPIC_MODEL=claude-haiku-4-5-20251001
-GOOGLE_API_KEY=...               # Gemini Flash (Director fallback + onboarding summary paths)
+GOOGLE_API_KEY=...               # Gemini Flash (Director fallback + new customer summary paths)
 DEEPGRAM_API_KEY=...             # STT
 ELEVENLABS_API_KEY=...           # TTS
 ELEVENLABS_VOICE_ID=...          # Voice ID (optional, has default)

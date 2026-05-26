@@ -14,8 +14,8 @@ def test_telnyx_senior_calls_use_senior_safe_vad_profile():
     }
 
 
-def test_onboarding_calls_keep_shorter_pause_window():
-    profile = resolve_vad_params("telnyx", "onboarding")
+def test_new_customer_calls_keep_shorter_pause_window():
+    profile = resolve_vad_params("telnyx", "new_customer")
 
     assert profile == {
         "start_secs": 0.3,
