@@ -18,6 +18,9 @@ appId: com.donna.caregiver
           text: "Not Now"
           optional: true
       - tapOn:
+          point: "32%,61%"
+          optional: true
+      - tapOn:
           text: "Return to Donna.*"
           optional: true
       - tapOn:

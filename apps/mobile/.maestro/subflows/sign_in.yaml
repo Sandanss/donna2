@@ -15,7 +15,15 @@ appId: com.donna.caregiver
 - stopApp
 - launchApp:
     clearKeychain: true
+- waitForAnimationToEnd
 - runFlow: dismiss_dev_menu.yaml
+- runFlow: dismiss_ios_account_prompt.yaml
+- runFlow: dismiss_dev_menu.yaml
+- runFlow:
+    when:
+      visible: "Create Account|Already have an account\\?"
+    commands:
+      - tapOn: "Sign In"
 
 # Wait for landing page (clearKeychain signs user out → landing page)
 - extendedWaitUntil:
@@ -50,22 +58,31 @@ appId: com.donna.caregiver
 - tapOn:
     text: "OK"
     optional: true
+- runFlow: dismiss_ios_account_prompt.yaml
 
 # Email — tap to focus and type
 - tapOn:
     id: "sign-in-email"
 - eraseText: 50
 - inputText: ${TEST_EMAIL}
+- runFlow: dismiss_ios_account_prompt.yaml
 
 # Password
 - tapOn:
     id: "sign-in-password"
 - inputText: ${TEST_PASSWORD}
+- runFlow: dismiss_ios_account_prompt.yaml
 
 # Submit via the Sign In button (testID: sign-in-submit)
 # Fallback: pressKey Enter triggers onSubmitEditing={handleSignIn}
 - tapOn:
     id: "sign-in-submit"
+- waitForAnimationToEnd:
+    timeout: 5000
+- runFlow: dismiss_ios_account_prompt.yaml
+- waitForAnimationToEnd:
+    timeout: 5000
+- runFlow: dismiss_ios_account_prompt.yaml
 
 # Wait for Clerk auth to either complete or ask for a visible second factor.
 - extendedWaitUntil:

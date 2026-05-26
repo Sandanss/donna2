@@ -411,9 +411,7 @@ export default function SignInScreen() {
 
     try {
       const result = await signIn.create({
-        strategy: "password",
         identifier: email.trim(),
-        password,
       });
       await handleSignInResult(result);
     } catch (err: unknown) {
