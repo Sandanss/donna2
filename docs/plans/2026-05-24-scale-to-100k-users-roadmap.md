@@ -123,17 +123,25 @@ The cost: cross-store consistency. We need application-level logic (or a workflo
 - Stay on one Neon Postgres.
 - Verify the repository/module boundary works as the seam — today that is unqualified queue tables in `services/call-queue.js`; if `ops.*` lands, all dispatcher queries should move there without scattering SQL across services.
 - Read replicas for analytics queries (admin dashboards, daily reports).
-- Aggressive `VACUUM` and index maintenance on `call_queue` and `call_attempts`; operational partition maintenance begins only after partitioned queue/job/attempt tables land. Memory partition maintenance begins immediately because the 64 senior partitions already exist.
+- Aggressive `VACUUM` and index maintenance on `call_queue` and `call_attempts`; memory partition maintenance begins immediately because the 64 senior partitions already exist; partition maintenance for `audit_logs` starts with the monthly partitioning work below; other operational tables stay flat until Phase B or until partitioned queue/job/attempt tables land.
+- **Partition `audit_logs` by month** before journal-store split (Phase B). This is interim work that ships while the table is still small (~10M rows today; would be ~270M at 10k users unpartitioned). Sketch:
+  - New `audit_logs` partitioned parent with `PRIMARY KEY (id, created_at)` (partition key must be in PK).
+  - Monthly partitions pre-created for past 12 + future 6 months. Default partition as safety net (alarm if it grows).
+  - Indexes unchanged: `user_id`, `(resource_type, resource_id)`, `created_at`. Postgres propagates per-partition.
+  - Cutover via offline script (`scripts/migrate-audit-logs-to-partitioned.js`): bulk copy `< T` in monthly batches, then `ACCESS EXCLUSIVE` lock + delta copy `>= T` + rename. Lock window ~1–3s at current write rate.
+  - New `services/audit-log-partition-manager.js` runs daily: creates next 3 months of partitions, drops partitions past HIPAA retention window (confirm number in `docs/compliance/` before first drop). Replaces existing `DELETE FROM audit_logs WHERE created_at < ...` in `services/data-retention.js` and `pipecat/services/data_retention.py` (only one wins — pick Node).
+  - Keep `audit_logs_pre_partition` for one release cycle before dropping.
+  - Migration belongs in `db/migrations/` (next free number), not duplicated in `pipecat/db/migrations/` — both dirs target the same DB.
 - pgvector stays in-DB; index type stays `hnsw`.
 - Use the DB observability dashboard to baseline pool idle, lock waits, hot table writes/dead tuples, and slow query aggregates before changing stores.
 
-**Acceptance for leaving Phase A:** p95 query latency on the dispatcher's dequeue stays under 50ms at peak. If it doesn't, Phase B is overdue.
+**Acceptance for leaving Phase A:** p95 query latency on the dispatcher's dequeue stays under 50ms at peak. Audit-log retention runs in under 1s (DROP PARTITION) rather than scanning the table. If either fails, Phase B is overdue.
 
 **Phase B (~5k–25k users): split out the operational store.**
 
 - Move operational queue/job/attempt/guard tables to a dedicated Postgres cluster ("donna-ops"). If `ops.*` has not already landed, this requires an online migration from the current flat tables.
 - Cross-DB foreign keys disappear — the operational `call_queue.senior_id` is just a UUID, not an enforced FK. Application logic (dispatcher service) is the boundary.
-- Audit logs move to the journal store (Postgres logical replica first, ClickHouse later if cardinality warrants it).
+- Audit logs (already partitioned by month from Phase A) move to the journal store. Partition-by-date carries over: logical replica of the partitioned table first, ClickHouse later if cardinality warrants it.
 - Read replica for admin/caregiver-facing reads to take pressure off primary.
 
 **Why now:** the dispatcher is the workload with the spikiest write pattern. Isolating it means a queue backlog can't cause a caregiver dashboard slowdown, and vice versa. The journal store split is driven by audit log volume specifically — at 5k users we're already writing 100k+ audit rows/day, and that workload is fundamentally different from the OLTP workload of the main DB.
@@ -170,6 +178,7 @@ These cost almost nothing now and pay off enormously:
 - **No new FKs should cross the future `public.* / ops.*` boundary.** Current migrations still use default-schema FKs, so removing cross-boundary FKs is future online migration work.
 - **Every senior-scoped write includes `senior_id` in the row**, even when redundant. Sharding later requires this; backfilling it is painful. The memory path now enforces this by making `memories.senior_id` non-null and part of the partition key.
 - **Audit logs are insert-only and never queried in the hot path.** Already true. Keep it that way — no triggers that read audit on write.
+- **Partition `audit_logs` by month before it grows past ~10M rows.** Cheap migration today, painful at 100M+. Sets up Phase B journal-store split as a logical-replica swap rather than a schema redesign. See §3.3 Phase A.
 - **Memory embeddings are queried by `senior_id + similarity`, never global similarity.** Already true, and now matched by the physical 64-way `senior_id` hash partitioning. This makes per-tenant sharding of the vector store trivial later.
 - **Region column on every operationally relevant table.** This is not current runtime schema. Add it to `call_attempts`, `call_queue`, `post_call_jobs`, and future cross-cluster-replicated tables when multi-region routing becomes real. Default `'us-east-1'` is fine for the first migration.
 - **Don't add cross-table joins that the dispatcher needs.** The dispatcher should be able to operate with only `ops.*` knowledge. Today it joins to `seniors` for some queries — that's a future migration cost worth paying down opportunistically.
