@@ -73,10 +73,10 @@ function OnboardingInner() {
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  // Dev mode detection
+  // Dev mode detection — only enabled in local Vite dev server, never in production builds
   const devMode = useMemo(() => {
     if (typeof window === 'undefined') return false;
-    return import.meta.env.DEV || window.location.search.includes('dev=true');
+    return import.meta.env.DEV;
   }, []);
 
   // Try to get Clerk auth (may not be available in dev mode / SSR)
