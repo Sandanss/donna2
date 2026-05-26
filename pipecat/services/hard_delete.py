@@ -133,7 +133,7 @@ async def _assert_no_active_prospect_legal_hold(conn, prospect_id: str) -> None:
              AND (
                (lh.resource_type = 'prospect' AND lh.resource_id = $1)
                OR EXISTS (
-                 SELECT 1 FROM memories m
+                 SELECT 1 FROM prospect_memories m
                  WHERE m.prospect_id = $1
                    AND lh.resource_type = 'memory'
                    AND lh.resource_id = m.id::text
@@ -344,9 +344,9 @@ async def hard_delete_prospect(
             counts = {}
 
             row = await conn.fetchval(
-                "SELECT COUNT(*) FROM memories WHERE prospect_id = $1", prospect_id
+                "SELECT COUNT(*) FROM prospect_memories WHERE prospect_id = $1", prospect_id
             )
-            counts["memories"] = row or 0
+            counts["prospect_memories"] = row or 0
 
             row = await conn.fetchval(
                 "SELECT COUNT(*) FROM conversations WHERE prospect_id = $1", prospect_id
@@ -362,7 +362,7 @@ async def hard_delete_prospect(
             counts["idempotency_keys"] = row or 0
 
             await conn.execute(
-                "DELETE FROM memories WHERE prospect_id = $1", prospect_id
+                "DELETE FROM prospect_memories WHERE prospect_id = $1", prospect_id
             )
             await conn.execute(
                 "DELETE FROM conversations WHERE prospect_id = $1", prospect_id

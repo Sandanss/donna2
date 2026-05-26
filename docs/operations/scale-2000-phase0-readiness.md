@@ -38,6 +38,7 @@ npm run phase0:redis-drill -- --simulate-outage
 npm run phase0:live-call-drill -- --senior-id=<staging-senior-uuid> --prewarm-only
 npm run phase0:live-call-drill -- --senior-id=<staging-senior-uuid> --confirm-live-call
 npm run phase6:post-call-worker-once -- --confirm-db-writes --limit=100
+npm run phase6:post-call-pipecat-worker-once -- --confirm-db-writes --limit=100
 npm run phase6:post-call-stampede -- --completions=600 --db-pool-idle-ratio=<observed-staging-idle-ratio>
 ```
 
@@ -62,6 +63,7 @@ The sentinel scanner intentionally does not print matched lines. Findings report
 | Prompt-cache / token metric coverage | `conversations.call_metrics` coverage counts | `conversation_call_metrics_coverage` |
 | Queue depth placeholder | `call_queue`, if Phase 1 tables exist | `call_queue_depth_placeholder` |
 | Post-call backlog placeholder | `post_call_jobs`, if Phase 1 tables exist | `post_call_backlog_placeholder` |
+| DB pressure snapshot | `/api/observability/db` or `services/db-observability.js` | pool stats, activity summary, lock waits, hot table stats, queryid-only slow-query aggregates |
 
 ## Manual Measurements Still Required
 
@@ -90,7 +92,7 @@ Record decisions before Phase 1 is considered unblocked:
 | TTS vendor at scale | TBD | TBD | BAA + latency + cost |
 | Outbound caller-ID strategy | TBD | TBD | Telnyx conversation |
 | Queue/job/guard/shadow retention windows | TBD | TBD | Compliance review |
-| Post-call worker location | TBD | TBD | DB pool and deploy topology |
+| Post-call worker runtime/topology | TBD | TBD | Choose managed workflow engine vs. dedicated Railway Pipecat worker vs. looped/scheduled Pipecat worker process |
 
 ## Incident Runbook Skeleton
 
@@ -116,4 +118,4 @@ Each scenario needs detection signal, immediate response, rollback criteria, and
 
 ## Database Partitioning Note
 
-Do not shard by last name. Phase 0 should identify hot tables with measurements first. If indexes, pooling, and queue leasing are insufficient, the next design is Postgres-native partitioning by `senior_id` hash or by time window depending on the table's access pattern. Multi-database sharding stays out of scope for the 2,000-user milestone.
+Do not shard by last name. Phase 0 should identify hot tables with measurements first. Senior-owned `memories` is already 64-way hash-partitioned by `senior_id`, with prospect rows split into `prospect_memories`; use DB observability and memory p95/backlog metrics to decide whether that is enough or whether a dedicated vector store is needed later. Queue/job/attempt tables are still flat operational tables: if indexes, pooling, and queue leasing are insufficient there, the next design is Postgres-native partitioning by `senior_id` hash or by time window depending on the table's access pattern. Multi-database sharding stays out of scope for the 2,000-user milestone.

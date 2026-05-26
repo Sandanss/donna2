@@ -205,7 +205,7 @@ class TestPostCallProcessing:
 
     @pytest.mark.asyncio
     async def test_post_call_enqueues_job_graph_when_enabled(self, session_state, monkeypatch):
-        """Queue materialization is gated, PHI-free, and does not replace inline processing yet."""
+        """Queue mode enqueues the graph and defers heavy post-call work."""
         monkeypatch.setenv("POST_CALL_QUEUE_ENABLED", "true")
         session_state["_transcript"] = [
             {"role": "user", "content": "Hello Donna"},
@@ -218,13 +218,14 @@ class TestPostCallProcessing:
 
         with patch("services.post_call_jobs.maybe_enqueue_post_call_job_graph", new_callable=AsyncMock) as mock_enqueue, \
              patch("services.conversations.complete", new_callable=AsyncMock), \
-             patch("services.call_analysis.analyze_completed_call", new_callable=AsyncMock, return_value={"summary": "Good call"}), \
-             patch("services.call_analysis.save_call_analysis", new_callable=AsyncMock), \
-             patch("services.memory.extract_from_conversation", new_callable=AsyncMock), \
-             patch("services.interest_discovery.discover_new_interests", return_value=[]), \
-             patch("services.interest_discovery.compute_interest_scores", new_callable=AsyncMock, return_value={}), \
-             patch("services.interest_discovery.update_interest_scores", new_callable=AsyncMock), \
-             patch("services.daily_context.save_call_context", new_callable=AsyncMock), \
+             patch("services.call_analysis.analyze_completed_call", new_callable=AsyncMock, return_value={"summary": "Good call"}) as mock_analyze, \
+             patch("services.call_analysis.save_call_analysis", new_callable=AsyncMock) as mock_save_analysis, \
+             patch("services.memory.extract_from_conversation", new_callable=AsyncMock) as mock_extract, \
+             patch("services.interest_discovery.discover_new_interests", return_value=[]) as mock_discover, \
+             patch("services.interest_discovery.compute_interest_scores", new_callable=AsyncMock, return_value={}) as mock_scores, \
+             patch("services.interest_discovery.update_interest_scores", new_callable=AsyncMock) as mock_update_scores, \
+             patch("services.daily_context.save_call_context", new_callable=AsyncMock) as mock_daily, \
+             patch("services.call_snapshot.build_snapshot", new_callable=AsyncMock) as mock_snapshot, \
              patch("services.context_cache.clear_cache"), \
              patch("services.scheduler.clear_reminder_context_async", new_callable=AsyncMock):
 
@@ -236,6 +237,14 @@ class TestPostCallProcessing:
             call_sid="CA-test-001",
             senior_id="senior-test-001",
         )
+        mock_analyze.assert_not_awaited()
+        mock_save_analysis.assert_not_awaited()
+        mock_extract.assert_not_awaited()
+        mock_discover.assert_not_called()
+        mock_scores.assert_not_awaited()
+        mock_update_scores.assert_not_awaited()
+        mock_daily.assert_not_awaited()
+        mock_snapshot.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_post_call_with_unacknowledged_reminder(self, reminder_session_state):

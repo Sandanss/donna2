@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import {
+  useDatabaseHealth,
   useMetricsSummary,
   useLatencyTrends,
   useInfraMetrics,
@@ -38,11 +39,24 @@ function LatencyBar({ label, value, max }: { label: string; value: number | null
   );
 }
 
+function formatNumber(value: number | string | null | undefined) {
+  if (value == null) return '--';
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric.toLocaleString() : '--';
+}
+
+function formatMs(value: number | string | null | undefined) {
+  if (value == null) return '--';
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? `${numeric.toLocaleString()}ms` : '--';
+}
+
 export function InfraDashboard() {
   const [hours, setHours] = useState(24);
   const { summary, endReasons, loading: summaryLoading } = useMetricsSummary(hours);
   const { data: latencyData, loading: latencyLoading } = useLatencyTrends(hours);
   const { metrics, loading: metricsLoading } = useInfraMetrics(hours);
+  const { data: dbHealth, loading: dbLoading } = useDatabaseHealth();
 
   const successRate = summary?.total_calls
     ? Math.round((Number(summary.successful_calls) / Number(summary.total_calls)) * 100)
@@ -74,6 +88,38 @@ export function InfraDashboard() {
         <StatCard label="Avg Turns" value={summary?.avg_turn_count ? Number(summary.avg_turn_count) : null} />
       </div>
 
+      <div className="infra-section">
+        <h3>Database Pressure</h3>
+        <div className="stats-grid">
+          <StatCard label="Pool Total" value={formatNumber(dbHealth?.pool.total)} />
+          <StatCard label="Pool Idle" value={formatNumber(dbHealth?.pool.idle)} />
+          <StatCard label="Pool Waiting" value={formatNumber(dbHealth?.pool.waiting)} />
+          <StatCard label="Blocked Backends" value={formatNumber(dbHealth?.locks.blocked_backends)} />
+        </div>
+        <div className="trend-table-wrapper">
+          <table className="trend-table">
+            <thead>
+              <tr>
+                <th>Active DB Backends</th>
+                <th>Waiting Locks</th>
+                <th>Waiting Backends</th>
+                <th>Max Query Age</th>
+                <th>Max Tx Age</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>{formatNumber(dbHealth?.activity.active_backends)}</td>
+                <td>{formatNumber(dbHealth?.locks.waiting_locks)}</td>
+                <td>{formatNumber(dbHealth?.locks.waiting_backends)}</td>
+                <td>{formatNumber(dbHealth?.activity.max_query_age_seconds)}s</td>
+                <td>{formatNumber(dbHealth?.activity.max_transaction_age_seconds)}s</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       {/* Latency overview */}
       <div className="infra-section">
         <h3>Average Latency</h3>
@@ -97,6 +143,78 @@ export function InfraDashboard() {
                 <span className="end-reason-count">{r.count}</span>
               </div>
             ))}
+          </div>
+        )}
+      </div>
+
+      <div className="infra-section">
+        <h3>Hot Tables</h3>
+        {!dbHealth?.hotTables.available && dbHealth?.hotTables.unavailableReason ? (
+          <p className="no-data">{dbHealth.hotTables.unavailableReason}</p>
+        ) : (dbHealth?.hotTables.tables.length || 0) === 0 && !dbLoading ? (
+          <p className="no-data">No table statistics available</p>
+        ) : (
+          <div className="trend-table-wrapper">
+            <table className="trend-table">
+              <thead>
+                <tr>
+                  <th>Table</th>
+                  <th>Live Rows</th>
+                  <th>Dead %</th>
+                  <th>Seq Scan</th>
+                  <th>Idx Scan</th>
+                  <th>Writes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(dbHealth?.hotTables.tables || []).map(table => (
+                  <tr key={table.table_name}>
+                    <td>{table.table_name}</td>
+                    <td>{formatNumber(table.estimated_live_rows)}</td>
+                    <td>{formatNumber(table.dead_tuple_pct)}%</td>
+                    <td>{formatNumber(table.seq_scan)}</td>
+                    <td>{formatNumber(table.idx_scan)}</td>
+                    <td>{formatNumber(Number(table.rows_inserted) + Number(table.rows_updated) + Number(table.rows_deleted))}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="infra-section">
+        <h3>Slow Query Aggregates</h3>
+        {!dbHealth?.slowQueries.available && dbHealth?.slowQueries.unavailableReason ? (
+          <p className="no-data">{dbHealth.slowQueries.unavailableReason}</p>
+        ) : (dbHealth?.slowQueries.queries.length || 0) === 0 && !dbLoading ? (
+          <p className="no-data">No slow-query aggregate data available</p>
+        ) : (
+          <div className="trend-table-wrapper">
+            <table className="trend-table">
+              <thead>
+                <tr>
+                  <th>Query ID</th>
+                  <th>Calls</th>
+                  <th>Mean</th>
+                  <th>Max</th>
+                  <th>Total</th>
+                  <th>Rows</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(dbHealth?.slowQueries.queries || []).map(query => (
+                  <tr key={query.query_id}>
+                    <td>{query.query_id}</td>
+                    <td>{formatNumber(query.calls)}</td>
+                    <td>{formatMs(query.mean_exec_time_ms)}</td>
+                    <td>{formatMs(query.max_exec_time_ms)}</td>
+                    <td>{formatMs(query.total_exec_time_ms)}</td>
+                    <td>{formatNumber(query.rows_returned)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>
@@ -167,7 +285,7 @@ export function InfraDashboard() {
         )}
       </div>
 
-      {(summaryLoading || latencyLoading || metricsLoading) && (
+      {(summaryLoading || latencyLoading || metricsLoading || dbLoading) && (
         <div className="loading-indicator">Loading...</div>
       )}
     </div>

@@ -7,4 +7,14 @@ const pool = new Pool({
   max: parseInt(process.env.DB_POOL_MAX || '20', 10),
   idleTimeoutMillis: 30000,
 });
+
+export function getDbPoolStats() {
+  return {
+    max: pool.options?.max ?? null,
+    total: pool.totalCount ?? null,
+    idle: pool.idleCount ?? null,
+    waiting: pool.waitingCount ?? null,
+  };
+}
+
 export const db = drizzle(pool, { schema });

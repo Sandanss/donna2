@@ -1,11 +1,18 @@
 # Donna 2,000 User Burst Scaling Technical Plan
 
 Date: May 18, 2026
-Revision: 2
-Status: Active rollout plan with current `zuludev` implementation status
+Revision: 3
+Status: Active rollout plan with current scaling-branch implementation status
 Primary surfaces: `services/scheduler.js`, `db/schema.js`, `pipecat/main.py`, `pipecat/api/routes/telnyx.py`, `pipecat/api/routes/call_context.py`, `pipecat/services/post_call.py`, Railway configuration
 
-## Revision Notes (rev 2)
+## Revision Notes
+
+Rev 3 changes from rev 2:
+
+- **Memory scaling work is now proactive, not deferred.** `memories` is split from `prospect_memories` and rebuilt as 64 Postgres hash partitions by `senior_id`; memory read/write paths include the owner key so Postgres can prune to the relevant partition.
+- **Post-call queue activation now releases Pipecat capacity.** With `POST_CALL_QUEUE_ENABLED=true`, Pipecat enqueues the heavy jobs and skips inline analysis, memory extraction, daily-context, interest, and snapshot work while keeping immediate completion, reminder, notification, and cleanup behavior inline.
+- **PHI-safe DB observability is implemented.** The Node observability API and dashboard now expose pool pressure, aggregate activity, lock waits, hot table stats, and queryid-only slow-query aggregates without raw SQL text or PHI.
+- **The 10k section now separates completed proactive work from future operational-table partitioning.** Call queue/job/attempt tables remain flat default-schema tables for the 2,000-user rollout unless measurements force an online ops-table migration.
 
 Rev 2 changes from rev 1:
 
@@ -19,7 +26,7 @@ Rev 2 changes from rev 1:
 
 ## Executive Summary
 
-Donna can scale to 2,000 daily users, but the current architecture should not be scaled by raising `MAX_CONCURRENT_CALLS` and adding Pipecat replicas. The active scheduler is a single Node polling loop that discovers due work, deduplicates with in-memory sets, and fires calls with a fixed concurrency of 10. Pipecat admission control is per replica. Redis is optional. Telnyx webhook dedupe is local memory. Post-call work runs inline. Database pools multiply quickly as replicas are added.
+Donna can scale to 2,000 daily users, but the current architecture should not be scaled by raising `MAX_CONCURRENT_CALLS` and adding Pipecat replicas. The active scheduler is a single Node polling loop that discovers due work, deduplicates with in-memory sets, and fires calls with a fixed concurrency of 10. Pipecat admission control is per replica. Redis is optional. Telnyx webhook dedupe is local memory. Post-call work defaults to inline when the queue flag is off; with `POST_CALL_QUEUE_ENABLED=true`, Pipecat now enqueues heavy post-call jobs and skips those heavy inline steps so call capacity is released sooner. Database pools multiply quickly as replicas are added.
 
 The target is to change from "find due calls and fire them" to "materialize eligible calls into a durable queue, prioritize them, lease them, and dispatch only when global voice capacity is available." This plan introduces:
 
@@ -34,11 +41,12 @@ The target is to change from "find due calls and fire them" to "materialize elig
 - Database constraints, indexes, pooling, and idempotency changes for concurrent writes.
 - PHI-safe queue, Redis, logging, retention, and audit practices.
 
-Several schema-level decisions were evaluated for forward compatibility. The current `zuludev` implementation is more conservative than the original rev-2 target (full status in §2.7 Schema Layout And Partitioning):
+Several schema-level decisions were evaluated for forward compatibility. The current scaling branch implementation is more conservative than the original rev-2 target for operational tables, while already landing memory partitioning (full status in §2.7 Schema Layout And Partitioning):
 
-- Current migrations create `senior_call_schedules`, `call_queue`, `call_attempts`, `post_call_jobs`, `outbound_call_guards`, `scheduler_shadow_comparisons`, and Node-owned `canary_cohort_membership` in the default application schema, matching the active services and tests.
-- Current queue, attempt, and job tables are not hash-partitioned. They rely on senior/status/lease/dedupe indexes and `FOR UPDATE SKIP LOCKED`; `senior_id` hash partitioning remains a forward-compatible migration decision before higher-volume rollout.
-- Post-call work currently uses `post_call_jobs` as the Postgres metadata/work table behind an opt-in worker. A durable workflow engine (Temporal Cloud or Inngest) remains the recommended production runtime once Phase 0 closes that decision.
+- Current migrations create `senior_call_schedules`, `call_queue`, `call_attempts`, `post_call_jobs`, `outbound_call_guards`, `scheduler_shadow_comparisons`, Node-owned `canary_cohort_membership`, 64 hash-partitioned `memories`, and unpartitioned `prospect_memories` in the default application schema, matching the active services and tests.
+- Current queue, attempt, and job tables are not hash-partitioned. They rely on senior/status/lease/dedupe indexes and `FOR UPDATE SKIP LOCKED`; `senior_id` hash partitioning remains a forward-compatible migration decision for operational tables before higher-volume rollout. Memory partitioning has already landed because memory search/write growth is the higher-risk user-data hot path.
+- Post-call work currently uses `post_call_jobs` as the Postgres metadata/work table behind an opt-in worker. A Pipecat-side worker can execute heavy post-call jobs today; a durable workflow engine (Temporal Cloud or Inngest) remains the recommended production runtime once Phase 0 closes that decision.
+- DB scaling observability is available through the admin observability API/dashboard with PHI-free pool, lock, hot-table, and queryid-only slow-query aggregate views.
 - Current Redis key shapes are single-region: `pipecat:instance:{instance_id}`, `pipecat:reservation:{reservation_id}`, and `pipecat:queue-reservations:{queue_id}`. Region-aware schema and Redis keys remain future multi-region work.
 
 Provider capacity and BAAs are required for Telnyx, ElevenLabs, Deepgram, Anthropic, Google/Gemini, OpenAI/Tavily (if used during calls or post-call work), Resend, Neon, Railway, Sentry, Upstash/Redis vendor.
@@ -327,6 +335,8 @@ If any check fails, the guard transitions to `cancelled`, the Redis reservation 
 | `outbound_call_guards` | No raw PHI | IDs, guard keys, status only | Short retention + senior delete |
 | `scheduler_shadow_comparisons` | No raw PHI | IDs, decisions, skip reasons only | Short retention; no transcripts/reminder text |
 | `post_call_jobs` | Yes, only if necessary | Prefer IDs; encrypt payload body | Export/delete/retention/legal hold |
+| `memories` | Yes | Senior-owned memories only; 64 hash partitions by `senior_id`; embeddings + encrypted/plain memory fields follow existing memory rules | Export/delete/retention/legal hold |
+| `prospect_memories` | Yes | Prospect-owned onboarding memories split out of senior partition set | Export/delete/retention/legal hold |
 | Redis call metadata | Yes | Encrypted shared-state payload, short TTL | TTL + incident runbook |
 | Redis locks/heartbeats | No raw PHI | IDs and counters only | TTL |
 | Logs/metrics/dashboards | No raw PHI | IDs/counts/status only; hash where possible | Log retention and review |
@@ -425,21 +435,22 @@ Main / production and dev run the new code in `legacy_only` mode. `zuludev` runs
 
 This section separates the **current branch implementation** from the **forward-compatible schema target**. The distinction matters because the active code, tests, and runbooks currently use unqualified table names such as `call_queue`, not `ops.call_queue`.
 
-### Current `zuludev` implementation
+### Current scaling-branch implementation
 
-Verified against `db/migrations/010_call_queue_foundation.sql`, `db/migrations/011_call_queue_concurrent_indexes.sql`, `db/migrations/012_post_call_job_state_machine.sql`, `db/migrations/013_canary_cohort_membership.sql`, `pipecat/db/migrations/023_call_queue_foundation.sql`, `pipecat/db/migrations/024_call_queue_concurrent_indexes.sql`, `pipecat/db/migrations/025_post_call_job_state_machine.sql`, `services/call-queue.js`, `services/post-call-jobs.js`, and the integration tests:
+Verified against `db/migrations/010_call_queue_foundation.sql`, `db/migrations/011_call_queue_concurrent_indexes.sql`, `db/migrations/012_post_call_job_state_machine.sql`, `db/migrations/013_canary_cohort_membership.sql`, `db/migrations/021_memories_hash_partitioned.sql`, `pipecat/db/migrations/023_call_queue_foundation.sql`, `pipecat/db/migrations/024_call_queue_concurrent_indexes.sql`, `pipecat/db/migrations/025_post_call_job_state_machine.sql`, `pipecat/db/migrations/032_memories_hash_partitioned.sql`, `services/call-queue.js`, `services/post-call-jobs.js`, `services/memory.js`, `pipecat/services/memory.py`, and the integration tests:
 
 - `senior_call_schedules`, `call_queue`, `call_attempts`, `post_call_jobs`, `outbound_call_guards`, `scheduler_shadow_comparisons`, and Node-owned `canary_cohort_membership` are created in the default application schema.
-- There is no `ops` schema, `call_control_index` table, `call_attempts.region` column, or `PARTITION BY HASH` declaration in the current migrations.
+- `memories` is a default-schema table partitioned into 64 hash partitions by `senior_id`. `senior_id` is non-null, senior memory writes/searches include `senior_id`, and prospect memory rows are stored separately in `prospect_memories`.
+- There is no `ops` schema, `call_control_index` table, `call_attempts.region` column, or `PARTITION BY HASH` declaration for the current queue/job/attempt tables.
 - The current uniqueness model is global `dedupe_key`, global `outbound_call_guards.guard_key`, `(queue_id, attempt_number)`, and partial unique `call_attempts.call_control_id` where not null.
-- The current hot-path scaling primitives are indexes on status/lane/time/senior, `FOR UPDATE SKIP LOCKED` leasing, bounded worker batches, Redis capacity reservations, and the durable guard reconciler.
+- The current hot-path scaling primitives are indexes on status/lane/time/senior, `FOR UPDATE SKIP LOCKED` leasing, bounded worker batches, Redis capacity reservations, the durable guard reconciler, senior-scoped memory partition pruning, and PHI-safe DB observability for pool/lock/hot-table pressure.
 - Current Redis capacity keys are `pipecat:instance:{instance_id}`, `pipecat:reservation:{reservation_id}`, and `pipecat:queue-reservations:{queue_id}`.
 
 This current shape is the one reflected by `docs/architecture/ARCHITECTURE.md`, `docs/architecture/PERFORMANCE.md`, the Phase 1 migration runbook, and the test suite.
 
 ### Forward-compatible target
 
-The original rev-2 target remains valid as a scaling direction, but it is **not implemented on the current branch**. Before applying Phase 1 to a live database, choose one of these paths in writing:
+The original rev-2 operational-table target remains valid as a scaling direction, but it is **not implemented on the current branch**. Before applying Phase 1 to a live database, choose one of these paths in writing:
 
 1. If no shared environment has applied the current migrations yet, rewrite the Phase 1 migrations and service SQL to use `ops.*`, hash-partitioned queue/job tables, `call_control_index`, and region columns before the first live apply.
 2. If staging or production has already applied the current migrations, keep the current flat tables for the 2,000-user rollout unless Phase 0 clone timing or load tests show DB write pressure. Then add a separate online migration plan for `ops.*` and partitioning.
@@ -450,6 +461,7 @@ The forward target is:
 - `call_queue`, `call_attempts`, and `post_call_jobs` become hash-partitioned by `senior_id` with 16 partitions.
 - Primary keys on partitioned tables include the partition key, and unique constraints include `senior_id` where Postgres requires it.
 - `ops.call_control_index` remains unpartitioned for global `call_control_id -> (senior_id, queue_id, attempt_id)` lookup if `call_attempts` becomes partitioned.
+- Memory tables do not wait for this future operational-table move: senior-owned `memories` already uses 64 hash partitions by `senior_id`; the future memory decision is when to move vector search to a dedicated pgvector/vector store if measured memory-search or embedding-write pressure exceeds the primary database budget.
 
 Example target DDL shape, not current branch DDL:
 
@@ -472,6 +484,28 @@ END $$;
 Current code is single-region from an application-data perspective. Railway scaling scripts accept a Railway region argument for actuator commands, but call routing and queue schemas do not branch on region.
 
 Multi-region call routing is explicitly out of scope per §1.7. When it becomes in scope, add `region` to the operational attempt/reservation model and reshape Redis keys deliberately; do not assume the current single-region key shape already encodes region.
+
+### Table scaling risk snapshot
+
+This is the scale-bearing table list for the 2,000 -> 10,000 path. Risk means "likely to become a bottleneck under burst/write/search pressure," not compliance sensitivity.
+
+| Table / family | Main pressure | 2k risk | 10k risk | Current posture |
+| --- | --- | --- | --- | --- |
+| `memories` | Senior-scoped vector search + post-call writes | Medium | High | 64 hash partitions by `senior_id`; every senior read/write includes `senior_id` for partition pruning. Move to dedicated vector store only after measured memory pressure. |
+| `prospect_memories` | Onboarding/prospect memory writes | Low | Medium | Split out so prospect rows do not dilute senior memory partitions. |
+| `post_call_jobs` | End-of-window job burst, retries, dependencies | Medium | High | Flat table with indexes and `FOR UPDATE SKIP LOCKED`; heavy Pipecat worker drains jobs under concurrency caps. Candidate for `ops.*`/partitioning or workflow engine before 10k if backlog/DB pressure grows. |
+| `call_queue` | Dispatcher lease contention | Low/Medium | Medium/High | Flat table is acceptable for 2k with status/lane/time indexes and bounded batches. Partition/worker-affinity only when DB observability shows lock or lease pressure. |
+| `call_attempts` | Burst insert/update history | Medium | High | Flat indexed table; key candidate for `ops.*`/dedicated operational Postgres if burst writes hit DB pool SLOs. |
+| `outbound_call_guards` | Dial-authority uniqueness | Low | Medium | Small, short-retention safety table; keep indexed and short-lived. |
+| `scheduler_shadow_comparisons` | Shadow-mode write volume | Low | Low/Medium | Short retention; PHI-free. Can be archived/deleted aggressively after rollout. |
+| `senior_call_schedules` | Materializer scans | Low | Medium | Normalized schedule table with predictable scan pattern; add region/time-window partitioning only if materializer p95 moves. |
+| `reminder_deliveries` | Reminder dedupe/history writes | Medium | Medium/High | Idempotency key and indexes matter more than partitioning at 2k; watch write spikes around hard reminders. |
+| `conversations` and transcript rows | Append-only call history | Medium | High | Keep hot-path writes idempotent; journal/archive split is likely before 100k and may be useful before 10k if storage/write pressure rises. |
+| `call_analyses` / summaries | Post-call analysis writes/reads | Low/Medium | Medium/High | Queue heavy writes; consider journal split with conversations when analysis volume grows. |
+| `call_metrics` | Per-call aggregate metrics | Low | Medium | Unique by call SID; useful for SLOs and cost. Keep small and indexed. |
+| `audit_logs` | Append-only compliance events | Medium | High | Never queried in hot path. S3/Parquet or warehouse archival is a likely 10k+ move. |
+| `seniors`, `caregivers`, `reminders`, `daily_call_context` | User-scoped OLTP reads/writes | Low/Medium | Medium | Stay in primary Postgres; add read replicas/caches for dashboard pressure before sharding. |
+| `canary_cohort_membership` | Rollout membership lookup | Low | Low | Node-owned, small operational table; retain/delete with rollout policy. |
 
 ## 2.8 Dual-Path Rollout Contract
 
@@ -577,7 +611,8 @@ These artifacts do not satisfy Phase 0 by themselves. They make the Phase 0 evid
 
 1. **Schema and migrations.** See §2.7 for current branch status and the forward-compatible target.
    - Current branch migrations create `senior_call_schedules`, `call_queue`, `call_attempts`, `post_call_jobs`, `outbound_call_guards`, `scheduler_shadow_comparisons`, and Node-owned `canary_cohort_membership` in the default application schema. Queue/job migrations are mirrored between Node and Pipecat; canary membership is Node-only today.
-   - Current branch migrations do **not** create `ops.*`, `call_control_index`, `call_attempts.region`, or hash partitions. Do not mark those items complete until a separate migration/code rewrite lands.
+   - Current branch migrations also create 64 hash-partitioned senior `memories` plus unpartitioned `prospect_memories`, mirrored between Node and Pipecat. This is the proactive memory-scaling step; it is separate from operational queue/job partitioning.
+   - Current branch migrations do **not** create `ops.*`, `call_control_index`, `call_attempts.region`, or hash partitions for queue/job/attempt tables. Do not mark those operational-table items complete until a separate migration/code rewrite lands.
    - Before live Phase 1 apply, record whether we are accepting the current flat-table implementation for the 2,000-user rollout or rewriting the migrations to the `ops.*` / partitioned target before any live data exists.
    - If the flat-table implementation is accepted, the trigger for `ops.*` / partitioning moves to the Phase 0 DB measurements and the §6 operational Postgres split decision.
 2. **Keep `CREATE INDEX CONCURRENTLY` outside transactional migration files.** Current code has already split the concurrent indexes into `db/migrations/011_call_queue_concurrent_indexes.sql` and `pipecat/db/migrations/024_call_queue_concurrent_indexes.sql`. Live apply must run those files in autocommit/outside a transaction; do not run them through a migration runner that wraps files in `BEGIN/COMMIT`.
@@ -610,7 +645,8 @@ These artifacts do not satisfy Phase 0 by themselves. They make the Phase 0 evid
 - Non-transactional concurrent index migrations: `db/migrations/011_call_queue_concurrent_indexes.sql` and `pipecat/db/migrations/024_call_queue_concurrent_indexes.sql`.
 - Post-call job state migrations: `db/migrations/012_post_call_job_state_machine.sql` and `pipecat/db/migrations/025_post_call_job_state_machine.sql`.
 - Canary cohort membership migration: `db/migrations/013_canary_cohort_membership.sql` (Node-owned; no Pipecat mirror).
-- Gap vs forward target: the current migrations are flat default-schema tables, not `ops.*` and not `PARTITION BY HASH`. That is a documented remaining schema decision, not a completed Phase 1 artifact.
+- Memory partition migrations: `db/migrations/021_memories_hash_partitioned.sql` and `pipecat/db/migrations/032_memories_hash_partitioned.sql`.
+- Gap vs forward target: the current operational queue/job/attempt migrations are flat default-schema tables, not `ops.*` and not `PARTITION BY HASH`. That is a documented remaining schema decision, not a completed Phase 1 artifact. Senior memories are already hash-partitioned.
 
 ## Phase 2 — Schedule Normalization and Materializer (~1–2 weeks)
 
@@ -818,7 +854,7 @@ The work items below describe a Postgres-backed `post_call_jobs` design. In the 
 
 Why: the dependency graph, retry/backoff, dead-letter, and per-job-type concurrency caps described in items 2–5 below are all first-class features of Temporal/Inngest. Building them on Postgres is doable (this plan describes how) but every operational concern has to be re-implemented in app code, and the post-call burst is the single highest-value place in the system to use a managed workflow runtime.
 
-Decision belongs to Phase 0 (Open Decisions closed in writing) — choose Temporal Cloud, Inngest, or stay with the Postgres-only Plan B. The work items below describe the canonical job semantics in either case; only the runtime engine differs. If a workflow engine is chosen, `post_call_jobs` becomes the system-of-record for "what work was enqueued for this call SID" and the workflow engine owns lease/retry/dead-letter execution.
+Decision belongs to Phase 0 (Open Decisions closed in writing) — choose Temporal Cloud, Inngest, or stay with the Postgres-only Plan B. The work items below describe the canonical job semantics in either case; only the runtime engine differs. If a workflow engine is chosen, `post_call_jobs` becomes the system-of-record for "what work was enqueued for this call SID" and the workflow engine owns lease/retry/dead-letter execution. Rev 3 implements the Postgres-only Pipecat worker path so heavy work can leave the call-completion path before a managed workflow engine is selected.
 
 **Work items:**
 
@@ -868,9 +904,10 @@ Decision belongs to Phase 0 (Open Decisions closed in writing) — choose Tempor
 **Phase 6 implementation artifacts on this branch:**
 
 - Post-call job state migration: `db/migrations/012_post_call_job_state_machine.sql` mirrored by `pipecat/db/migrations/025_post_call_job_state_machine.sql`.
-- Queue primitives and worker executor: `services/post-call-jobs.js` implements dependency-aware enqueue/lease, retry backoff policy, dead-letter propagation, manual replay, provider-cap math, in-process provider semaphores, and one-tick worker execution.
-- Pipecat enqueue wiring: `pipecat/services/post_call.py` calls `pipecat/services/post_call_jobs.py` behind `POST_CALL_QUEUE_ENABLED`; default behavior remains inline post-call processing with no queue rows, and even with the flag enabled the inline chain still runs until the later cutover disables it.
-- Dual-path worker tick: `npm run phase6:post-call-worker-once -- --confirm-db-writes` leases queued jobs through the production workflow handler seam. Default `artifact_verification` mode verifies PHI-free completion artifacts produced by inline Pipecat post-call processing; a real workflow adapter can be injected without changing lease/run/complete semantics. The explicit flag is required because staging currently shares the production Neon database.
+- Node queue primitives and worker executor: `services/post-call-jobs.js` implements dependency-aware enqueue/lease, retry backoff policy, dead-letter propagation, manual replay, provider-cap math, in-process provider semaphores, and one-tick worker execution.
+- Pipecat enqueue wiring: `pipecat/services/post_call.py` calls `pipecat/services/post_call_jobs.py` behind `POST_CALL_QUEUE_ENABLED`; default behavior remains inline post-call processing with no queue rows, but when the flag is enabled Pipecat enqueues the heavy job graph and skips inline analysis, memory extraction, daily-context, interest-discovery, and snapshot-rebuild work. Immediate completion, reminder recovery, notification delivery evidence, discovery suggestions, cache clearing, and call metrics still run inline.
+- Pipecat worker executor: `pipecat/services/post_call_job_worker.py` leases `post_call_jobs` with `FOR UPDATE SKIP LOCKED`, enforces dependencies/retries/dead-letter propagation, and runs handlers for metrics, reminder recovery, analysis, memory extraction, daily context, caregiver notifications, interest discovery, and snapshot rebuild.
+- Worker ticks: `npm run phase6:post-call-worker-once -- --confirm-db-writes` remains the Node workflow-handler/artifact-verification tick. `npm run phase6:post-call-pipecat-worker-once -- --confirm-db-writes --limit=100` runs the Pipecat heavy-job executor from `pipecat/scripts/run_post_call_worker_once.py`. Any staging command that writes to the shared Neon database must be limited to dummy or explicitly consenting test seniors.
 - Admin dead-letter surface: `GET /api/post-call-jobs/dead-letter` and `POST /api/post-call-jobs/:id/replay`; responses omit encrypted payloads and replay writes a PHI-free audit record. `apps/admin-v2/src/pages/PostCallJobs.tsx` renders the dead-letter rows and manual replay action without exposing job payloads.
 - Authorized export coverage: Node export already decrypts `payload_encrypted`; Pipecat export now includes post-call jobs and strips ciphertext after authorized decryption.
 - Provider-stub stampede harness: `npm run phase6:post-call-stampede` runs a 600-completion, 4,800-job PHI-free simulation and checks critical p95, provider concurrency caps, DB pool idle ratio, and non-critical backlog drain.
@@ -879,6 +916,8 @@ Decision belongs to Phase 0 (Open Decisions closed in writing) — choose Tempor
 **Remaining Phase 6 work:**
 
 - Run the 600-completion stampede harness with Phase 0 measured provider limits and real staging DB pool observations.
+- Run the Pipecat worker tick against staging queue rows and record that heavy jobs drain within §1.3 SLOs without extending active call capacity occupancy.
+- Choose production worker topology: managed workflow engine, dedicated Railway Pipecat worker service, or a looped/scheduled Pipecat worker process.
 
 ## Phase 7 — Small Live Canary (~1–2 weeks)
 
@@ -973,7 +1012,7 @@ Each production step keeps both paths available:
 
 ---
 
-## Implementation Status Retrospective (updated 2026-05-24)
+## Implementation Status Retrospective (updated 2026-05-25)
 
 This section records the current `zuludev` reality after Phases 0-8 implementation commits and replaces the older Phase 0-3 retrospective.
 
@@ -981,6 +1020,9 @@ This section records the current `zuludev` reality after Phases 0-8 implementati
 
 - `CALL_ARCHITECTURE_MODE` enumerates the rollout modes in §2.8 (`legacy_only`, `shadow_materialize`, `shadow_dispatch`, `canary_queue`, `queue_primary`, `legacy_rollback`).
 - The current queue/guard/job tables exist in mirrored Node and Pipecat migrations, with PHI-safe columns, idempotency indexes, retention, hard-delete, legal-hold, and export coverage.
+- Senior-owned `memories` is now 64-way hash-partitioned by `senior_id`, prospect-owned rows are routed to `prospect_memories`, and Node/Pipecat memory services include the owner key for partition pruning.
+- Pipecat can now enqueue heavy post-call work and skip the heavy inline chain when `POST_CALL_QUEUE_ENABLED=true`; `pipecat/services/post_call_job_worker.py` executes the queued heavy jobs with dependency and retry handling.
+- Admin DB observability now includes a PHI-safe database pressure view for pool stats, aggregate activity, locks, hot tables, and queryid-only slow-query aggregates.
 - `pipecat/services/capacity.py` publishes PHI-free heartbeats at 5 s interval / 15 s TTL, and Node reads them through `services/pipecat-capacity.js`.
 - `PIPECAT_REQUIRE_REDIS=true` fails closed at startup; Redis-backed rate limits fail closed when enabled.
 - `pipecat/services/readiness.py` implements the Phase 3 readiness gate, and `pipecat/main.py` starts it and exposes readiness through `/health` and capacity heartbeats.
@@ -991,7 +1033,7 @@ This section records the current `zuludev` reality after Phases 0-8 implementati
 
 ### Important mismatch vs original rev-2 target
 
-The current Phase 1 migrations are **not** the `ops.*` / hash-partitioned schema described by the original rev-2 text. The active code and tests use flat default-schema tables. Treat §2.7's `ops.*` and partitioning design as a forward-compatible migration target, not as completed implementation.
+The current Phase 1 operational queue/job/attempt migrations are **not** the `ops.*` / hash-partitioned schema described by the original rev-2 text. The active code and tests use flat default-schema operational tables. Treat §2.7's `ops.*` and operational-table partitioning design as a forward-compatible migration target, not as completed implementation. Senior memories are the exception: they are already hash-partitioned by `senior_id`.
 
 This is the main remaining documentation/code distinction. It is not a runtime bug by itself, but it changes the migration decision before a live apply:
 
@@ -1036,6 +1078,9 @@ Metrics scaffolding lands in Phase 0; real data fills in as phases ship. Require
 - `post_call_job_dead_letter_total{job_type}` (rev 2)
 - `db_pool_idle{service}`
 - `db_slow_query_total{service}`
+- `db_lock_waiting_count{service}`
+- `db_hot_table_rows_written{table}`
+- `db_hot_table_dead_tuple_ratio{table}`
 - `provider_rate_limited_total{provider}`
 - `provider_concurrency_used{provider}` (rev 2)
 - `caller_id_answer_rate{caller_id}` (rev 2)
@@ -1184,9 +1229,10 @@ Below items move from "open" to "closed by Phase 0 exit." None of them is allowe
 - Redis vendor: Railway TCP Redis vs. Upstash REST (failure-mode semantics differ materially; affects Phase 3 fail-closed behavior).
 - Queue / job / guard / shadow-comparison retention windows (current proposal: 90/180/30/30 days).
 - Overbook factor (initially 1.0; revised only after Phase 7 production canary measurements).
-- Whether post-call workers run inside Node API process or as a separate Railway worker service.
-- **Durable workflow engine for post-call jobs.** Temporal Cloud vs. Inngest vs. Postgres-only Plan B. Decision drives Phase 6 implementation per its "Implementation strategy" section.
-- **Operational Postgres split trigger.** Default: stay on Neon until write throughput on `call_attempts` or `post_call_jobs` becomes a measurable bottleneck. Trigger metric: sustained alert on DB pool idle dropping below §1.3 SLO during burst windows. If the §2.7 `ops.*` migration has landed by then, the split is an operational-schema move; if not, the split first needs an online migration plan from the current flat tables.
+- Whether post-call workers run as a managed workflow engine, a dedicated Railway Pipecat worker service, or a looped/scheduled Pipecat worker process. The Postgres-backed Pipecat worker path exists now; production topology is still a Phase 0 decision.
+- **Durable workflow engine for post-call jobs.** Temporal Cloud vs. Inngest vs. Postgres-only Pipecat worker. Decision drives whether Phase 6 stays on the implemented Postgres worker or moves execution to a managed workflow runtime.
+- **Operational Postgres split trigger.** Default: stay on Neon until write throughput on `call_attempts` or `post_call_jobs` becomes a measurable bottleneck. Trigger metric: sustained alert on DB pool idle dropping below §1.3 SLO during burst windows or PHI-safe DB observability showing lock/hot-table pressure in the dispatcher/job tables. If the §2.7 `ops.*` migration has landed by then, the split is an operational-schema move; if not, the split first needs an online migration plan from the current flat tables.
+- **Memory/vector split trigger.** Senior memories are already 64-way hash-partitioned. Move embeddings to dedicated pgvector/vector infrastructure only when memory search p95, embedding write backlog, table bloat, or DB pool pressure shows the partitioned in-DB design is consuming the primary database budget.
 
 ---
 
@@ -1195,35 +1241,38 @@ Below items move from "open" to "closed by Phase 0 exit." None of them is allowe
 For the engineer or AI agent executing this plan, the build order is:
 
 1. **Phase 0** — measure, decide, contract. Do not skip. Do not partial-skip. Phase 1 cannot start until baselines exist.
-2. **Phase 1** — schema + idempotency + retention parity. Apply the current split migrations (`010` foundation, `011` concurrent indexes, `012` post-call state, `013` canary membership) and explicitly record whether live rollout uses the current flat tables or the `ops.*` / partitioned target from §2.7.
+2. **Phase 1** — schema + idempotency + retention parity. Apply the current split migrations (`010` foundation, `011` concurrent indexes, `012` post-call state, `013` canary membership, `021`/`032` memory partitioning) and explicitly record whether live rollout uses the current flat operational tables or the `ops.*` / partitioned operational target from §2.7.
 3. **Phase 2** (parallel with Phase 3) — materializer, shadow-only. DST suite required.
 4. **Phase 3** (parallel with Phase 2) — Pipecat multi-instance hardening, replica readiness gate, Node-side drain, inbound lane wiring.
 5. **Phase 4** — dispatcher, `shadow_dispatch` dry-run first, then `canary_queue` live only for allowlisted cohorts, with service-to-service rate-limit carve-out and senior-delete race recheck.
 6. **Phase 5** — synthetic live A/B with legacy control + queue treatment running concurrently, caller-ID answer-rate canary, and rollback drill.
-7. **Phase 6** — post-call queue with dependency graph, retry/backoff, dead-letter handling, 600-completion stampede test.
+7. **Phase 6** — post-call queue with dependency graph, retry/backoff, dead-letter handling, Pipecat heavy-job worker validation, and 600-completion stampede test.
 8. **Phase 7** — small live canary (HARD gate from Phases 3 + 6 + BAAs).
 9. **Phase 8** — scheduled capacity + autoscaler with replica warm-up gate + cost-aware scale-down.
 10. **Phase 9** — production rollout at 50 → 100 → 250 → 600 → 2,000, keeping legacy available for non-canary cohorts and rollback until 14 clean days on `queue_primary`.
 
-Single biggest discipline: **Phase 0 is not optional.** Rev 1 let the team jump to building because Phase 0 was a thin guardrail. Rev 2 makes Phase 0 produce measurements and close decisions. Everything downstream inherits Phase 0's quality.
+Single biggest discipline: **Phase 0 is not optional.** Rev 1 let the team jump to building because Phase 0 was a thin guardrail. Rev 2/3 make Phase 0 produce measurements and close decisions. Everything downstream inherits Phase 0's quality.
 
 ---
 
 # 8. Forward Path To 10,000 Users
 
-This plan delivers durable, multi-instance voice infrastructure capable of 600 concurrent active calls and 2,000 daily users. Scaling further — to roughly 10,000 daily users and 3,000 concurrent at peak — is past the original design point of the architecture, but **rev 2 itself is the in-flight 10k-shaped iteration** of the 2k plan: the move from "find due calls and fire" to durable queue + capacity-aware dispatcher + workflow-engine semantics + numeric SLOs is a 10k-shaped architecture executed against a 2k milestone. The original rev-2 `ops.*`, partitioning, and region-key-shape items remain forward-compatible targets, not current branch implementation.
+This plan delivers durable, multi-instance voice infrastructure capable of 600 concurrent active calls and 2,000 daily users. Scaling further — to roughly 10,000 daily users and 3,000 concurrent at peak — is past the original design point of the architecture, but **rev 3 is now the in-flight 10k-shaped iteration** of the 2k plan: the move from "find due calls and fire" to durable queue + capacity-aware dispatcher + heavy post-call workers + proactive memory partitioning + numeric SLOs is a 10k-shaped architecture executed against a 2k milestone. The original rev-2 `ops.*`, operational-table partitioning, and region-key-shape items remain forward-compatible targets, not current branch implementation.
 
-This section is not a deferred future plan and not a catalog of separate side-environment prototypes. It is the operating record of which 10k transitions are already addressed by rev 2 work items, which require additional work that is not yet in rev 2, and the triggers that determine when each transition starts. Refinements to this material land in rev 2 directly, not in parallel docs.
+This section is not a deferred future plan and not a catalog of separate side-environment prototypes. It is the operating record of which 10k transitions are already addressed by rev 3 work items, which require additional work that is not yet in rev 3, and the triggers that determine when each transition starts. Refinements to this material land in rev 3 directly, not in parallel docs.
 
-## 8.1 What rev 2 already does for 10k
+## 8.1 What rev 3 already does for 10k
 
-Implemented decisions in current `zuludev` chosen with the 10k transition in mind:
+Implemented decisions in the current scaling branch chosen with the 10k transition in mind:
 
 - **Durable queue and guard model.** `call_queue`, `call_attempts`, `outbound_call_guards`, and `scheduler_shadow_comparisons` move dial authority from in-memory sets to Postgres rows with leases, unique guards, and audit/comparison records.
-- **Indexed flat-table substrate.** Current migrations add the indexes needed for 2,000-user dry-run/canary validation. If they become hot, §2.7 names the online path to `ops.*` and `senior_id` partitions.
+- **Indexed flat-table operational substrate.** Current queue/job/attempt migrations add the indexes needed for 2,000-user dry-run/canary validation. If they become hot, §2.7 names the online path to `ops.*` and `senior_id` partitions.
+- **Senior memory partitioning.** `memories` is already split into 64 `senior_id` hash partitions, and prospect memory writes go to `prospect_memories`. This avoids the highest-risk user-data hot table becoming one giant search/write target.
+- **Queued heavy post-call execution.** Pipecat can enqueue the heavy post-call job graph and skip inline analysis/memory/daily-context/snapshot work when `POST_CALL_QUEUE_ENABLED=true`, with a Pipecat worker available to drain those jobs.
+- **PHI-safe DB pressure visibility.** Admin observability can now show pool pressure, lock waits, hot tables, and queryid-only slow-query aggregates, which makes the operational split trigger measurable instead of speculative.
 - **`PIPECAT_REQUIRE_REDIS=true` from Phase 3.** Removes the single-instance code path. Multi-region Redis later requires Redis Cluster, but application code already assumes Redis as the source of truth.
 - **Single-region Redis key discipline.** Heartbeats and reservations are ID-only and PHI-free. Region-aware schema/key reshaping is intentionally future work, not implicitly half-implemented.
-- **Workflow engine recommendation (Phase 6).** Per-job-type concurrency caps, retry/backoff, and dead-letter are first-class in Temporal/Inngest. Scaling job concurrency by 10x is a configuration knob.
+- **Workflow engine recommendation (Phase 6).** Per-job-type concurrency caps, retry/backoff, and dead-letter are first-class in Temporal/Inngest; the implemented Postgres Pipecat worker is the Plan B execution path until the production runtime decision is made.
 - **Numeric SLOs (§1.3).** The same metric framework extends to 10k; only the targets get retightened.
 
 ## 8.2 What breaks first as users grow past 2,000
@@ -1232,7 +1281,7 @@ In order of how soon the wall hits:
 
 1. **Outbound caller-ID reputation.** Long before any code-level metric moves, ~3,000 outbound calls in a 15-minute window from a single caller ID triggers carrier spam analytics. Answer rate collapses silently. Already on the radar via §1.6 (caller-ID pool) and Phase 0 §4 (caller-ID strategy). At 10k, single-ID is not viable — number pool + STIR/SHAKEN + reputation monitoring become structural.
 2. **Provider concurrency quotas.** 3,000 concurrent calls means 3,000 concurrent Deepgram streams, 3,000 active Claude contexts, ~6,000 Director LLM RPS. Per-org quotas become hard ceilings. Plan: committed-tier contracts on every minute-billed vendor; multi-provider sharding via AI Gateway for STT and LLM with documented failover paths exercised in chaos tests.
-3. **Single Postgres write throughput.** Even with `FOR UPDATE SKIP LOCKED` and the current senior/status/time indexes, one Postgres primary handles a fixed write rate. `call_attempts`, `post_call_jobs`, `audit_logs`, and `conversations` all spike simultaneously during burst windows. Plan: if measurements show the current flat tables are hot, migrate operational tables to the §2.7 `ops.*` / partitioned target or a dedicated operational Postgres with provisioned IOPS; use read replicas for context hydration; consider moving the `audit_logs` append path to S3/Parquet rather than a Postgres table at 10k volume.
+3. **Single Postgres write throughput.** Even with `FOR UPDATE SKIP LOCKED` and the current senior/status/time indexes, one Postgres primary handles a fixed write rate. `call_attempts`, `post_call_jobs`, `audit_logs`, and `conversations` all spike simultaneously during burst windows. Memory writes/searches are less risky than before because `memories` is already senior-hash-partitioned, but the operational and journal write paths can still get hot. Plan: if measurements show the current flat operational tables are hot, migrate operational tables to the §2.7 `ops.*` / partitioned target or a dedicated operational Postgres with provisioned IOPS; use read replicas for context hydration; consider moving the `audit_logs` append path to S3/Parquet rather than a Postgres table at 10k volume.
 4. **Redis as a single point of failure.** Single-region Redis is acceptable for one Pipecat region. Multi-region voice requires Redis Cluster with cross-AZ failover, and capacity coherence becomes a consensus problem. Plan: Redis Cluster mode, capacity reservations consider Redis quorum, fallback path that leases through Postgres at higher latency if Redis degrades.
 5. **Single-region voice latency.** US coast-to-coast users on a single Pipecat region accept ~80–100ms additional one-way audio latency. Tolerable but noticeable. International expansion makes this worse. Plan: deploy Pipecat in multiple regions, route on `seniors.preferred_region`, accept cross-region writes for shared state (Postgres + Redis primaries stay in one region; reads are local).
 6. **Caregiver notification throughput.** ~10,000 daily notifications, bursty by call-end window. Resend (or any single provider) starts throttling. Plan: notification service tier with batching, provider failover, per-provider concurrency caps.
@@ -1240,19 +1289,20 @@ In order of how soon the wall hits:
 
 ## 8.3 Transitions between 2,000 and 10,000
 
-For each transition, "Status in rev 2" records what is already addressed inside this plan and what is explicitly not. The trigger column records the SLO or product signal that escalates the row from "scheduled to be addressed" to "active work item."
+For each transition, "Status in rev 3" records what is already addressed inside this plan and what is explicitly not. The trigger column records the SLO or product signal that escalates the row from "scheduled to be addressed" to "active work item."
 
-| Transition | Driver | Trigger to escalate | Status in rev 2 |
+| Transition | Driver | Trigger to escalate | Status in rev 3 |
 | --- | --- | --- | --- |
-| Move operational tables to `ops.*` / dedicated operational Postgres | Burst write throughput; DB pool exhaustion | Sustained §1.3 DB-pool-idle alert during burst, or ~3,000 daily users | Target and trigger specified in §2.7 / §6, but current code still uses flat default-schema tables. Requires an online migration unless done before live Phase 1 apply. |
+| Move operational tables to `ops.*` / dedicated operational Postgres | Burst write throughput; DB pool exhaustion | Sustained §1.3 DB-pool-idle alert during burst, DB observability showing lock/hot-table pressure, or ~3,000 daily users | Target and trigger specified in §2.7 / §6, but current operational code still uses flat default-schema tables. Requires an online migration unless done before live Phase 1 apply. |
+| Memory/vector store split | Memory search latency; embedding write backlog; primary DB pressure | Memory search p95 over target, embedding backlog sustained, or partitioned `memories` appears in hot-table/lock pressure | Senior `memories` already uses 64 hash partitions by `senior_id`; next move is dedicated pgvector/vector DB only after measured pressure. |
 | Pipecat second region | Audio latency for West Coast / international users | Product signal, not capacity signal | Actual multi-region deploy explicitly out of scope per §1.7. Current code is single-region; adding this requires `region` schema/key changes and routing work. |
-| Telnyx managed number pool / caller-ID strategy | Answer-rate decline correlated with outbound volume | First measurable drop below §1.3 80%-of-baseline target | Strategy decision is Phase 0 §4. Canary validation is Phase 5 §3 with answer-rate gate. Number-pool integration code not yet in rev 2. |
-| Multi-provider sharding (STT/LLM via AI Gateway) | Provider rate-limit alerts at peak | First sustained provider 429s | Per-provider concurrency caps tied to Phase 0 measured peaks, applied in Phase 6 §5. Failover routing across providers (e.g., Deepgram + AssemblyAI) not yet in rev 2 — additional work. |
-| Redis Cluster (HA / multi-region) | Pipecat multi-region rollout or single-AZ Redis incident | Either trigger first | Required-mode (`PIPECAT_REQUIRE_REDIS=true`) and fail-closed admission in Phase 3 §1. Cluster topology and cross-AZ failover not yet in rev 2 — additional work. |
-| Workflow engine concurrency cap increase | Post-call job backlog growing | 10x current per-job-type cap with no DB stress | Engine choice is Phase 0 Open Decision. Caps and dependency graph are Phase 6 §2–§5. Increase is a config change, not new code. |
-| `audit_logs` archival to S3/Parquet | `audit_logs` write rate or storage cost | Storage-cost trigger before throughput trigger | Not yet addressed in rev 2 — additional work when triggered. |
+| Telnyx managed number pool / caller-ID strategy | Answer-rate decline correlated with outbound volume | First measurable drop below §1.3 80%-of-baseline target | Strategy decision is Phase 0 §4. Canary validation is Phase 5 §3 with answer-rate gate. Number-pool integration code not yet in rev 3. |
+| Multi-provider sharding (STT/LLM via AI Gateway) | Provider rate-limit alerts at peak | First sustained provider 429s | Per-provider concurrency caps tied to Phase 0 measured peaks, applied in Phase 6 §5. Failover routing across providers (e.g., Deepgram + AssemblyAI) not yet in rev 3 — additional work. |
+| Redis Cluster (HA / multi-region) | Pipecat multi-region rollout or single-AZ Redis incident | Either trigger first | Required-mode (`PIPECAT_REQUIRE_REDIS=true`) and fail-closed admission in Phase 3 §1. Cluster topology and cross-AZ failover not yet in rev 3 — additional work. |
+| Workflow engine or Pipecat worker concurrency cap increase | Post-call job backlog growing | 10x current per-job-type cap with no DB stress | Postgres-backed Pipecat worker exists now. Engine choice remains a Phase 0 Open Decision; if staying Postgres-only, concurrency increases need staging proof that worker leases and DB pool stay healthy. |
+| `audit_logs` archival to S3/Parquet | `audit_logs` write rate or storage cost | Storage-cost trigger before throughput trigger | Not yet addressed in rev 3 — additional work when triggered. |
 
-Rows marked "additional work" are the explicit 10k-only items not covered by current rev 2 work items. They become PRs against rev 2 when the trigger fires.
+Rows marked "additional work" are the explicit 10k-only items not covered by current rev 3 work items. They become PRs against rev 3 when the trigger fires.
 
 ## 8.4 Product transitions
 
@@ -1261,16 +1311,16 @@ Code and infrastructure are necessary but not sufficient at 10k. Two product-lev
 - **Schedule distribution.** Stop letting all users pick "9:00 AM." Offer scheduling bands ("morning: 8–9 AM, we'll pick a quiet minute"), use historical answer-rate data to suggest off-peak slots, and use deterministic jitter within the band to spread load. Possibly more capacity headroom than any single infrastructure change.
 - **Tiered call types.** Hard reminders remain time-sensitive. Companion check-ins become flexible within a multi-hour window. The lane reservation policy in §2.3 extends naturally; the product change is exposing the flexibility to caregivers in the mobile app.
 
-## 8.5 How 10k iteration happens inside rev 2
+## 8.5 How 10k iteration happens inside rev 3
 
-Rev 2 is the working doc for the 10k-shaped iteration; this is not a side environment. A few rules keep that workable:
+Rev 3 is the working doc for the 10k-shaped iteration; this is not a side environment. A few rules keep that workable:
 
 - **Phase 0 measurements stay the gate for everything downstream.** Baseline data that drives §1.3 SLO targets, vendor concurrency inventory, and the cost model still close before Phase 1 starts. 10k-flavored work items consume those measurements as inputs; they do not skip them.
-- **Additional 10k work items (the "additional work" rows in §8.3) land as edits to rev 2, not as separate plan docs.** When the trigger for a row in §8.3 fires, the corresponding phase in rev 2 gets the new work item appended, with the existing prerequisite-gate / work-items / exit-criteria structure. Examples:
+- **Additional 10k work items (the "additional work" rows in §8.3) land as edits to rev 3, not as separate plan docs.** When the trigger for a row in §8.3 fires, the corresponding phase in rev 3 gets the new work item appended, with the existing prerequisite-gate / work-items / exit-criteria structure. Examples:
   - "Multi-provider STT failover" becomes a Phase 3 or Phase 4 work item once first sustained provider 429s are observed.
   - "Redis Cluster topology" becomes a Phase 3 work item once a single-AZ Redis incident occurs or multi-region deploy is decided in.
   - "`audit_logs` archival to S3" becomes a Phase 1 or Phase 6 work item once storage-cost signals fire.
-- **Out-of-scope items in §1.7 stay out of scope until explicitly reopened.** Multi-region call routing, multi-database/multi-tenant sharding, B2B tenancy, and replacing Telnyx or Claude are listed as separate-plan candidates. If 10k pressure forces one of them, the response is a new plan, not a rev-2 expansion.
-- **Schema cheapness must be made real before it is counted as complete.** The `ops.*` schema, partitioning, and region columns are still useful 10k-shaped ideas, but the current branch has not implemented them. They either land before live Phase 1 apply or become explicit online migration work triggered by Phase 0/rollout measurements.
+- **Out-of-scope items in §1.7 stay out of scope until explicitly reopened.** Multi-region call routing, multi-database/multi-tenant sharding, B2B tenancy, and replacing Telnyx or Claude are listed as separate-plan candidates. If 10k pressure forces one of them, the response is a new plan, not a rev-3 expansion.
+- **Schema cheapness must be made real before it is counted as complete.** Senior memory partitioning is real now. The `ops.*` schema, operational-table partitioning, and region columns are still useful 10k-shaped ideas, but the current branch has not implemented them for queue/job/attempt tables. They either land before live Phase 1 apply or become explicit online migration work triggered by Phase 0/rollout measurements.
 
-The forward-compatible decisions already captured in rev 2 (durable queue, Redis-required posture, workflow-engine semantics, and the documented `ops.*` / partitioning / region target) are what make further 10k iteration cheap to keep folding back into this document. New 10k work follows the same structure: prerequisite gate, work items, numeric exit criteria, rollback drill where applicable.
+The forward-compatible decisions already captured in rev 3 (durable queue, Redis-required posture, queued post-call execution, senior memory partitioning, DB pressure observability, and the documented `ops.*` / operational-partitioning / region target) are what make further 10k iteration cheap to keep folding back into this document. New 10k work follows the same structure: prerequisite gate, work items, numeric exit criteria, rollback drill where applicable.

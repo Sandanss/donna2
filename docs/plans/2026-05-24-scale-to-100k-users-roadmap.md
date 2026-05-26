@@ -9,7 +9,7 @@ Primary surfaces (future): `services/call-queue.js` partitioning, Postgres topol
 
 This is a **roadmap, not a plan**. It describes the architectural moves that become necessary somewhere between 10k and 100k daily users, the rough order they become load-bearing, and the design decisions worth making *now* (during the 2k buildout) so we don't paint ourselves into a corner. None of this is committed work. The point is to make the 2k → 10k → 100k path evolutionary, not a rewrite.
 
-The scale-to-2000 plan is the authoritative document for everything happening this quarter. Where this roadmap says "today" it means the state after the 2k plan ships. Current `zuludev` code still uses flat default-schema queue/job tables; `ops.*`, hash partitioning, region columns, and cross-DB splits below are future targets unless a later migration lands.
+The scale-to-2000 plan is the authoritative document for everything happening this quarter. Where this roadmap says "today" it means the state after the 2k plan ships. Current scaling-branch code still uses flat default-schema queue/job/attempt tables; `ops.*`, operational-table hash partitioning, region columns, and cross-DB splits below are future targets unless a later migration lands. Senior-owned `memories` is the exception: it is already 64-way hash-partitioned by `senior_id`, with prospect rows split into `prospect_memories`.
 
 ---
 
@@ -91,11 +91,14 @@ This is the section the rest of the roadmap hinges on. The DB is the hardest thi
 
 - **One Neon Postgres cluster**, branched for dev/staging/prod.
 - Current runtime migrations create flat default-schema operational tables: `call_queue`, `call_attempts`, `post_call_jobs`, `outbound_call_guards`, `scheduler_shadow_comparisons`, and Node-owned `canary_cohort_membership`.
-- The `ops.*` schema and hash partitions are forward targets from the 2k plan, not current branch implementation.
+- The `ops.*` schema and operational queue/job/attempt hash partitions are forward targets from the 2k plan, not current branch implementation.
+- Senior `memories` is already hash-partitioned into 64 partitions by `senior_id`; `prospect_memories` keeps onboarding/prospect rows out of that partition set.
 - Connection pooling via PgBouncer / Neon's pooler.
 - pgvector for memory embeddings, in-DB.
+- PHI-safe DB observability exposes pool pressure, aggregate activity, lock waits, hot table stats, and queryid-only slow-query aggregates.
 
 This is fine for 2k. It will start to feel constrained somewhere between 10k–25k, depending on access patterns.
+The detailed 2k -> 10k table-risk view lives in the companion plan's "Table scaling risk snapshot"; this roadmap only describes the store-level moves after those risks become measurable.
 
 ### 3.2 The principle: split by access pattern before sharding by tenant
 
@@ -106,7 +109,7 @@ Sharding by `senior_id` is intuitive (each user is independent), but it's also t
 | **Hot transactional, user-scoped** | `seniors`, `caregivers`, `reminders`, `daily_call_context` | Stay in primary Postgres |
 | **Hot transactional, ops-scoped** | current flat `call_queue`, `call_attempts`, `post_call_jobs`, `outbound_call_guards`; future `ops.*` equivalents | Dedicated **ops** Postgres (own cluster) |
 | **Append-only, high volume** | `conversations` (turn transcripts), `call_analyses`, audit logs | Dedicated **journal** store — Postgres logical replica, ClickHouse, or BigQuery |
-| **Vector search** | `memories` pgvector embeddings | Dedicated vector DB (Pinecone, Weaviate, or pgvector on its own cluster) at ~1M+ vectors |
+| **Vector search** | 64-way partitioned `memories` pgvector embeddings | Dedicated vector DB (Pinecone, Weaviate, or pgvector on its own cluster) at ~1M+ vectors or when measured pressure says the primary DB budget is being consumed |
 | **Long-cold archive** | Conversations >90 days, retired senior data | Object storage (S3) with metadata pointers |
 
 The win of access-pattern splits: each store can be sized, replicated, and scaled independently. The dispatcher's queue contention doesn't fight with caregiver dashboard reads. Audit log writes don't compete with reminder scheduler writes. Vector search latency doesn't blow up when post-call workers backfill embeddings in bulk.
@@ -120,16 +123,25 @@ The cost: cross-store consistency. We need application-level logic (or a workflo
 - Stay on one Neon Postgres.
 - Verify the repository/module boundary works as the seam — today that is unqualified queue tables in `services/call-queue.js`; if `ops.*` lands, all dispatcher queries should move there without scattering SQL across services.
 - Read replicas for analytics queries (admin dashboards, daily reports).
-- Aggressive `VACUUM` and index maintenance on `call_queue` and `call_attempts`; partition maintenance begins only after partitioned tables land.
+- Aggressive `VACUUM` and index maintenance on `call_queue` and `call_attempts`; memory partition maintenance begins immediately because the 64 senior partitions already exist; partition maintenance for `audit_logs` starts with the monthly partitioning work below; other operational tables stay flat until Phase B or until partitioned queue/job/attempt tables land.
+- **Partition `audit_logs` by month** before journal-store split (Phase B). This is interim work that ships while the table is still small (~10M rows today; would be ~270M at 10k users unpartitioned). Sketch:
+  - New `audit_logs` partitioned parent with `PRIMARY KEY (id, created_at)` (partition key must be in PK).
+  - Monthly partitions pre-created for past 12 + future 6 months. Default partition as safety net (alarm if it grows).
+  - Indexes unchanged: `user_id`, `(resource_type, resource_id)`, `created_at`. Postgres propagates per-partition.
+  - Cutover via offline script (`scripts/migrate-audit-logs-to-partitioned.js`): bulk copy `< T` in monthly batches, then `ACCESS EXCLUSIVE` lock + delta copy `>= T` + rename. Lock window ~1–3s at current write rate.
+  - New `services/audit-log-partition-manager.js` runs daily: creates next 3 months of partitions, drops partitions past HIPAA retention window (confirm number in `docs/compliance/` before first drop). Replaces existing `DELETE FROM audit_logs WHERE created_at < ...` in `services/data-retention.js` and `pipecat/services/data_retention.py` (only one wins — pick Node).
+  - Keep `audit_logs_pre_partition` for one release cycle before dropping.
+  - Migration belongs in `db/migrations/` (next free number), not duplicated in `pipecat/db/migrations/` — both dirs target the same DB.
 - pgvector stays in-DB; index type stays `hnsw`.
+- Use the DB observability dashboard to baseline pool idle, lock waits, hot table writes/dead tuples, and slow query aggregates before changing stores.
 
-**Acceptance for leaving Phase A:** p95 query latency on the dispatcher's dequeue stays under 50ms at peak. If it doesn't, Phase B is overdue.
+**Acceptance for leaving Phase A:** p95 query latency on the dispatcher's dequeue stays under 50ms at peak. Audit-log retention runs in under 1s (DROP PARTITION) rather than scanning the table. If either fails, Phase B is overdue.
 
 **Phase B (~5k–25k users): split out the operational store.**
 
 - Move operational queue/job/attempt/guard tables to a dedicated Postgres cluster ("donna-ops"). If `ops.*` has not already landed, this requires an online migration from the current flat tables.
 - Cross-DB foreign keys disappear — the operational `call_queue.senior_id` is just a UUID, not an enforced FK. Application logic (dispatcher service) is the boundary.
-- Audit logs move to the journal store (Postgres logical replica first, ClickHouse later if cardinality warrants it).
+- Audit logs (already partitioned by month from Phase A) move to the journal store. Partition-by-date carries over: logical replica of the partitioned table first, ClickHouse later if cardinality warrants it.
 - Read replica for admin/caregiver-facing reads to take pressure off primary.
 
 **Why now:** the dispatcher is the workload with the spikiest write pattern. Isolating it means a queue backlog can't cause a caregiver dashboard slowdown, and vice versa. The journal store split is driven by audit log volume specifically — at 5k users we're already writing 100k+ audit rows/day, and that workload is fundamentally different from the OLTP workload of the main DB.
@@ -138,7 +150,7 @@ The cost: cross-store consistency. We need application-level logic (or a workflo
 
 **Phase C (~25k–60k users): vector store split + journal store split.**
 
-- pgvector workload moves out — either to a dedicated Postgres-with-pgvector cluster (cheapest path, keeps SQL ergonomics), or to a managed vector DB (Pinecone, Turbopuffer). At ~5M embeddings, in-DB pgvector is doable but starts to dominate IOPS during memory-search-heavy peaks.
+- pgvector workload moves out — either to a dedicated Postgres-with-pgvector cluster (cheapest path, keeps SQL ergonomics), or to a managed vector DB (Pinecone, Turbopuffer). The 64-way `senior_id` partitioning buys time, but at ~5M embeddings in-DB pgvector can still dominate IOPS during memory-search-heavy peaks.
 - Journal store becomes its own real store. Conversations >24h old move to ClickHouse / BigQuery / S3+Parquet. The main DB keeps a thin pointer + "last summary" cache.
 - Embedding generation moves fully async — the call path doesn't wait, post-call jobs write to the vector store via a queue.
 
@@ -164,9 +176,10 @@ These cost almost nothing now and pay off enormously:
 
 - **Application queries hit operational queue tables through a single repository/module boundary**, not scattered across services. If/when `ops.*` or a separate ops DB lands, only that boundary changes. (`services/call-queue.js` is already shaping up this way.)
 - **No new FKs should cross the future `public.* / ops.*` boundary.** Current migrations still use default-schema FKs, so removing cross-boundary FKs is future online migration work.
-- **Every senior-scoped write includes `senior_id` in the row**, even when redundant. Sharding later requires this; backfilling it is painful.
+- **Every senior-scoped write includes `senior_id` in the row**, even when redundant. Sharding later requires this; backfilling it is painful. The memory path now enforces this by making `memories.senior_id` non-null and part of the partition key.
 - **Audit logs are insert-only and never queried in the hot path.** Already true. Keep it that way — no triggers that read audit on write.
-- **Memory embeddings are queried by `senior_id + similarity`, never global similarity.** Already true. This makes per-tenant sharding of the vector store trivial later.
+- **Partition `audit_logs` by month before it grows past ~10M rows.** Cheap migration today, painful at 100M+. Sets up Phase B journal-store split as a logical-replica swap rather than a schema redesign. See §3.3 Phase A.
+- **Memory embeddings are queried by `senior_id + similarity`, never global similarity.** Already true, and now matched by the physical 64-way `senior_id` hash partitioning. This makes per-tenant sharding of the vector store trivial later.
 - **Region column on every operationally relevant table.** This is not current runtime schema. Add it to `call_attempts`, `call_queue`, `post_call_jobs`, and future cross-cluster-replicated tables when multi-region routing becomes real. Default `'us-east-1'` is fine for the first migration.
 - **Don't add cross-table joins that the dispatcher needs.** The dispatcher should be able to operate with only `ops.*` knowledge. Today it joins to `seniors` for some queries — that's a future migration cost worth paying down opportunistically.
 
@@ -283,6 +296,10 @@ Per-call cost under $0.40 by 25k users. Under $0.30 by 100k. Anything above $0.4
 
 ## 8. Observability and incident response
 
+### 8.0 What exists after the 2k scaling work
+
+The 2k work now includes PHI-safe DB observability for the exact signals that decide when this roadmap's database moves become real: pool pressure, aggregate activity, lock waits, hot table stats, and queryid-only slow-query aggregates. That means Phase B/Phase C should be triggered by measured table/query pressure, not fear of growth alone.
+
 ### 8.1 What changes at 100k
 
 You cannot debug an individual call. Telemetry has to be aggregate-first, with the ability to drill into a specific call when paged.
@@ -303,9 +320,9 @@ This is the order things become load-bearing, not a committed schedule. Each ste
 
 | Phase | User count | Engineering moves | DB moves |
 | --- | --- | --- | --- |
-| Today | 0–2k | 2k plan executes | Single Neon |
-| Near (post-2k) | 2k–5k | Provider router (Layer 1) | Read replicas |
-| Mid | 5k–25k | Add/activate worker-affinity queue partitions; provider fallback (Layer 2) | Phase B: split operational tables into `ops.*`/ops DB |
+| Today | 0–2k | 2k plan executes; heavy post-call worker path and DB observability land | Single Neon; senior `memories` 64-way hash-partitioned |
+| Near (post-2k) | 2k–5k | Provider router (Layer 1); validate DB pressure baselines | Read replicas if dashboard reads need them |
+| Mid | 5k–25k | Add/activate worker-affinity queue partitions if measured hot; provider fallback (Layer 2) | Phase B: split operational tables into `ops.*`/ops DB |
 | Mid-late | 25k–60k | Multi-region Pipecat; AI Gateway adoption | Phase C: vector + journal split |
 | Late | 60k–100k | Per-region capacity orchestration; advanced cost routing | Phase D: tenant sharding (only if measured ceiling demands it) |
 
@@ -318,8 +335,8 @@ The honest summary: **the next 6 months are the 2k plan, and we don't need most 
 These are decisions worth having a written answer to within the next 6 months:
 
 1. **Which provider relationship breaks first under growth?** Most likely Telnyx (concurrency + caller-ID reputation) or Anthropic (TPM). Map both to specific contract milestones.
-2. **What does our pgvector workload look like at 1M embeddings?** Run a load test now (on a Neon branch) to find out before we have 1M for real.
-3. **Are we Postgres-first or workflow-engine-first for post-call work?** The 2k plan recommends a workflow engine (Temporal/Inngest) and keeps the Postgres worker as Plan B. Make the call before ~10k users — switching costs go up fast after.
+2. **What does our pgvector workload look like at 1M embeddings after 64-way senior partitioning?** Run a load test now (on a Neon branch) to find out before we have 1M for real.
+3. **Are we Postgres-first or workflow-engine-first for post-call work?** The 2k plan now has a working Postgres-backed Pipecat worker path and still recommends a workflow engine (Temporal/Inngest) for production maturity. Make the runtime call before ~10k users — switching costs go up fast after.
 4. **Multi-region database story.** Do we ever need it? Probably not for 100k. Document the threshold at which we'd reconsider.
 5. **Caregiver dashboard scaling.** Today's admin UI is fine for hundreds of caregivers. At 100k seniors, caregivers likely number 50k+. The admin UI becomes its own scaling problem worth scoping separately.
 
