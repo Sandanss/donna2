@@ -223,10 +223,10 @@ Runs automatically after every call disconnect:
 - The 10,000-user path is documented as forward work built on the queue architecture, not completed runtime support
 
 ### Deployment
-- Three environments: dev, staging, production
+- Four Railway environments: dev, facudev, staging, production
 - CI/CD: PRs run tests/checks; staging deploy and smoke tests are push-gated; production deploys are handled by the main deploy workflow
 - Railway (Pipecat + Node.js), Vercel (frontends)
-- Neon PostgreSQL with branch-per-environment
+- Neon PostgreSQL; database URLs may be shared across Railway environments, so verify the target before data-mutating work
 
 ---
 

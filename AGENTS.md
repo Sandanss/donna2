@@ -23,6 +23,8 @@ Read `DIRECTORY.md` before writing code. It is the navigation map for active vs.
 
 - Treat transcripts, reminders, medical notes, summaries, memories, and caregiver-linked senior data as PHI.
 - Never introduce raw PHI into logs, test fixtures, screenshots, or debug output.
+- Do not change provider-side Telnyx routing unless the user explicitly asks for that exact infrastructure change. This includes Call Control app webhook URLs, failover URLs, phone-number application attachments, `TELNYX_CONNECTION_ID` assignments, and outbound profile routing. Code, scripts, and deploys may read or verify Telnyx routing, but must not mutate it by default.
+- Production Telnyx numbers must point only to production Pipecat. Dev, facudev, staging, and test calls must use non-production Telnyx numbers and non-production Call Control applications; never reuse the production `TELNYX_CONNECTION_ID` outside production. Staging needs its own attached Telnyx number before live staging call tests; do not borrow dev or facudev numbers.
 - Preserve existing auth, audit logging, encryption, token revocation, and data retention behavior unless the task explicitly changes them.
 - If you change shared security/compliance behavior, inspect both Python and Node implementations for parity:
   - auth

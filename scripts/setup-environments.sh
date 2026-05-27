@@ -131,9 +131,32 @@ echo ""
 info "Configuration needed:"
 echo ""
 
-read -rp "Dev Telnyx voice phone number (e.g. +1234567890): " DEV_TELNYX_NUMBER
+read -rp "Dev Telnyx voice phone number (dedicated to dev/zuludev, e.g. +1234567890): " DEV_TELNYX_NUMBER
 if [ -z "$DEV_TELNYX_NUMBER" ]; then
-  fail "Telnyx voice number is required"
+  fail "Dev Telnyx voice number is required"
+fi
+
+read -rp "Dev Telnyx Call Control application ID (must not be production): " DEV_TELNYX_CONNECTION_ID
+if [ -z "$DEV_TELNYX_CONNECTION_ID" ]; then
+  fail "Dev Telnyx Call Control application ID is required"
+fi
+
+read -rp "Staging Telnyx voice phone number (dedicated to staging): " STAGING_TELNYX_NUMBER
+if [ -z "$STAGING_TELNYX_NUMBER" ]; then
+  fail "Staging needs a dedicated Telnyx number for live call testing. Do not reuse dev or production."
+fi
+
+read -rp "Staging Telnyx Call Control application ID (must not be production or dev): " STAGING_TELNYX_CONNECTION_ID
+if [ -z "$STAGING_TELNYX_CONNECTION_ID" ]; then
+  fail "Staging Telnyx Call Control application ID is required"
+fi
+
+if [ "$STAGING_TELNYX_NUMBER" = "$DEV_TELNYX_NUMBER" ]; then
+  fail "Staging and dev Telnyx numbers must be different"
+fi
+
+if [ "$STAGING_TELNYX_CONNECTION_ID" = "$DEV_TELNYX_CONNECTION_ID" ]; then
+  fail "Staging and dev TELNYX_CONNECTION_ID values must be different"
 fi
 
 # ─────────────────────────────────────────────
@@ -167,8 +190,8 @@ get_public_url() {
 }
 
 # Read shared environment vars from production. Donna currently uses one shared
-# secret set across production, staging, and dev; rotate these together if any
-# lower environment can expose Railway variables or app runtime logs.
+# secret set across production and lower environments; rotate these together if
+# any lower environment can expose Railway variables or app runtime logs.
 ANTHROPIC_API_KEY=$(get_prod_var donna-pipecat ANTHROPIC_API_KEY)
 ANTHROPIC_MODEL=$(get_prod_var donna-pipecat ANTHROPIC_MODEL)
 DEEPGRAM_API_KEY=$(get_prod_var donna-pipecat DEEPGRAM_API_KEY)
@@ -179,7 +202,7 @@ GOOGLE_API_KEY=$(get_prod_var donna-pipecat GOOGLE_API_KEY)
 OPENAI_API_KEY=$(get_prod_var donna-pipecat OPENAI_API_KEY)
 TELNYX_API_KEY=$(get_prod_var donna-pipecat TELNYX_API_KEY)
 TELNYX_PUBLIC_KEY=$(get_prod_var donna-pipecat TELNYX_PUBLIC_KEY)
-TELNYX_CONNECTION_ID=$(get_prod_var donna-pipecat TELNYX_CONNECTION_ID)
+PROD_TELNYX_CONNECTION_ID=$(get_prod_var donna-pipecat TELNYX_CONNECTION_ID)
 JWT_SECRET=$(get_prod_var donna-pipecat JWT_SECRET)
 DONNA_API_KEYS=$(get_prod_var donna-pipecat DONNA_API_KEYS)
 if [ -z "$DONNA_API_KEYS" ]; then
@@ -190,6 +213,13 @@ if [ -z "$FIELD_ENCRYPTION_KEY" ]; then
   FIELD_ENCRYPTION_KEY=$(get_prod_var donna-api FIELD_ENCRYPTION_KEY)
 fi
 CLERK_SECRET_KEY=$(get_prod_var donna-api CLERK_SECRET_KEY)
+
+if [ -n "$PROD_TELNYX_CONNECTION_ID" ] && [ "$DEV_TELNYX_CONNECTION_ID" = "$PROD_TELNYX_CONNECTION_ID" ]; then
+  fail "Dev TELNYX_CONNECTION_ID must not match production. Create or select a separate Telnyx Call Control application."
+fi
+if [ -n "$PROD_TELNYX_CONNECTION_ID" ] && [ "$STAGING_TELNYX_CONNECTION_ID" = "$PROD_TELNYX_CONNECTION_ID" ]; then
+  fail "Staging TELNYX_CONNECTION_ID must not match production. Create or select a separate Telnyx Call Control application."
+fi
 
 DEV_PIPECAT_PUBLIC_URL=$(get_public_url donna-pipecat dev)
 DEV_NODE_API_URL=$(get_public_url donna-api dev)
@@ -211,7 +241,7 @@ if [ -z "$ANTHROPIC_API_KEY" ] || [ -z "$DONNA_API_KEYS" ] || [ -z "$FIELD_ENCRY
   echo "  TELNYX_API_KEY        = <Telnyx API key>"
   echo "  TELNYX_PUBLIC_KEY     = <Telnyx public key>"
   echo "  TELNYX_PHONE_NUMBER   = $DEV_TELNYX_NUMBER"
-  echo "  TELNYX_CONNECTION_ID  = <Telnyx Voice API application id>"
+  echo "  TELNYX_CONNECTION_ID  = <dev Telnyx Voice API application id>"
   echo "  TELEPHONY_PROVIDER    = telnyx"
   echo "  NODE_API_URL          = https://<dev-node-domain>   (on donna-pipecat)"
   echo "  CLERK_SECRET_KEY      = <shared Clerk secret>       (on donna-api)"
@@ -224,7 +254,9 @@ if [ -z "$ANTHROPIC_API_KEY" ] || [ -z "$DONNA_API_KEYS" ] || [ -z "$FIELD_ENCRY
   echo "  ENVIRONMENT           = production"
   echo "  DATABASE_URL          = $STAGING_DB_URL"
   echo "  PIPECAT_PUBLIC_URL    = https://<staging-pipecat-domain>"
-  echo "  + same shared secret set and Telnyx dev number"
+  echo "  TELNYX_PHONE_NUMBER   = $STAGING_TELNYX_NUMBER"
+  echo "  TELNYX_CONNECTION_ID  = <staging Telnyx Voice API application id>"
+  echo "  + same shared secret set"
   echo ""
   ok "Neon branches created. Set Railway vars manually, then run: make deploy-dev"
   exit 0
@@ -284,7 +316,7 @@ set_dev_var donna-pipecat TELEPHONY_PROVIDER "telnyx"
 set_dev_var donna-pipecat TELNYX_API_KEY "$TELNYX_API_KEY"
 set_dev_var donna-pipecat TELNYX_PUBLIC_KEY "$TELNYX_PUBLIC_KEY"
 set_dev_var donna-pipecat TELNYX_PHONE_NUMBER "$DEV_TELNYX_NUMBER"
-set_dev_var donna-pipecat TELNYX_CONNECTION_ID "$TELNYX_CONNECTION_ID"
+set_dev_var donna-pipecat TELNYX_CONNECTION_ID "$DEV_TELNYX_CONNECTION_ID"
 set_dev_var donna-pipecat ANTHROPIC_API_KEY "$ANTHROPIC_API_KEY"
 set_dev_var donna-pipecat ANTHROPIC_MODEL "${ANTHROPIC_MODEL:-claude-haiku-4-5-20251001}"
 set_dev_var donna-pipecat DEEPGRAM_API_KEY "$DEEPGRAM_API_KEY"
@@ -338,8 +370,8 @@ set_staging_var donna-pipecat NODE_API_URL "$STAGING_NODE_API_URL"
 set_staging_var donna-pipecat TELEPHONY_PROVIDER "telnyx"
 set_staging_var donna-pipecat TELNYX_API_KEY "$TELNYX_API_KEY"
 set_staging_var donna-pipecat TELNYX_PUBLIC_KEY "$TELNYX_PUBLIC_KEY"
-set_staging_var donna-pipecat TELNYX_PHONE_NUMBER "$DEV_TELNYX_NUMBER"
-set_staging_var donna-pipecat TELNYX_CONNECTION_ID "$TELNYX_CONNECTION_ID"
+set_staging_var donna-pipecat TELNYX_PHONE_NUMBER "$STAGING_TELNYX_NUMBER"
+set_staging_var donna-pipecat TELNYX_CONNECTION_ID "$STAGING_TELNYX_CONNECTION_ID"
 set_staging_var donna-pipecat ANTHROPIC_API_KEY "$ANTHROPIC_API_KEY"
 set_staging_var donna-pipecat ANTHROPIC_MODEL "${ANTHROPIC_MODEL:-claude-haiku-4-5-20251001}"
 set_staging_var donna-pipecat DEEPGRAM_API_KEY "$DEEPGRAM_API_KEY"
@@ -381,13 +413,19 @@ echo "  dev         → Neon 'dev' branch"
 echo ""
 echo "Next steps:"
 echo ""
-echo "  1. Configure Telnyx Voice API application for dev number ($DEV_TELNYX_NUMBER):"
+echo "  1. Configure only the non-production Telnyx Voice API applications:"
+echo "     Do not edit the production Telnyx application, production phone-number attachment, or production webhook."
 if [ -n "$DEV_PIPECAT_PUBLIC_URL" ]; then
-  echo "     Webhook URL → $DEV_PIPECAT_PUBLIC_URL/telnyx/events"
+  echo "     Dev webhook URL     → $DEV_PIPECAT_PUBLIC_URL/telnyx/events"
 else
-  echo "     Webhook URL → https://<dev-pipecat-domain>/telnyx/events"
-  echo "     Set PIPECAT_PUBLIC_URL and NODE_API_URL after Railway creates domains."
+  echo "     Dev webhook URL     → https://<dev-pipecat-domain>/telnyx/events"
 fi
+if [ -n "$STAGING_PIPECAT_PUBLIC_URL" ]; then
+  echo "     Staging webhook URL → $STAGING_PIPECAT_PUBLIC_URL/telnyx/events"
+else
+  echo "     Staging webhook URL → https://<staging-pipecat-domain>/telnyx/events"
+fi
+echo "     Set PIPECAT_PUBLIC_URL and NODE_API_URL after Railway creates domains if either URL was missing."
 echo ""
 echo "  2. Deploy to dev:"
 echo "     make deploy-dev"

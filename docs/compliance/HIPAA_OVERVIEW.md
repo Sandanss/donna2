@@ -113,7 +113,7 @@ PHI is any individually identifiable health information. In Donna's system, the 
 | Security headers | Implemented | HSTS, X-Frame-Options, CSP-adjacent headers |
 | Telnyx webhook validation | Implemented | Ed25519 Telnyx signature verification on `/telnyx/events`, plus single-use `ws_token` validation for Telnyx media WebSocket startup |
 | Error handling (no data leakage) | Implemented | Global error handler strips internal details from API responses |
-| Environment isolation | Implemented | dev/staging/production with separate databases and phone numbers |
+| Environment isolation | Partial | production/dev/facudev/staging use separate Railway services and isolated Telnyx Call Control apps; production, dev, and facudev have attached Telnyx numbers, while staging needs its own attached number before live staging call tests. Database URLs may intentionally be shared, so shared-DB writes must be treated as production-impacting. |
 | Sentry PII controls | Implemented | `send_default_pii=False` configured |
 
 ### What Is NOT Implemented (Gaps)

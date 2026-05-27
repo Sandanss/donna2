@@ -63,7 +63,7 @@ npx tsc --noEmit
 
 ## Development Notes
 
-- Voice and live call behavior should be validated through Railway dev and the current dev Telnyx number, using only dummy or consenting test phones.
+- Voice and live call behavior should be validated through the correct Railway lane and Telnyx number: `dev` is David's zuludev lane, `facudev` is Facundo's lane, and production is never used for testing. Staging has isolated Telnyx app settings but needs its own attached Telnyx number before live staging call tests.
 - Local frontend work should use configured dev/mock APIs and must not silently fall back to production Railway APIs.
 - Treat transcripts, reminders, profile notes, summaries, memories, and caregiver-linked senior data as PHI. Legacy medical-note fields may still appear in migrations/history and should be handled as PHI until nulled.
 - Production boot is intentionally fail-closed. Node and Pipecat require safe production secrets and labeled `DONNA_API_KEYS`; legacy `DONNA_API_KEY` is local/test compatibility only.

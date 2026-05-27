@@ -488,7 +488,9 @@ Frontend E2E tests are in `tests/e2e/` — see [`docs/guides/FRONTEND_TESTING.md
 
 ## Deployment
 
-Three environments: **dev** (experiments), **staging** (CI), **production** (customers). Each has its own Neon DB branch and Telnyx number for voice.
+Four Railway environments are in use: **dev** (David's zuludev lane), **facudev** (Facundo's lane), **staging** (CI/pre-merge), and **production** (customers). Each has its own Railway services; database URLs may intentionally be shared, so verify the target before data-mutating work. Production, dev, and facudev have attached Telnyx numbers; staging has an isolated Call Control app but needs its own attached Telnyx number before live staging call tests.
+
+**Telnyx routing guardrail:** do not change provider-side Telnyx routing unless the user explicitly asks for that exact infrastructure change. Production Telnyx numbers must point only to production Pipecat. Dev, facudev, staging, and test calls must use non-production Telnyx numbers and non-production Call Control applications; never reuse the production `TELNYX_CONNECTION_ID` outside production. Staging needs its own attached Telnyx number before live staging call tests; do not borrow dev or facudev numbers.
 
 ```bash
 # Deploy to dev (your iteration environment)

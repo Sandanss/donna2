@@ -1,6 +1,6 @@
 # 2,000-User Live Drill Runbook
 
-Use staging first. Use only dummy or explicitly consenting test phones. Do not run a live outbound call against a senior unless the target has been confirmed as a test/consenting target for this drill.
+Use staging first only after a dedicated staging Telnyx number is attached to the `Donna Staging` Call Control app. Use only dummy or explicitly consenting test phones. Do not run a live outbound call against a senior unless the target has been confirmed as a test/consenting target for this drill.
 
 Current staging uses the same Neon `DATABASE_URL` as production. Treat any staging command that writes queue, job, guard, reminder, conversation, or call-attempt rows as a production-data mutation. Keep cohorts to dummy/consenting test seniors and do not run worker commands without the explicit DB-write confirmation flag.
 
@@ -32,7 +32,7 @@ BAA completion is not a blocker for staging drills when founders explicitly acce
 
    `REDIS_URL` uses Railway private networking, so do the connectivity smoke from inside the deployed Pipecat container, not with local `railway run`. Pipecat rate limits require `REDIS_URL`; Upstash REST alone is not enough for SlowAPI's Redis storage adapter.
 
-3. Confirm staging has the required live-call environment values without printing secret values:
+3. Confirm staging has the required live-call environment values without printing secret values, and verify the staging Telnyx number is attached to the staging Call Control app. If `TELNYX_PHONE_NUMBER` belongs to dev or facudev, stop here and attach a dedicated staging number first.
 
    ```bash
    railway run --environment staging --service donna-pipecat -- node -e "const names=['DATABASE_URL','DONNA_API_KEYS','FIELD_ENCRYPTION_KEY','TELNYX_API_KEY','TELNYX_PUBLIC_KEY','TELNYX_CONNECTION_ID','TELNYX_PHONE_NUMBER','REDIS_URL']; console.log(Object.fromEntries(names.map(n=>[n,Boolean(process.env[n])])));"

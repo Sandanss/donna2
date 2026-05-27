@@ -134,15 +134,24 @@ Plan and runbooks: [`docs/plans/2026-05-18-scale-to-2000-users-technical-plan.md
 - For Claude Code sessions, prefer `claude --worktree --tmux` when starting isolated branch work.
 - For Codex sessions, create the worktree explicitly, for example `git worktree add ../donna2-mobile-fix -b codex/mobile-fix origin/main`, then start Codex from that directory.
 
-Three environments, fully isolated (own Railway services, own Neon DB branch, own Telnyx number):
+Four Railway environments (own services, isolated Telnyx routing). Database URLs may intentionally be shared, so verify the target before data-mutating work. Values verified against `railway variables --service donna-pipecat --environment <env>` and Telnyx Call Control on 2026-05-27:
 
-| Env | Database | Voice # |
+| Env | Owner / purpose | Telnyx routing |
 |---|---|---|
-| **production** | Neon `main` | +18064508649 |
-| **staging** | Neon `staging` | +19789235477 |
-| **dev** | Neon `dev` | +19789235477 |
+| **production** | Customers | Production number attached to production `Donna` Call Control app |
+| **dev** | David's zuludev lane | Dedicated dev number attached to `Donna Dev (zuludev)` |
+| **facudev** | Facundo's dev lane | Dedicated facudev number attached to `Donna FacuDev` |
+| **staging** | CI/pre-merge | `Donna Staging` Call Control app exists; attach a dedicated staging number before live staging call tests |
+
+Legacy Twilio numbers are still configured in `TWILIO_PHONE_NUMBER` across all envs (prod: +18064508649, staging/dev/facudev: +19789235477) but are not the active voice path. Telnyx + Pipecat is the live stack; Twilio env vars are a cleanup item.
 
 Railway environments are **not** tied to git branches — `make deploy-dev` uploads your working directory. The only automated git→deploy hooks: PR to `main` deploys staging; push to `main` deploys production.
+
+### Telnyx routing hard rule
+
+Do **not** change provider-side Telnyx routing unless the user explicitly asks for that exact infrastructure change. This includes Call Control app webhook URLs, failover URLs, phone-number application attachments, `TELNYX_CONNECTION_ID` assignments, and outbound profile routing. Code, scripts, and deploys may read or verify Telnyx routing, but must not mutate it by default.
+
+Production Telnyx numbers must point only to production Pipecat. Dev, facudev, staging, and test calls must use non-production Telnyx numbers and non-production Call Control applications; never reuse the production `TELNYX_CONNECTION_ID` outside production. If staging needs live calls, buy/assign a dedicated staging Telnyx number and attach it to `Donna Staging`; do not borrow dev or facudev numbers.
 
 ```bash
 # Deploy

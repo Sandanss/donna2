@@ -399,7 +399,7 @@ Manual caregiver/admin calls through `routes/calls.js` call Pipecat directly unt
 
 ## Deployment
 
-Three environments: **dev** (experiments), **staging** (CI), **production** (customers).
+Four Railway environments are active: **dev** (David's zuludev lane), **facudev** (Facundo's lane), **staging** (CI/pre-merge), and **production** (customers).
 
 | Service | Platform | Port | URL |
 |---------|----------|------|-----|

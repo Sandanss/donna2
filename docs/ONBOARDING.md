@@ -200,15 +200,16 @@ Other useful docs:
 
 ---
 
-## 6. Three Environments
+## 6. Railway Environments
 
-| Environment | Purpose | How to deploy | Phone # for testing |
-|-------------|---------|---------------|---------------------|
-| **dev** | Your experiments | `make deploy-dev` | Shared dev Telnyx number; confirm current value in Railway/Telnyx before calling |
-| **staging** | Pre-merge CI | Automatic on PR | Do not assume the dev number; coordinate before staging voice tests |
-| **production** | Live customers | Automatic on merge to `main` | +18064508649 (DO NOT test here) |
+| Environment | Purpose | How to deploy | Telnyx routing |
+|-------------|---------|---------------|----------------|
+| **dev** | David's zuludev lane | `make deploy-dev` | Dedicated dev number + `Donna Dev (zuludev)` Call Control app |
+| **facudev** | Facundo's dev lane | `railway up --environment facudev` | Dedicated facudev number + `Donna FacuDev` Call Control app |
+| **staging** | Pre-merge CI | Automatic on PR | Dedicated `Donna Staging` Call Control app; needs its own attached Telnyx number before live staging call tests |
+| **production** | Live customers | Automatic on merge to `main` | Production number + production `Donna` Call Control app; DO NOT test here |
 
-Each has its own database (Neon branch) and Railway services. Dev is your playground — you can't break production from dev.
+Each has its own Railway services. Database URLs may intentionally be shared across environments, so verify the target `DATABASE_URL` fingerprint before data-mutating work and treat shared-DB writes as production-impacting. Dev and facudev are playgrounds for their owners at the service/routing layer, but they still use production-grade secrets and must be treated carefully. Telnyx is the **active** voice path; legacy Twilio numbers are still set in env but not dialed. Verify current values with a PHI-safe Railway/Telnyx check before any voice test.
 
 ---
 
@@ -225,7 +226,8 @@ make deploy-dev-pipecat      # Voice pipeline changes (~30s)
 make deploy-dev              # Both Pipecat + Node.js API (~60s)
 
 # 4. Test with a real call
-#    Call the current dev Telnyx number from an approved dummy/consenting test phone.
+#    Use the Telnyx number for your assigned Railway lane from an approved
+#    dummy/consenting test phone. Do not use production.
 
 # 5. Check logs
 make logs-dev                # Voice/call pipeline logs
@@ -279,7 +281,7 @@ railway logs --service donna-pipecat --environment dev
 
 **Don't test voice locally with ngrok.** Always deploy to Railway dev environment and test with real phone calls.
 
-**Donna currently uses one shared secret set across dev, staging, and production.** You don't need your own Anthropic, Deepgram, ElevenLabs, Cartesia, Groq, Google, OpenAI, or Telnyx keys for normal dev work when Railway injects the configured environment values. SMS is inactive for now. Production-like environments must have `DONNA_API_KEYS`, `FIELD_ENCRYPTION_KEY`, `JWT_SECRET`, `CLERK_SECRET_KEY`, `PIPECAT_PUBLIC_URL`, and Telnyx voice credentials set so Pipecat can fail closed. Treat dev/staging Railway variable or runtime-log exposure as production secret exposure until these secrets are split by environment.
+**Donna currently uses one shared secret set across dev, facudev, staging, and production.** You don't need your own Anthropic, Deepgram, ElevenLabs, Cartesia, Groq, Google, OpenAI, or Telnyx keys for normal dev work when Railway injects the configured environment values. SMS is inactive for now. Production-like environments must have `DONNA_API_KEYS`, `FIELD_ENCRYPTION_KEY`, `JWT_SECRET`, `CLERK_SECRET_KEY`, `PIPECAT_PUBLIC_URL`, and Telnyx voice credentials set so Pipecat can fail closed. Treat dev/facudev/staging Railway variable or runtime-log exposure as production secret exposure until these secrets are split by environment.
 
 **Commit messages should be specific.** Not `feat: update memory system` but `feat: reduce memory context to 20 items (recent turns already cover last 3 calls)`. See the commit message guidelines in `claude.md`.
 
