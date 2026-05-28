@@ -17,7 +17,7 @@ import {
 import { eq, desc, sql } from 'drizzle-orm';
 import { seniorService } from '../services/seniors.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
-import { writeLimiter } from '../middleware/rate-limit.js';
+import { writeLimiter, authLimiter } from '../middleware/rate-limit.js';
 import { idempotencyMiddleware } from '../middleware/idempotency.js';
 import { validateBody, validateParams } from '../middleware/validate.js';
 import {
@@ -307,7 +307,7 @@ router.delete('/api/seniors/:id/data', requireAuth, validateParams(seniorIdParam
 });
 
 // Data export — HIPAA right-to-access (all data for a senior in one JSON bundle)
-router.get('/api/seniors/:id/export', requireAuth, validateParams(seniorIdParamSchema), async (req, res) => {
+router.get('/api/seniors/:id/export', requireAuth, validateParams(seniorIdParamSchema), authLimiter, async (req, res) => {
   try {
     if (!await canAccessSenior(req.auth, req.params.id)) {
       return sendError(res, 403, { error: 'Access denied to this senior' });

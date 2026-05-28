@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { caregivers, notificationPreferences, reminders, seniors } from '../db/schema.js';
 import { requireAuth } from '../middleware/auth.js';
-import { writeLimiter } from '../middleware/rate-limit.js';
+import { writeLimiter, authLimiter } from '../middleware/rate-limit.js';
 import { idempotencyMiddleware } from '../middleware/idempotency.js';
 import { validateBody } from '../middleware/validate.js';
 import { onboardingPhoneAvailabilitySchema, onboardingSchema } from '../validators/schemas.js';
@@ -19,7 +19,12 @@ const router = Router();
 const log = createLogger('Onboarding');
 
 function normalizePhone(phone) {
-  return String(phone || '').replace(/\D/g, '').slice(-10);
+  const digits = String(phone || '').replace(/\D/g, '');
+  // Accept 10-digit US or 11-digit with leading 1 — reject anything else
+  // to prevent international numbers silently colliding with domestic ones.
+  if (digits.length === 10) return digits;
+  if (digits.length === 11 && digits[0] === '1') return digits.slice(1);
+  return digits.slice(-10); // fallback for legacy data compat
 }
 
 function phonesMatch(a, b) {
@@ -37,13 +42,16 @@ function shouldSyncCallSchedules() {
   return process.env.CALL_QUEUE_DUAL_WRITE_SCHEDULES === 'true' || config.shadowMaterialize;
 }
 
-router.post('/api/onboarding/validate-phone', requireAuth, validateBody(onboardingPhoneAvailabilitySchema), writeLimiter, async (req, res) => {
+router.post('/api/onboarding/validate-phone', requireAuth, validateBody(onboardingPhoneAvailabilitySchema), authLimiter, async (req, res) => {
   try {
     if (!req.auth.userId || req.auth.userId === 'cofounder') {
       return sendError(res, 400, { error: 'Clerk authentication required for onboarding' });
     }
 
     const phone = normalizePhone(req.body.phone);
+    if (phone.length !== 10) {
+      return sendError(res, 400, { error: 'Please enter a valid 10-digit US phone number' });
+    }
     if (blocksCaregiverPhoneReuse({
       seniorPhone: phone,
       caregiverPhone: req.body.caregiverPhone,

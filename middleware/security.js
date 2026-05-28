@@ -4,17 +4,17 @@ import helmet from 'helmet';
 /**
  * Security headers middleware using helmet.
  * - Sets X-Content-Type-Options, X-Frame-Options, etc.
- * - CSP configured for admin dashboard (allows inline scripts for now)
+ * - CSP: no unsafe-inline scripts, encrypted WebSocket only
  */
 export function securityHeaders() {
   return helmet({
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'"],
+        scriptSrc: ["'self'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
         imgSrc: ["'self'", "data:"],
-        connectSrc: ["'self'", "ws:", "wss:"],
+        connectSrc: ["'self'", "wss:"],
       },
     },
     crossOriginEmbedderPolicy: false,

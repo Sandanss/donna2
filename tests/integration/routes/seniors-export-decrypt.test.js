@@ -56,6 +56,7 @@ const harness = vi.hoisted(() => {
     }),
     idempotencyMiddleware: vi.fn((_req, _res, next) => next()),
     writeLimiter: vi.fn((_req, _res, next) => next()),
+    authLimiter: vi.fn((_req, _res, next) => next()),
     canAccessSenior: vi.fn(),
     getAccessibleSeniorIds: vi.fn(),
     routeError: vi.fn((res, error) => {
@@ -97,6 +98,7 @@ vi.mock('../../../middleware/idempotency.js', () => ({
 }));
 vi.mock('../../../middleware/rate-limit.js', () => ({
   writeLimiter: harness.writeLimiter,
+  authLimiter: harness.authLimiter,
 }));
 vi.mock('../../../routes/helpers.js', () => ({
   canAccessSenior: harness.canAccessSenior,
